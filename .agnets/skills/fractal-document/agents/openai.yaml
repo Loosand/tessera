@@ -1,0 +1,4 @@
+interface:
+  display_name: "Fractal Document"
+  short_description: "Keep code and architecture documentation synchronized"
+  default_prompt: "Use $fractal-document to update this project while keeping file headers, folder maps, and architecture docs aligned."

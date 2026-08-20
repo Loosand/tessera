@@ -1,0 +1,10 @@
+.DS_Store
+.turbo/
+node_modules/
+dist/
+out/
+coverage/
+*.log
+
+# 仅限本地的文件。
+/.local
