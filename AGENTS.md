@@ -49,8 +49,8 @@
 
 - 以 [design.md](design.md) 为设计与交互事实源。
 - 组件分层为 `tokens → primitives → base → patterns → features`。
-- `packages/ui/src/primitives/` 使用 Base UI 行为原语，并采用 shadcn/ui 的源码持有与组合方式。
-- 业务应用不得直接导入 Base UI；基础交互必须经过 `@tessera/ui` 暴露。
+- `packages/design-system/components/ui/` 使用 Base UI 行为原语，并采用 shadcn/ui 的源码持有方式。
+- 业务应用不得直接导入 Base UI；基础交互必须经过 `@tessera/design-system` 的明确子路径暴露。
 - 样式使用 Tailwind CSS 与语义 token；避免在业务组件内重复硬编码颜色、圆角和阴影。
 - 富文本选用 TipTap，复杂动效选用 Motion；只在对应功能开始实现时引入依赖。
 

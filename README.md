@@ -7,6 +7,7 @@ Tessera 是一个本地优先、可编程的阅读工作台，用于处理 Markd
 - Electron 桌面外壳
 - Bun workspace 与任务执行
 - React + TypeScript 渲染层
+- Drizzle ORM + SQLite 本地数据层
 - 兼容 Node.js/Bun 的 TypeScript 核心包
 - 通过稳定的 `AgentRuntime` 边界接入可替换的 Agent 运行时
 
@@ -28,6 +29,12 @@ bun run check
 
 `bun run check` 依次执行 Biome、类型检查、测试和构建，是提交前的完整检查入口。
 
+如果当前网络无法下载 Electron 预构建文件，可在安装时临时指定镜像：
+
+```bash
+ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ bun install
+```
+
 ## 工作区
 
 ```text
@@ -35,8 +42,9 @@ apps/desktop            Electron 主进程、预加载脚本和 React 渲染层
 packages/contracts      IPC 与领域共享契约
 packages/core           应用级核心服务
 packages/agent-runtime  可替换的 Agent 运行时接口
+packages/database       Drizzle + SQLite 本地索引与运行状态
 packages/skills         SKILL.md 发现与加载契约
-packages/ui             共享 React 组件与设计系统
+packages/design-system  共享 React 组件与视觉系统
 ```
 
 项目许可证将在开源与商业策略明确后确定。

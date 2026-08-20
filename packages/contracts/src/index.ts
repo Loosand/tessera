@@ -12,6 +12,17 @@
 
 export const IPC_CHANNELS = {
   appInfo: "app:info",
+  workspaceCurrent: "workspace:current",
+  workspaceSelect: "workspace:select",
+  workspaceRecent: "workspace:recent",
+  workspaceOpenRecent: "workspace:open-recent",
+  workspaceReveal: "workspace:reveal",
+  workspaceListDocuments: "workspace:list-documents",
+  workspaceChanged: "workspace:changed",
+  documentRead: "document:read",
+  documentCreate: "document:create",
+  documentRename: "document:rename",
+  documentWrite: "document:write",
 } as const
 
 export interface AppInfo {
@@ -20,6 +31,46 @@ export interface AppInfo {
   platform: string
 }
 
+export interface WorkspaceInfo {
+  id: string
+  name: string
+  rootPath: string
+}
+
+export interface WorkspaceDocumentEntry {
+  name: string
+  relativePath: string
+  modifiedAt: number
+  size: number
+}
+
+export interface DocumentSnapshot extends WorkspaceDocumentEntry {
+  content: string
+}
+
+export interface WorkspaceChangeEvent {
+  paths: string[]
+}
+
+export type DocumentWriteResult =
+  | { status: "saved"; document: DocumentSnapshot }
+  | { status: "conflict"; document: DocumentSnapshot }
+
 export interface DesktopApi {
   getAppInfo(): Promise<AppInfo>
+  getCurrentWorkspace(): Promise<WorkspaceInfo | null>
+  selectWorkspace(): Promise<WorkspaceInfo | null>
+  listRecentWorkspaces(): Promise<WorkspaceInfo[]>
+  openRecentWorkspace(workspaceId: string): Promise<WorkspaceInfo>
+  revealCurrentWorkspace(): Promise<void>
+  listWorkspaceDocuments(): Promise<WorkspaceDocumentEntry[]>
+  readDocument(relativePath: string): Promise<DocumentSnapshot>
+  createDocument(): Promise<DocumentSnapshot>
+  renameDocument(relativePath: string): Promise<DocumentSnapshot | null>
+  writeDocument(
+    relativePath: string,
+    content: string,
+    expectedModifiedAt: number,
+  ): Promise<DocumentWriteResult>
+  onWorkspaceChanged(listener: (event: WorkspaceChangeEvent) => void): () => void
 }

@@ -5,8 +5,10 @@
   "private": true,
   "type": "module",
   "packageManager": "bun@1.3.13",
+  "trustedDependencies": ["electron"],
   "workspaces": ["apps/*", "packages/*"],
   "scripts": {
+    "postinstall": "node apps/desktop/node_modules/electron/install.js",
     "dev": "bun --cwd apps/desktop dev",
     "build": "turbo run build",
     "format": "biome format --write .",

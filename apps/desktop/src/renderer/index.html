@@ -1,5 +1,17 @@
+<!--
+  [INPUT]: Electron Vite 渲染入口、内容安全策略与 React 挂载脚本
+  [OUTPUT]: 使用中文语言环境和窄 CSP 的桌面页面根节点
+  [POS]: Electron 渲染层的唯一 HTML 入口
+  [DOC]: docs/architecture.md
+
+  [PROTOCOL]:
+  1. 文件契约变化时更新本 Header。
+  2. 成员或职责变化时同步最近的 .folder.md。
+  3. 行为变化时同步 [DOC] 指向的文档。
+-->
+
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <meta
@@ -14,4 +26,3 @@
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

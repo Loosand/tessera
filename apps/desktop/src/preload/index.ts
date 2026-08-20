@@ -10,12 +10,29 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import type { DesktopApi } from "@tessera/contracts"
+import type { DesktopApi, WorkspaceChangeEvent } from "@tessera/contracts"
 import { IPC_CHANNELS } from "@tessera/contracts"
 import { contextBridge, ipcRenderer } from "electron"
 
 const api: DesktopApi = Object.freeze({
   getAppInfo: () => ipcRenderer.invoke(IPC_CHANNELS.appInfo),
+  getCurrentWorkspace: () => ipcRenderer.invoke(IPC_CHANNELS.workspaceCurrent),
+  selectWorkspace: () => ipcRenderer.invoke(IPC_CHANNELS.workspaceSelect),
+  listRecentWorkspaces: () => ipcRenderer.invoke(IPC_CHANNELS.workspaceRecent),
+  openRecentWorkspace: (workspaceId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.workspaceOpenRecent, workspaceId),
+  revealCurrentWorkspace: () => ipcRenderer.invoke(IPC_CHANNELS.workspaceReveal),
+  listWorkspaceDocuments: () => ipcRenderer.invoke(IPC_CHANNELS.workspaceListDocuments),
+  readDocument: (relativePath: string) => ipcRenderer.invoke(IPC_CHANNELS.documentRead, relativePath),
+  createDocument: () => ipcRenderer.invoke(IPC_CHANNELS.documentCreate),
+  renameDocument: (relativePath: string) => ipcRenderer.invoke(IPC_CHANNELS.documentRename, relativePath),
+  writeDocument: (relativePath: string, content: string, expectedModifiedAt: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.documentWrite, relativePath, content, expectedModifiedAt),
+  onWorkspaceChanged: (listener: (event: WorkspaceChangeEvent) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, change: WorkspaceChangeEvent) => listener(change)
+    ipcRenderer.on(IPC_CHANNELS.workspaceChanged, handler)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.workspaceChanged, handler)
+  },
 })
 
 contextBridge.exposeInMainWorld("tessera", api)

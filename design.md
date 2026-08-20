@@ -33,17 +33,17 @@ features：Reader、Editor、Library、Activity、Agent、Diff
 
 | 层面 | 选型 | 约束 |
 | --- | --- | --- |
-| 无样式原语 | Base UI | 仅在 `packages/ui/src/primitives/` 内直接使用 |
-| 组件组织 | shadcn/ui，`new-york` 方向 | 组件源码归项目所有，按 Tessera token 调整 |
+| 无样式原语 | Base UI | 仅在 `packages/design-system/components/ui/` 内直接使用 |
+| 组件组织 | shadcn/ui，`base-nova` | 基础组件位于 `components/ui/`，复合组件位于 `components/` |
 | 样式 | Tailwind CSS | 业务层优先组合语义类，避免任意值扩散 |
 | 图标 | Hugeicons | 通过统一 Icon 包装层控制尺寸、描边与无障碍属性 |
 | 动效 | Motion | 只用于状态与空间关系，普通 hover/press 优先 CSS |
-| 富文本 | TipTap | Markdown 仍是内容事实源，编辑器状态不能替代文件 |
+| 即时预览编辑 | TipTap | Markdown 仍是内容事实源，编辑器状态不能替代文件 |
 | 源码与 Diff | CodeMirror | 用于 Markdown 源码、代码片段与差异检查 |
 | 复杂数据 UI | TanStack | 按需使用 Query、Table、Virtual，不预装未使用模块 |
 
-上述选型中，组件分层与 `@tessera/ui` 边界已建立；Base UI、Tailwind、TipTap、Motion、CodeMirror
-和图标包装层目前是规划能力，在首个真实组件需要时逐项接入。
+Base UI、shadcn/ui、Tailwind 和 Hugeicons 已接入 `@tessera/design-system`；TipTap 已用于 Markdown
+即时预览编辑。Motion、CodeMirror 与 TanStack 仍是规划能力，在首个真实功能需要时逐项接入。
 
 ## Token 与主题
 
@@ -57,6 +57,12 @@ features：Reader、Editor、Library、Activity、Agent、Diff
 ## 布局与交互
 
 - 桌面主框架由侧栏、标签/导航区、内容画布和按需出现的右侧面板组成。
+- 工作区侧栏支持文件树、文档列表和当前文档大纲；底部集中承载新建、当前工作区菜单与列表/树切换。
+- 侧栏可由用户主动收起；窗口进入窄布局时自动收起，重新展开后以覆盖层出现，不挤压正文。
+- 桌面窗口最小尺寸为 `520 × 420`；低于 `760px` 宽度时进入窄布局，正文和核心操作必须继续可用。
+- 文档顶栏统一承载前进后退、文件名、保存状态、模式切换、AI 助手和设置入口。
+- 主编辑体验只有即时预览编辑与 Markdown 源码两种状态，使用 `⌘/` 快速切换；不设置独立预览页。
+- 文件名点击后打开系统原生文件面板，重命名必须保留 Markdown 扩展名、位于当前工作区且不能覆盖同名文件。
 - 设置页采用稳定的左侧导航与右侧内容栏；使用 `SettingSection` 和 `SettingRow` 形成一致节奏。
 - 主要操作与当前对象相邻；破坏性操作必须明确标记并提供确认或撤销路径。
 - Agent 建议、文件 Diff、权限请求和最终写入必须在视觉上区分，不能伪装成普通聊天文本。

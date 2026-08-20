@@ -1,0 +1,21 @@
+{
+  "$schema": "https://ui.shadcn.com/schema.json",
+  "style": "base-nova",
+  "rsc": false,
+  "tsx": true,
+  "tailwind": {
+    "config": "",
+    "css": "styles/globals.css",
+    "baseColor": "neutral",
+    "cssVariables": true,
+    "prefix": ""
+  },
+  "iconLibrary": "hugeicons",
+  "aliases": {
+    "components": "@tessera/design-system/components",
+    "utils": "@tessera/design-system/lib/utils",
+    "ui": "@tessera/design-system/components/ui",
+    "lib": "@tessera/design-system/lib",
+    "hooks": "@tessera/design-system/hooks"
+  }
+}
