@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 首批 AI API 供应商元数据、LobeHub 图标、持久化配置与类型化模型发现函数
- * [OUTPUT]: 可恢复配置、加密密钥状态、全部/详情主从工作区、连接测试与即时持久化的分组模型目录
+ * [OUTPUT]: 可恢复配置、兼容协议多连接、加密密钥状态、目录检查与即时持久化的分组模型目录
  * [POS]: @tessera/ai/react 提供的模型供应商管理视图
  * [DOC]: design.md、docs/architecture/ai-providers.md
  *
@@ -13,7 +13,7 @@
 import type {
   AiProviderConfig,
   AiProviderConnectionInput,
-  AiProviderModel,
+  AiProviderModelListResult,
   AiProviderSaveInput,
 } from "@tessera/contracts"
 import {
@@ -35,10 +35,12 @@ import {
   AI_PROVIDER_DEFINITIONS,
   type AiProviderDefinition,
   type AiProviderDraft,
+  type AiProviderDraftUpdate,
   type AiProviderDrafts,
   type AiProviderId,
   type AiProviderModelDraft,
   appendAiProviderModel,
+  createAiProviderDraft,
   createInitialAiProviderDrafts,
   matchesAiProvider,
   mergeDiscoveredAiProviderModels,
@@ -59,7 +61,31 @@ const ProviderIcon = lazy(async () => {
   return { default: icons.ProviderIcon }
 })
 
-type ProviderSelection = "all" | AiProviderId
+type ProviderSelection = "all" | string
+
+type ProviderConnectionView = {
+  draft: AiProviderDraft
+  provider: AiProviderDefinition
+}
+
+function findProviderDefinition(providerId: AiProviderId): AiProviderDefinition {
+  const provider = AI_PROVIDER_DEFINITIONS.find((candidate) => candidate.id === providerId)
+  if (!provider) throw new Error(`未知的 AI 供应商协议：${providerId}`)
+  return provider
+}
+
+function isAiProviderDraft(draft: AiProviderDraft | undefined): draft is AiProviderDraft {
+  return draft !== undefined
+}
+
+function listProviderConnections(drafts: AiProviderDrafts): ProviderConnectionView[] {
+  return Object.values(drafts)
+    .filter(isAiProviderDraft)
+    .map((draft) => ({
+      draft,
+      provider: findProviderDefinition(draft.providerId),
+    }))
+}
 
 function ProviderMark({ provider, size = "lg" }: { provider: AiProviderDefinition; size?: "sm" | "lg" }) {
   const compact = size === "sm"
@@ -91,46 +117,57 @@ function ProviderStatus({ configured }: { configured: boolean }) {
   )
 }
 
-interface ProviderDirectoryProps {
+type ProviderDirectoryProps = {
   drafts: AiProviderDrafts
+  onAddConnection: (providerId: AiProviderId) => void
   onSelectProvider: (providerId: ProviderSelection) => void
   selectedProviderId: ProviderSelection
 }
 
-function ProviderDirectory({ drafts, onSelectProvider, selectedProviderId }: ProviderDirectoryProps) {
+function ProviderDirectory({
+  drafts,
+  onAddConnection,
+  onSelectProvider,
+  selectedProviderId,
+}: ProviderDirectoryProps) {
   const [query, setQuery] = useState("")
   const deferredQuery = useDeferredValue(query)
-  const visibleProviders = useMemo(
-    () => AI_PROVIDER_DEFINITIONS.filter((provider) => matchesAiProvider(provider, deferredQuery)),
-    [deferredQuery],
+  const connections = useMemo(() => listProviderConnections(drafts), [drafts])
+  const visibleConnections = useMemo(
+    () =>
+      connections.filter(({ draft, provider }) =>
+        matchesAiProvider(provider, deferredQuery, draft.displayName),
+      ),
+    [connections, deferredQuery],
   )
-  const enabledProviders = visibleProviders.filter((provider) => drafts[provider.id].enabled)
-  const availableProviders = visibleProviders.filter((provider) => !drafts[provider.id].enabled)
+  const enabledConnections = visibleConnections.filter(({ draft }) => draft.enabled)
+  const availableConnections = visibleConnections.filter(({ draft }) => !draft.enabled)
 
-  const renderProviders = (providers: readonly AiProviderDefinition[]) => (
+  const renderConnections = (items: readonly ProviderConnectionView[]) => (
     <div className="space-y-0.5">
-      {providers.map((provider) => (
+      {items.map(({ draft, provider }) => (
         <button
-          key={provider.id}
+          key={draft.configId}
           type="button"
           className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-accent data-[active=true]:bg-accent data-[active=true]:text-accent-foreground"
-          data-active={provider.id === selectedProviderId || undefined}
-          aria-current={provider.id === selectedProviderId ? "page" : undefined}
-          onClick={() => onSelectProvider(provider.id)}
+          data-active={draft.configId === selectedProviderId || undefined}
+          aria-current={draft.configId === selectedProviderId ? "page" : undefined}
+          onClick={() => onSelectProvider(draft.configId)}
         >
           <ProviderMark provider={provider} size="sm" />
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-[13px] font-medium">{provider.name}</span>
+            <span className="block truncate text-[13px] font-medium">{draft.displayName}</span>
             <span className="block truncate font-mono text-[10px] text-muted-foreground">
+              {provider.multiple ? `${provider.name} · ` : ""}
               {provider.protocol}
             </span>
           </span>
           <span
-            className={`size-1.5 shrink-0 rounded-full ${drafts[provider.id].apiKeyConfigured ? "bg-foreground" : "bg-input"}`}
-            title={drafts[provider.id].apiKeyConfigured ? "已配置" : "待配置"}
+            className={`size-1.5 shrink-0 rounded-full ${draft.apiKeyConfigured ? "bg-foreground" : "bg-input"}`}
+            title={draft.apiKeyConfigured ? "已配置" : "待配置"}
             aria-hidden="true"
           />
-          <span className="sr-only">{drafts[provider.id].apiKeyConfigured ? "已配置" : "待配置"}</span>
+          <span className="sr-only">{draft.apiKeyConfigured ? "已配置" : "待配置"}</span>
         </button>
       ))}
     </div>
@@ -144,7 +181,7 @@ function ProviderDirectory({ drafts, onSelectProvider, selectedProviderId }: Pro
             <p className="text-[11px] font-medium tracking-[0.08em] text-muted-foreground uppercase">设置</p>
             <h1 className="mt-1 text-[15px] font-medium">模型供应商</h1>
           </div>
-          <span className="text-xs tabular-nums text-muted-foreground">{AI_PROVIDER_DEFINITIONS.length}</span>
+          <span className="text-xs tabular-nums text-muted-foreground">{connections.length}</span>
         </div>
         <div className="relative mt-3">
           <Icon
@@ -177,12 +214,10 @@ function ProviderDirectory({ drafts, onSelectProvider, selectedProviderId }: Pro
             <Icon icon={ListViewIcon} size={16} />
           </span>
           <span className="min-w-0 flex-1 truncate text-[13px] font-medium">全部供应商</span>
-          <span className="text-[10px] tabular-nums text-muted-foreground">
-            {AI_PROVIDER_DEFINITIONS.length}
-          </span>
+          <span className="text-[10px] tabular-nums text-muted-foreground">{connections.length}</span>
         </button>
 
-        {enabledProviders.length > 0 ? (
+        {enabledConnections.length > 0 ? (
           <section aria-labelledby="enabled-ai-providers">
             <h2
               id="enabled-ai-providers"
@@ -190,74 +225,100 @@ function ProviderDirectory({ drafts, onSelectProvider, selectedProviderId }: Pro
             >
               已启用
             </h2>
-            {renderProviders(enabledProviders)}
+            {renderConnections(enabledConnections)}
           </section>
         ) : null}
 
-        {availableProviders.length > 0 ? (
+        {availableConnections.length > 0 ? (
           <section
-            className={enabledProviders.length > 0 ? "mt-3" : undefined}
+            className={enabledConnections.length > 0 ? "mt-3" : undefined}
             aria-labelledby="other-ai-providers"
           >
             <h2
               id="other-ai-providers"
               className="px-2 pt-1 pb-1.5 text-[10px] font-medium tracking-[0.06em] text-muted-foreground uppercase"
             >
-              {enabledProviders.length > 0 ? "其他" : "全部"}
+              {enabledConnections.length > 0 ? "其他" : "全部"}
             </h2>
-            {renderProviders(availableProviders)}
+            {renderConnections(availableConnections)}
           </section>
         ) : null}
 
-        {visibleProviders.length === 0 ? (
+        {visibleConnections.length === 0 ? (
           <div className="px-4 py-10 text-center">
             <p className="text-[12px] font-medium">没有匹配的供应商</p>
             <p className="mt-1 text-[11px] leading-4 text-muted-foreground">换一个名称或协议关键词试试。</p>
           </div>
         ) : null}
+
+        <section className="mt-4 border-t border-border pt-3" aria-label="添加兼容连接">
+          <p className="px-2 pb-1.5 text-[10px] font-medium tracking-[0.06em] text-muted-foreground uppercase">
+            添加连接
+          </p>
+          {AI_PROVIDER_DEFINITIONS.filter((provider) => provider.multiple).map((provider) => (
+            <Button
+              key={provider.id}
+              variant="ghost"
+              size="sm"
+              className="w-full justify-start text-[12px] text-muted-foreground"
+              onClick={() => onAddConnection(provider.id)}
+            >
+              <Icon icon={Add01Icon} size={14} />
+              {provider.name}
+            </Button>
+          ))}
+        </section>
       </nav>
     </aside>
   )
 }
 
-interface ProviderOverviewProps {
+type ProviderOverviewProps = {
   drafts: AiProviderDrafts
   error: string | null
-  onOpenProvider: (providerId: AiProviderId) => void
-  onUpdateProvider: (providerId: AiProviderId, update: Partial<AiProviderDraft>) => void
+  onAddConnection: (providerId: AiProviderId) => void
+  onOpenProvider: (configId: string) => void
+  onUpdateProvider: (configId: string, update: AiProviderDraftUpdate) => void
 }
 
-function ProviderOverview({ drafts, error, onOpenProvider, onUpdateProvider }: ProviderOverviewProps) {
-  const enabledProviders = AI_PROVIDER_DEFINITIONS.filter((provider) => drafts[provider.id].enabled)
-  const availableProviders = AI_PROVIDER_DEFINITIONS.filter((provider) => !drafts[provider.id].enabled)
+function ProviderOverview({
+  drafts,
+  error,
+  onAddConnection,
+  onOpenProvider,
+  onUpdateProvider,
+}: ProviderOverviewProps) {
+  const connections = listProviderConnections(drafts)
+  const enabledConnections = connections.filter(({ draft }) => draft.enabled)
+  const availableConnections = connections.filter(({ draft }) => !draft.enabled)
 
-  const renderGroup = (title: string, providers: readonly AiProviderDefinition[]) => {
-    if (providers.length === 0) return null
+  const renderGroup = (title: string, items: readonly ProviderConnectionView[]) => {
+    if (items.length === 0) return null
 
     return (
       <section className="space-y-3" aria-label={title}>
         <div className="flex items-baseline gap-2">
           <h2 className="text-[15px] font-medium">{title}</h2>
-          <span className="text-xs tabular-nums text-muted-foreground">{providers.length}</span>
+          <span className="text-xs tabular-nums text-muted-foreground">{items.length}</span>
         </div>
         <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3">
-          {providers.map((provider) => {
-            const draft = drafts[provider.id]
+          {items.map(({ draft, provider }) => {
             return (
               <article
-                key={provider.id}
+                key={draft.configId}
                 className="flex min-h-40 min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-card transition-colors hover:border-foreground/20"
               >
                 <button
                   type="button"
                   className="min-w-0 flex-1 p-4 text-left"
-                  onClick={() => onOpenProvider(provider.id)}
+                  onClick={() => onOpenProvider(draft.configId)}
                 >
                   <div className="flex min-w-0 items-start gap-3">
                     <ProviderMark provider={provider} size="sm" />
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-[14px] font-medium">{provider.name}</p>
+                      <p className="truncate text-[14px] font-medium">{draft.displayName}</p>
                       <p className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">
+                        {provider.multiple ? `${provider.name} · ` : ""}
                         {provider.protocol}
                       </p>
                     </div>
@@ -271,8 +332,8 @@ function ProviderOverview({ drafts, error, onOpenProvider, onUpdateProvider }: P
                   <Switch
                     checked={draft.enabled}
                     size="sm"
-                    onCheckedChange={(enabled) => onUpdateProvider(provider.id, { enabled })}
-                    aria-label={`${draft.enabled ? "停用" : "启用"}${provider.name}`}
+                    onCheckedChange={(enabled) => onUpdateProvider(draft.configId, { enabled })}
+                    aria-label={`${draft.enabled ? "停用" : "启用"}${draft.displayName}`}
                   />
                 </footer>
               </article>
@@ -286,14 +347,29 @@ function ProviderOverview({ drafts, error, onOpenProvider, onUpdateProvider }: P
   return (
     <section className="min-h-full bg-background">
       <div className="mx-auto w-full max-w-5xl space-y-8 px-[clamp(20px,4vw,48px)] py-8 pb-24">
-        <header className="border-b border-border pb-5">
-          <p className="text-[11px] font-medium tracking-[0.08em] text-muted-foreground uppercase">
-            模型供应商
-          </p>
-          <h1 className="mt-1 text-xl font-medium tracking-[-0.02em]">全部供应商</h1>
-          <p className="mt-1 text-[13px] leading-5 text-muted-foreground">
-            启用常用连接，或进入供应商详情配置 API 与可用模型。
-          </p>
+        <header className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-5">
+          <div>
+            <p className="text-[11px] font-medium tracking-[0.08em] text-muted-foreground uppercase">
+              模型供应商
+            </p>
+            <h1 className="mt-1 text-xl font-medium tracking-[-0.02em]">全部连接</h1>
+            <p className="mt-1 text-[13px] leading-5 text-muted-foreground">
+              官方供应商保持单例；兼容协议可建立多个命名连接。
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {AI_PROVIDER_DEFINITIONS.filter((provider) => provider.multiple).map((provider) => (
+              <Button
+                key={provider.id}
+                variant="outline"
+                size="sm"
+                onClick={() => onAddConnection(provider.id)}
+              >
+                <Icon icon={Add01Icon} size={14} />
+                添加{provider.name}
+              </Button>
+            ))}
+          </div>
         </header>
         {error ? (
           <p
@@ -303,27 +379,27 @@ function ProviderOverview({ drafts, error, onOpenProvider, onUpdateProvider }: P
             {error}
           </p>
         ) : null}
-        {renderGroup("已启用", enabledProviders)}
-        {renderGroup(enabledProviders.length > 0 ? "未启用" : "可用供应商", availableProviders)}
+        {renderGroup("已启用", enabledConnections)}
+        {renderGroup(enabledConnections.length > 0 ? "未启用" : "可用连接", availableConnections)}
       </div>
     </section>
   )
 }
 
-interface ProviderDetailProps {
+type ProviderDetailProps = {
   apiKey: string
   draft: AiProviderDraft
   onApiKeyChange: (apiKey: string) => void
   onDelete: () => Promise<void>
-  onListModels: (input: AiProviderConnectionInput) => Promise<AiProviderModel[]>
-  onPersist: (update: Partial<AiProviderDraft>) => Promise<void>
+  onListModels: (input: AiProviderConnectionInput) => Promise<AiProviderModelListResult>
+  onPersist: (update: AiProviderDraftUpdate) => Promise<void>
   onSave: (apiKey: string) => Promise<void>
-  onUpdate: (update: Partial<AiProviderDraft>) => void
+  onUpdate: (update: AiProviderDraftUpdate) => void
   provider: AiProviderDefinition
 }
 
 type ProviderNotice = {
-  kind: "error" | "success"
+  kind: "error" | "info" | "success"
   scope: "connection" | "models"
   text: string
 }
@@ -334,7 +410,7 @@ function formatTokenLimit(value: number): string {
   return String(value)
 }
 
-interface ProviderModelGroupProps {
+type ProviderModelGroupProps = {
   disabled: boolean
   label: string
   models: readonly AiProviderModelDraft[]
@@ -476,13 +552,13 @@ function ProviderDetail({
       setNotice({
         kind: "success",
         scope: "connection",
-        text: enabled ? "供应商已启用。" : "供应商已停用。",
+        text: enabled ? "连接已启用。" : "连接已停用。",
       })
     } catch (error) {
       setNotice({
         kind: "error",
         scope: "connection",
-        text: error instanceof Error ? error.message : "保存供应商状态失败。",
+        text: error instanceof Error ? error.message : "保存连接状态失败。",
       })
     } finally {
       setActiveRequest(null)
@@ -505,7 +581,7 @@ function ProviderDetail({
       setNotice({
         kind: "error",
         scope: "connection",
-        text: error instanceof Error ? error.message : "保存供应商配置失败。",
+        text: error instanceof Error ? error.message : "保存连接配置失败。",
       })
     } finally {
       setActiveRequest(null)
@@ -528,12 +604,12 @@ function ProviderDetail({
       await onDelete()
       onApiKeyChange("")
       setConfirmDelete(false)
-      setNotice({ kind: "success", scope: "connection", text: "供应商配置已删除并恢复默认值。" })
+      setNotice({ kind: "success", scope: "connection", text: "连接配置已删除。" })
     } catch (error) {
       setNotice({
         kind: "error",
         scope: "connection",
-        text: error instanceof Error ? error.message : "删除供应商配置失败。",
+        text: error instanceof Error ? error.message : "删除连接配置失败。",
       })
     } finally {
       setActiveRequest(null)
@@ -545,12 +621,24 @@ function ProviderDetail({
       setActiveRequest(scope)
       setNotice(null)
       try {
-        const models = await onListModels({
+        const result = await onListModels({
           configId: draft.configId,
           providerId: provider.id,
           apiKey: apiKey.trim(),
           baseUrl: draft.baseUrl.trim(),
         })
+        if (!result.ok) {
+          if (result.code === "catalog-unsupported") {
+            setNotice({
+              kind: "info",
+              scope,
+              text: `${result.error} 这不影响保存连接或调用已知模型，请在下方手动添加模型 ID。`,
+            })
+            return
+          }
+          throw new Error(result.error)
+        }
+        const models = result.models
         if (scope === "models") {
           const mergedModels = mergeDiscoveredAiProviderModels(draft.models, models, provider.id)
           await onPersist({ models: mergedModels })
@@ -560,13 +648,13 @@ function ProviderDetail({
             text:
               models.length > 0
                 ? `已同步并保存 ${models.length} 个模型，当前列表共 ${mergedModels.length} 个；只有单模型目录会自动启用。`
-                : "连接成功，供应商返回了空模型列表，现有配置已保存。",
+                : "目录可访问，但服务返回了空模型列表，现有配置已保存。",
           })
         } else {
           setNotice({
             kind: "success",
             scope,
-            text: `连接成功，模型目录可访问（${models.length} 个模型）。`,
+            text: `模型目录可访问（${models.length} 个模型）。`,
           })
         }
       } catch (error) {
@@ -579,7 +667,7 @@ function ProviderDetail({
         setActiveRequest(null)
       }
     },
-    [apiKey, draft.baseUrl, draft.models, onListModels, onPersist, provider.id],
+    [apiKey, draft.baseUrl, draft.configId, draft.models, onListModels, onPersist, provider.id],
   )
 
   const hasBaseUrl = draft.baseUrl.trim().length > 0
@@ -613,13 +701,14 @@ function ProviderDetail({
             <ProviderMark provider={provider} />
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                <h2 className="text-xl font-medium tracking-[-0.02em]">{provider.name}</h2>
+                <h2 className="text-xl font-medium tracking-[-0.02em]">{draft.displayName}</h2>
                 <ProviderStatus configured={draft.apiKeyConfigured} />
               </div>
               <p className="mt-1 max-w-2xl text-[13px] leading-5 text-muted-foreground">
                 {provider.description}
               </p>
               <p className="mt-1.5 font-mono text-[10px] text-muted-foreground">
+                {provider.multiple ? `${provider.name} · ` : ""}
                 {provider.protocol} · {provider.adapter}
               </p>
             </div>
@@ -628,7 +717,7 @@ function ProviderDetail({
             checked={draft.enabled}
             disabled={activeRequest !== null}
             onCheckedChange={(enabled) => void persistProviderEnabled(enabled)}
-            aria-label={`${draft.enabled ? "停用" : "启用"}${provider.name}`}
+            aria-label={`${draft.enabled ? "停用" : "启用"}${draft.displayName}`}
           />
         </header>
 
@@ -643,7 +732,26 @@ function ProviderDetail({
           </div>
 
           <div className="overflow-hidden rounded-lg border border-border bg-card">
-            <div className="grid gap-4 p-4 2xl:grid-cols-2">
+            <div className={`grid gap-4 p-4 ${provider.multiple ? "xl:grid-cols-3" : "2xl:grid-cols-2"}`}>
+              {provider.multiple ? (
+                <label className="block min-w-0" htmlFor="provider-display-name">
+                  <span className="text-[12px] font-medium">连接名称</span>
+                  <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                    用于区分同一种兼容协议下的不同服务或账户。
+                  </span>
+                  <Input
+                    id="provider-display-name"
+                    value={draft.displayName}
+                    className="mt-2 h-9"
+                    placeholder={provider.name}
+                    aria-label="连接名称"
+                    onChange={(event) => {
+                      onUpdate({ displayName: event.currentTarget.value })
+                      setNotice(null)
+                    }}
+                  />
+                </label>
+              ) : null}
               <label className="block min-w-0" htmlFor="provider-api-key">
                 <span className="text-[12px] font-medium">API Key</span>
                 <span className="mt-0.5 block text-[11px] text-muted-foreground">
@@ -727,7 +835,7 @@ function ProviderDetail({
                 {activeRequest === "connection" ? (
                   <Icon icon={Refresh01Icon} size={13} className="animate-spin" />
                 ) : null}
-                {activeRequest === "connection" ? "测试中" : "测试连接"}
+                {activeRequest === "connection" ? "检查中" : "检查目录"}
               </Button>
               <Button
                 size="sm"
@@ -904,10 +1012,10 @@ function ProviderDetail({
   )
 }
 
-export interface AiProviderSettingsProps {
+export type AiProviderSettingsProps = {
   deleteConfig: (configId: string) => Promise<void>
   listConfigs: () => Promise<AiProviderConfig[]>
-  listModels: (input: AiProviderConnectionInput) => Promise<AiProviderModel[]>
+  listModels: (input: AiProviderConnectionInput) => Promise<AiProviderModelListResult>
   saveConfig: (input: AiProviderSaveInput) => Promise<AiProviderConfig>
   subscribeToConfigChanges?: (listener: () => void) => () => void
 }
@@ -924,15 +1032,11 @@ function draftFromConfig(config: AiProviderConfig): AiProviderDraft {
   }
 }
 
-function saveInputFromDraft(
-  providerId: AiProviderId,
-  draft: AiProviderDraft,
-  apiKey = "",
-): AiProviderSaveInput {
+function saveInputFromDraft(draft: AiProviderDraft, apiKey = ""): AiProviderSaveInput {
   return {
     configId: draft.configId,
     displayName: draft.displayName,
-    providerId,
+    providerId: draft.providerId,
     enabled: draft.enabled,
     baseUrl: draft.baseUrl,
     models: draft.models.map((model) => ({ ...model })),
@@ -949,7 +1053,7 @@ export function AiProviderSettings({
 }: AiProviderSettingsProps) {
   const [selectedProviderId, setSelectedProviderId] = useState<ProviderSelection>("all")
   const [drafts, setDrafts] = useState(createInitialAiProviderDrafts)
-  const [apiKeys, setApiKeys] = useState<Partial<Record<AiProviderId, string>>>({})
+  const [apiKeys, setApiKeys] = useState<Record<string, string>>({})
   const [initialized, setInitialized] = useState(false)
   const [persistenceError, setPersistenceError] = useState<string | null>(null)
   const detailScrollRef = useRef<HTMLDivElement>(null)
@@ -971,11 +1075,19 @@ export function AiProviderSettings({
     return subscribeToConfigChanges?.(() => void reloadConfigs())
   }, [reloadConfigs, subscribeToConfigChanges])
 
-  const updateProvider = (providerId: AiProviderId, update: Partial<AiProviderDraft>) => {
-    setDrafts((current) => ({
-      ...current,
-      [providerId]: { ...current[providerId], ...update },
-    }))
+  const updateProvider = (configId: string, update: AiProviderDraftUpdate) => {
+    setDrafts((current) => {
+      const currentDraft = current[configId]
+      if (!currentDraft) return current
+      return {
+        ...current,
+        [configId]: { ...currentDraft, ...update },
+      }
+    })
+  }
+
+  const replaceProvider = (configId: string, draft: AiProviderDraft) => {
+    setDrafts((current) => ({ ...current, [configId]: draft }))
   }
 
   const selectProvider = (providerId: ProviderSelection) => {
@@ -983,31 +1095,43 @@ export function AiProviderSettings({
     setSelectedProviderId(providerId)
   }
 
-  const selectedProvider =
-    selectedProviderId === "all"
-      ? undefined
-      : AI_PROVIDER_DEFINITIONS.find((provider) => provider.id === selectedProviderId)
+  const addConnection = (providerId: AiProviderId) => {
+    const provider = findProviderDefinition(providerId)
+    if (!provider.multiple) {
+      selectProvider(provider.id)
+      return
+    }
 
-  const persistProviderUpdate = async (
-    providerId: AiProviderId,
-    update: Partial<AiProviderDraft>,
-  ): Promise<void> => {
-    const previous = drafts[providerId]
+    const siblingCount = listProviderConnections(drafts).filter(
+      ({ draft }) => draft.providerId === providerId,
+    ).length
+    const configId = `${providerId}:${globalThis.crypto.randomUUID()}`
+    const draft = createAiProviderDraft(provider, configId, `${provider.name} ${siblingCount + 1}`)
+    setDrafts((current) => ({ ...current, [configId]: draft }))
+    selectProvider(configId)
+  }
+
+  const selectedDraft = selectedProviderId === "all" ? undefined : drafts[selectedProviderId]
+  const selectedProvider = selectedDraft ? findProviderDefinition(selectedDraft.providerId) : undefined
+
+  const persistProviderUpdate = async (configId: string, update: AiProviderDraftUpdate): Promise<void> => {
+    const previous = drafts[configId]
+    if (!previous) throw new Error("连接配置不存在或已被删除。")
     const next = { ...previous, ...update }
-    updateProvider(providerId, update)
+    updateProvider(configId, update)
     setPersistenceError(null)
     try {
-      const config = await saveConfig(saveInputFromDraft(providerId, next))
-      updateProvider(providerId, draftFromConfig(config))
+      const config = await saveConfig(saveInputFromDraft(next))
+      replaceProvider(configId, draftFromConfig(config))
     } catch (error) {
-      updateProvider(providerId, previous)
-      setPersistenceError(error instanceof Error ? error.message : "保存供应商配置失败。")
+      replaceProvider(configId, previous)
+      setPersistenceError(error instanceof Error ? error.message : "保存连接配置失败。")
       throw error
     }
   }
 
-  const persistOverviewUpdate = (providerId: AiProviderId, update: Partial<AiProviderDraft>) => {
-    void persistProviderUpdate(providerId, update).catch(() => undefined)
+  const persistOverviewUpdate = (configId: string, update: AiProviderDraftUpdate) => {
+    void persistProviderUpdate(configId, update).catch(() => undefined)
   }
 
   if (!initialized) {
@@ -1022,6 +1146,7 @@ export function AiProviderSettings({
     <div className="grid h-full min-h-0 grid-rows-[minmax(180px,36vh)_minmax(0,1fr)] min-[900px]:grid-cols-[240px_minmax(0,1fr)] min-[900px]:grid-rows-1">
       <ProviderDirectory
         drafts={drafts}
+        onAddConnection={addConnection}
         selectedProviderId={selectedProviderId}
         onSelectProvider={selectProvider}
       />
@@ -1030,14 +1155,15 @@ export function AiProviderSettings({
           <ProviderOverview
             drafts={drafts}
             error={persistenceError}
+            onAddConnection={addConnection}
             onOpenProvider={selectProvider}
             onUpdateProvider={persistOverviewUpdate}
           />
-        ) : selectedProvider ? (
+        ) : selectedProvider && selectedDraft ? (
           <ProviderDetail
             key={selectedProviderId}
             provider={selectedProvider}
-            draft={drafts[selectedProviderId]}
+            draft={selectedDraft}
             apiKey={apiKeys[selectedProviderId] ?? ""}
             onApiKeyChange={(apiKey) =>
               setApiKeys((current) => ({ ...current, [selectedProviderId]: apiKey }))
@@ -1045,17 +1171,30 @@ export function AiProviderSettings({
             onListModels={listModels}
             onPersist={(update) => persistProviderUpdate(selectedProviderId, update)}
             onSave={async (apiKey) => {
-              const config = await saveConfig(
-                saveInputFromDraft(selectedProviderId, drafts[selectedProviderId], apiKey),
-              )
-              updateProvider(selectedProviderId, draftFromConfig(config))
+              const config = await saveConfig(saveInputFromDraft(selectedDraft, apiKey))
+              replaceProvider(selectedProviderId, draftFromConfig(config))
               setApiKeys((current) => ({ ...current, [selectedProviderId]: "" }))
             }}
             onDelete={async () => {
-              await deleteConfig(drafts[selectedProviderId].configId)
-              const defaults = createInitialAiProviderDrafts()
-              updateProvider(selectedProviderId, defaults[selectedProviderId])
-              setApiKeys((current) => ({ ...current, [selectedProviderId]: "" }))
+              await deleteConfig(selectedDraft.configId)
+              setApiKeys((current) => {
+                const next = { ...current }
+                delete next[selectedProviderId]
+                return next
+              })
+
+              if (selectedDraft.configId === selectedDraft.providerId) {
+                const defaultDraft = createAiProviderDraft(selectedProvider)
+                setDrafts((current) => ({ ...current, [selectedProviderId]: defaultDraft }))
+                return
+              }
+
+              setDrafts((current) => {
+                const next = { ...current }
+                delete next[selectedProviderId]
+                return next
+              })
+              selectProvider("all")
             }}
             onUpdate={(update) => updateProvider(selectedProviderId, update)}
           />

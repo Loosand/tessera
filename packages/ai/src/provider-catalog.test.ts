@@ -31,9 +31,25 @@ describe("AI 供应商设置模型", () => {
     ])
   })
 
+  it("兼容协议允许多连接，官方服务保持单例", () => {
+    expect(
+      Object.fromEntries(AI_PROVIDER_DEFINITIONS.map((provider) => [provider.id, provider.multiple])),
+    ).toEqual({
+      "openai-compatible": true,
+      "anthropic-compatible": true,
+      deepseek: false,
+      grok: false,
+      openrouter: false,
+    })
+  })
+
   it("初始化时不假定任何供应商已配置", () => {
     const drafts = createInitialAiProviderDrafts()
-    expect(Object.values(drafts).every((draft) => !draft.enabled && !draft.apiKeyConfigured)).toBe(true)
+    expect(
+      AI_PROVIDER_DEFINITIONS.every(
+        (provider) => !drafts[provider.id].enabled && !drafts[provider.id].apiKeyConfigured,
+      ),
+    ).toBe(true)
   })
 
   it("为官方服务预填可覆盖的 API 地址", () => {
@@ -81,6 +97,41 @@ describe("AI 供应商设置模型", () => {
       models: [{ id: "openrouter/auto", enabled: false }],
     })
     expect(drafts.deepseek.baseUrl).toBe("https://api.deepseek.com")
+  })
+
+  it("启动时保留同一兼容协议下的多条具名连接", () => {
+    const drafts = createInitialAiProviderDrafts([
+      {
+        configId: "anthropic-compatible:deepseek",
+        displayName: "DeepSeek Messages",
+        providerId: "anthropic-compatible",
+        enabled: true,
+        baseUrl: "https://api.deepseek.com/anthropic",
+        apiKeyConfigured: true,
+        updatedAt: 100,
+        models: [],
+      },
+      {
+        configId: "anthropic-compatible:relay",
+        displayName: "团队中转",
+        providerId: "anthropic-compatible",
+        enabled: true,
+        baseUrl: "https://relay.example.com/anthropic",
+        apiKeyConfigured: true,
+        updatedAt: 200,
+        models: [],
+      },
+    ])
+
+    expect(drafts["anthropic-compatible:deepseek"]).toMatchObject({
+      displayName: "DeepSeek Messages",
+      providerId: "anthropic-compatible",
+    })
+    expect(drafts["anthropic-compatible:relay"]).toMatchObject({
+      displayName: "团队中转",
+      providerId: "anthropic-compatible",
+    })
+    expect(drafts["anthropic-compatible"]).toBeDefined()
   })
 
   it("标记可匿名读取的默认模型目录", () => {

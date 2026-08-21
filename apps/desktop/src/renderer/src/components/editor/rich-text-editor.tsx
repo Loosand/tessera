@@ -101,12 +101,13 @@ export function RichTextEditor({
   }, [syncController])
 
   useLayoutEffect(() => {
+    if (!active) return
     onFlushPendingEditsReadyRef.current(flushPendingEdits)
     return () => {
       flushPendingEdits()
       onFlushPendingEditsReadyRef.current(null)
     }
-  }, [flushPendingEdits])
+  }, [active, flushPendingEdits])
 
   useLayoutEffect(() => {
     if (!editor || !active) return

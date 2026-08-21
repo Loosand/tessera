@@ -1,8 +1,8 @@
 /**
- * [INPUT]: 已解析的供应商连接、任务消息、普通对话能力开关与 AI SDK UIMessageChunk
- * [OUTPUT]: 普通 Chat 流，以及 Chat/Agent 共用的输入校验、错误脱敏和公开增量裁剪
+ * [INPUT]: 已解析的供应商连接、任务消息、可选 Skill、客户端交互/研究计划工具、普通对话能力开关与 AI SDK UIMessageChunk
+ * [OUTPUT]: 注入当前 Skill instructions、可暂停等待用户并发布研究计划的普通 Chat 流，以及 Chat/Agent 共用的输入校验、错误脱敏和公开增量裁剪
  * [POS]: Electron 主进程与各 AI SDK 供应商之间的普通对话运行时及共享流边界
- * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/ai-providers.md、docs/architecture/task-navigation.md
+ * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/ai-providers.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -21,22 +21,30 @@ import {
   type UIMessage,
   type UIMessageChunk,
   convertToModelMessages,
+  isStepCount,
   streamText,
   validateUIMessages,
 } from "ai"
 import { createAiSdkChatRuntime } from "./ai-sdk-runtime"
+import { buildTaskSkillInstructions } from "./skill-instructions"
+import { createTaskInteractionTools } from "./task-interaction-tools"
 
 const MAX_MESSAGES = 200
 const MAX_TEXT_CHARACTERS = 2_000_000
 const MAX_FILE_DATA_URL_CHARACTERS = 12_000_000
 const MAX_ERROR_MESSAGE_LENGTH = 320
 
-export interface AiChatRuntimeInput extends AiChatStartInput, AiProviderConnectionInput {}
+export type AiChatRuntimeInput = AiChatStartInput & AiProviderConnectionInput
 
-export interface AiChatRuntimeOptions {
+export type AiChatRuntimeOptions = {
   abortSignal: AbortSignal
   onChunk: (chunk: AiChatStreamChunk) => void | Promise<void>
 }
+
+export type UiMessageValidationOptions<Message extends UIMessage> = Omit<
+  Parameters<typeof validateUIMessages<Message>>[0],
+  "messages"
+>
 
 export function safeErrorMessage(error: unknown, apiKey: string): string {
   const fallback = "模型请求失败，请检查供应商配置、模型状态与网络连接。"
@@ -56,7 +64,10 @@ function validateDataImage(url: string, mediaType: string) {
   if (url.length > MAX_FILE_DATA_URL_CHARACTERS) throw new Error("单张图片不能超过 8 MB。")
 }
 
-export async function toUiMessages(messages: readonly TaskMessage[]): Promise<UIMessage[]> {
+export async function toUiMessages<Message extends UIMessage = UIMessage>(
+  messages: readonly TaskMessage[],
+  options?: UiMessageValidationOptions<Message>,
+): Promise<Message[]> {
   if (messages.length === 0 || messages.length > MAX_MESSAGES) throw new Error("对话消息数量无效。")
   let textCharacters = 0
 
@@ -72,7 +83,7 @@ export async function toUiMessages(messages: readonly TaskMessage[]): Promise<UI
       if (part.type === "file") validateDataImage(part.url, part.mediaType)
     }
   }
-  return validateUIMessages<UIMessage>({ messages })
+  return validateUIMessages<Message>({ messages, ...options })
 }
 
 export function reasoningLevel(reasoning: AiChatReasoning) {
@@ -189,12 +200,16 @@ export async function streamAiChat(
   { abortSignal, onChunk }: AiChatRuntimeOptions,
 ): Promise<void> {
   const runtime = createAiSdkChatRuntime(input, { webSearch: input.webSearch })
-  const originalMessages = await toUiMessages(input.messages)
+  const tools = { ...(runtime.tools ?? {}), ...createTaskInteractionTools(input.skillId) }
+  const originalMessages = await toUiMessages(input.messages, { tools })
+  const instructions = await buildTaskSkillInstructions(input.skillId)
   const result = streamText({
     model: runtime.model,
-    messages: await convertToModelMessages(originalMessages),
-    ...(runtime.tools ? { tools: runtime.tools } : {}),
+    messages: await convertToModelMessages(originalMessages, { tools }),
+    ...(instructions ? { instructions } : {}),
+    tools,
     reasoning: reasoningLevel(input.reasoning),
+    stopWhen: isStepCount(input.skillId === "research" ? 8 : 4),
     abortSignal,
     timeout: { totalMs: 120_000, firstChunkMs: 30_000, chunkMs: 45_000 },
   })

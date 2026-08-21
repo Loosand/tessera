@@ -23,9 +23,9 @@ import { useCallback, useEffect, useRef, useState } from "react"
 type WorkspaceStatus = "idle" | "loading" | "ready" | "error"
 export type WorkspaceSaveStatus = "idle" | "dirty" | "saving" | "saved" | "conflict" | "error"
 
-interface NavigationState {
-  entries: string[]
-  index: number
+type NavigationState = {
+  readonly entries: readonly string[]
+  readonly index: number
 }
 
 function errorMessage(error: unknown) {

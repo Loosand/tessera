@@ -1,8 +1,8 @@
 /**
- * [INPUT]: 任务快照、可选工作区/当前文档、视图激活状态、侧栏/设置/文件跳转回调、AI 模型与 Electron useChat Transport
- * [OUTPUT]: 首次发送懒创建、后台生成恢复、Agent 授权范围、Diff 审批与持续保存的多轮流式任务页面
+ * [INPUT]: 带执行模式/Skill 的任务快照、可选工作区/当前文档、视图激活状态、侧栏/设置/文件跳转回调、AI 模型与 Electron useChat Transport
+ * [OUTPUT]: 首次发送懒创建、Skill 驱动、客户端问答暂停/恢复、后台生成恢复、Agent 授权范围、Diff 审批与持续保存的多轮流式任务页面
  * [POS]: Tessera 主导航中的普通 Chat 与工作区 Agent 共用任务表面
- * [DOC]: design.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
+ * [DOC]: design.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -10,8 +10,18 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import { toTaskMessages, useElectronChat } from "@tessera/ai/react"
-import type { AiChatReasoning, TaskMessage, TaskSessionStatus } from "@tessera/contracts"
+import {
+  type UIMessage,
+  hasPendingTaskUserInput,
+  toTaskMessages,
+  useElectronChat,
+} from "@tessera/ai/react"
+import {
+  REQUEST_USER_INPUT_TOOL_NAME,
+  type AiChatReasoning,
+  type TaskMessage,
+  type TaskSessionStatus,
+} from "@tessera/contracts"
 import { PanelLeftOpenIcon, Settings01Icon } from "@tessera/design-system/components/icons"
 import { Button } from "@tessera/design-system/components/ui/button"
 import { Icon } from "@tessera/design-system/components/ui/icon"
@@ -44,6 +54,7 @@ interface TaskPageProps {
   onEnsureTask: (title: string) => Promise<unknown | null>
   onPersistTask: (messages: TaskMessage[], status: TaskSessionStatus) => Promise<unknown | null>
   onModeChange: (mode: ActiveTask["mode"]) => void
+  onSkillChange: (skillId: ActiveTask["skillId"]) => void
   onOpenDocument?: ((path: string, line?: number) => void) | undefined
   onToggleSidebar: () => void
   onOpenSettings: () => void
@@ -67,10 +78,26 @@ function taskTitle(prompt: string, images: ComposerImage[]) {
   return filename?.slice(0, 48) || "新任务"
 }
 
-function taskStatus(status: "ready" | "submitted" | "streaming" | "error"): TaskSessionStatus {
+function taskStatus(
+  status: "ready" | "submitted" | "streaming" | "error",
+  messages: Parameters<typeof hasPendingTaskUserInput>[0],
+): TaskSessionStatus {
   if (status === "submitted" || status === "streaming") return "running"
   if (status === "error") return "failed"
+  if (hasPendingTaskUserInput(messages)) return "waiting-input"
   return "completed"
+}
+
+function shouldOmitRunningAssistantTail(message: UIMessage | undefined) {
+  if (!message || message.role !== "assistant") return false
+  if (message.parts.length === 0) return true
+  return message.parts.some((part) => {
+    if (part.type === "text" || part.type === "reasoning") return part.state === "streaming"
+    if (part.type === "dynamic-tool" || part.type.startsWith("tool-")) {
+      return part.state === "input-streaming" || part.state === "input-available"
+    }
+    return false
+  })
 }
 
 export function TaskPage({
@@ -83,6 +110,7 @@ export function TaskPage({
   onEnsureTask,
   onPersistTask,
   onModeChange,
+  onSkillChange,
   onOpenDocument,
   onToggleSidebar,
   onOpenSettings,
@@ -105,12 +133,14 @@ export function TaskPage({
     currentDocumentPath,
     initialMessages: task.messages,
     mode: task.mode,
+    skillId: task.skillId,
     providerId: selectedModel?.providerId ?? "openai-compatible",
     modelId: selectedModel?.id ?? "",
     reasoning,
     webSearch,
   })
   const running = chat.status === "submitted" || chat.status === "streaming"
+  const waitingForInput = hasPendingTaskUserInput(chat.messages)
   const lastPersistedRef = useRef(`${task.status}:${JSON.stringify(task.messages)}`)
   const loadAgentChangePreview = useCallback(
     (approvalId: string) => {
@@ -148,9 +178,11 @@ export function TaskPage({
           }
         : undefined,
     )
-    const status = taskStatus(chat.status)
+    const status = taskStatus(chat.status, chat.messages)
     const messages =
-      status === "running" && snapshots.at(-1)?.role === "assistant" ? snapshots.slice(0, -1) : snapshots
+      status === "running" && shouldOmitRunningAssistantTail(chat.messages.at(-1))
+        ? snapshots.slice(0, -1)
+        : snapshots
     const identity = `${status}:${JSON.stringify(messages)}`
     if (identity === lastPersistedRef.current) return
     const timer = window.setTimeout(
@@ -194,6 +226,10 @@ export function TaskPage({
 
   const send = async () => {
     if (!selectedModel || running || (!prompt.trim() && images.length === 0)) return
+    if (waitingForInput) {
+      setNotice("请先回答上方的问题，或选择跳过，任务随后会继续。")
+      return
+    }
     if (task.mode === "agent" && !workspaceName) {
       setNotice("Agent 任务必须在工作区中运行，请先打开工作区。")
       return
@@ -236,7 +272,13 @@ export function TaskPage({
     task.mode === "agent" && workspaceName
       ? `范围：工作区「${workspaceName}」中的 Markdown；写入必须先看 Diff 并批准，不含删除、Shell 或联网工具。`
       : ""
-  const composerNotice = notice || agentNotice || chat.error?.message || taskError || ""
+  const composerNotice =
+    notice ||
+    (waitingForInput ? "当前任务正在等待你的回答。" : "") ||
+    agentNotice ||
+    chat.error?.message ||
+    taskError ||
+    ""
 
   const composer = (compact = false) => (
     <TaskComposer
@@ -250,6 +292,8 @@ export function TaskPage({
       reasoning={reasoning}
       mode={task.mode}
       modeLocked={task.persisted || chat.messages.length > 0}
+      skillId={task.skillId}
+      skillLocked={task.persisted || chat.messages.length > 0}
       webSearch={webSearch}
       status={chat.status}
       notice={composerNotice}
@@ -262,6 +306,7 @@ export function TaskPage({
       onRemoveImage={(id) => setImages((current) => current.filter((image) => image.id !== id))}
       onModelChange={setSelectedModelKey}
       onModeChange={onModeChange}
+      onSkillChange={onSkillChange}
       onReasoningChange={setReasoning}
       onWebSearchChange={setWebSearch}
       onSubmit={() => void send()}
@@ -340,6 +385,13 @@ export function TaskPage({
                             id,
                             approved,
                             ...(!approved ? { reason: "用户拒绝了这次文档更改。" } : {}),
+                          })
+                        }
+                        onUserInput={(toolCallId, output) =>
+                          chat.addToolOutput({
+                            tool: REQUEST_USER_INPUT_TOOL_NAME,
+                            toolCallId,
+                            output,
                           })
                         }
                       />

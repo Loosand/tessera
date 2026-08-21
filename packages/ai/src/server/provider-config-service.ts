@@ -10,28 +10,31 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import type {
-  AiProviderConfig,
-  AiProviderConfiguredModel,
-  AiProviderConnectionInput,
-  AiProviderId,
-  AiProviderSaveInput,
+import {
+  type AiModelCapabilities,
+  type AiModelCapabilitySource,
+  type AiModelCapabilityState,
+  type AiProviderConfig,
+  type AiProviderConfiguredModel,
+  type AiProviderConnectionInput,
+  type AiProviderId,
+  type AiProviderSaveInput,
+  isAiProviderId,
 } from "@tessera/contracts"
 import { resolveAiModelCapabilities } from "../model-capabilities"
 
-const AI_PROVIDER_IDS = new Set<AiProviderId>([
-  "openai-compatible",
-  "anthropic-compatible",
-  "deepseek",
-  "grok",
-  "openrouter",
-])
-const MULTI_CONFIG_PROVIDER_IDS = new Set<AiProviderId>([
-  "openai-compatible",
-  "anthropic-compatible",
-])
-const CAPABILITY_STATES = new Set(["supported", "unsupported", "unknown"])
-const CAPABILITY_SOURCES = new Set(["builtin", "remote", "custom", "unknown"])
+const MULTI_CONFIG_PROVIDER_IDS = new Set<AiProviderId>(["openai-compatible", "anthropic-compatible"])
+const CAPABILITY_STATES = [
+  "supported",
+  "unsupported",
+  "unknown",
+] as const satisfies readonly AiModelCapabilityState[]
+const CAPABILITY_SOURCES = [
+  "builtin",
+  "remote",
+  "custom",
+  "unknown",
+] as const satisfies readonly AiModelCapabilitySource[]
 const MAX_API_KEY_LENGTH = 16_384
 const MAX_BASE_URL_LENGTH = 2_048
 const MAX_MODEL_ID_LENGTH = 512
@@ -39,7 +42,7 @@ const MAX_MODELS = 10_000
 const MAX_CONFIG_ID_LENGTH = 128
 const MAX_DISPLAY_NAME_LENGTH = 80
 
-export interface AiProviderConfigStoreRecord {
+export type AiProviderConfigStoreRecord = {
   apiKeyCiphertext: string | null
   baseUrl: string
   configId: string
@@ -50,20 +53,20 @@ export interface AiProviderConfigStoreRecord {
   updatedAt: number
 }
 
-export interface AiProviderConfigStore {
+export type AiProviderConfigStore = {
   delete(configId: string): void
   find(configId: string): AiProviderConfigStoreRecord | null
   list(): AiProviderConfigStoreRecord[]
   save(record: AiProviderConfigStoreRecord): void
 }
 
-export interface AiProviderSecretStorage {
+export type AiProviderSecretStorage = {
   decrypt(value: Uint8Array): string
   encrypt(value: string): Uint8Array
   isEncryptionAvailable(): boolean
 }
 
-export interface AiProviderConfigService {
+export type AiProviderConfigService = {
   deleteConfig(configId: string): void
   listConfigs(): AiProviderConfig[]
   resolveConnection(input: AiProviderConnectionInput): AiProviderConnectionInput
@@ -78,8 +81,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
-function isProviderId(value: unknown): value is AiProviderId {
-  return typeof value === "string" && AI_PROVIDER_IDS.has(value as AiProviderId)
+function isCapabilityState(value: unknown): value is AiModelCapabilityState {
+  return typeof value === "string" && CAPABILITY_STATES.some((state) => state === value)
+}
+
+function isCapabilitySource(value: unknown): value is AiModelCapabilitySource {
+  return typeof value === "string" && CAPABILITY_SOURCES.some((source) => source === value)
 }
 
 function nullableString(value: unknown): string | null {
@@ -92,11 +99,7 @@ function nullablePositiveInteger(value: unknown): number | null {
 
 function normalizeConfigId(value: unknown, providerId: AiProviderId): string {
   const configId = typeof value === "string" ? value.trim() : ""
-  if (
-    !configId ||
-    configId.length > MAX_CONFIG_ID_LENGTH ||
-    !/^[a-z0-9][a-z0-9._:-]*$/iu.test(configId)
-  ) {
+  if (!configId || configId.length > MAX_CONFIG_ID_LENGTH || !/^[a-z0-9][a-z0-9._:-]*$/iu.test(configId)) {
     throw new AiProviderConfigError("连接 ID 无效。")
   }
   if (!MULTI_CONFIG_PROVIDER_IDS.has(providerId) && configId !== providerId) {
@@ -134,30 +137,28 @@ function normalizeBaseUrl(value: unknown): string {
   return baseUrl.replace(/\/+$/u, "")
 }
 
-function normalizeCapabilities(value: unknown) {
+function normalizeCapabilities(value: unknown): AiModelCapabilities | undefined {
   if (!isRecord(value)) return undefined
   const imageInput = value.imageInput
   const reasoning = value.reasoning
   const search = value.search
   const toolUse = value.toolUse
   if (
-    !CAPABILITY_STATES.has(imageInput as string) ||
-    !CAPABILITY_STATES.has(reasoning as string) ||
-    !CAPABILITY_STATES.has(search as string) ||
-    !CAPABILITY_STATES.has(toolUse as string)
+    !isCapabilityState(imageInput) ||
+    !isCapabilityState(reasoning) ||
+    !isCapabilityState(search) ||
+    !isCapabilityState(toolUse)
   ) {
     return undefined
   }
-  return { imageInput, reasoning, search, toolUse } as AiProviderConfiguredModel["capabilities"]
+  return { imageInput, reasoning, search, toolUse }
 }
 
 function normalizeModel(value: unknown, providerId: AiProviderId): AiProviderConfiguredModel | null {
   if (!isRecord(value)) return null
   const id = typeof value.id === "string" ? value.id.trim() : ""
   if (!id || id.length > MAX_MODEL_ID_LENGTH || typeof value.enabled !== "boolean") return null
-  const capabilitySource = CAPABILITY_SOURCES.has(value.capabilitySource as string)
-    ? (value.capabilitySource as AiProviderConfiguredModel["capabilitySource"])
-    : undefined
+  const capabilitySource = isCapabilitySource(value.capabilitySource) ? value.capabilitySource : undefined
   const capabilities = normalizeCapabilities(value.capabilities)
   return {
     ...resolveAiModelCapabilities(providerId, {
@@ -207,7 +208,7 @@ function hexToBytes(value: string): Uint8Array {
 }
 
 function publicConfig(record: AiProviderConfigStoreRecord): AiProviderConfig | null {
-  if (!isProviderId(record.providerId)) return null
+  if (!isAiProviderId(record.providerId)) return null
   return {
     configId: record.configId,
     displayName: record.displayName,
@@ -220,15 +221,17 @@ function publicConfig(record: AiProviderConfigStoreRecord): AiProviderConfig | n
   }
 }
 
+export type CreateAiProviderConfigServiceOptions = {
+  now?: () => number
+  secretStorage: AiProviderSecretStorage
+  store: AiProviderConfigStore
+}
+
 export function createAiProviderConfigService({
   store,
   secretStorage,
   now = Date.now,
-}: {
-  store: AiProviderConfigStore
-  secretStorage: AiProviderSecretStorage
-  now?: () => number
-}): AiProviderConfigService {
+}: CreateAiProviderConfigServiceOptions): AiProviderConfigService {
   const requireEncryption = () => {
     if (!secretStorage.isEncryptionAvailable()) {
       throw new AiProviderConfigError("系统安全凭据存储当前不可用，无法保存或读取 API Key。")
@@ -243,7 +246,7 @@ export function createAiProviderConfigService({
         .filter((config): config is AiProviderConfig => config !== null),
 
     saveConfig: (input) => {
-      if (!isRecord(input) || !isProviderId(input.providerId)) {
+      if (!isRecord(input) || !isAiProviderId(input.providerId)) {
         throw new AiProviderConfigError("不支持这个 AI 供应商。")
       }
       if (typeof input.enabled !== "boolean") throw new AiProviderConfigError("供应商启用状态无效。")
@@ -252,6 +255,9 @@ export function createAiProviderConfigService({
       const baseUrl = normalizeBaseUrl(input.baseUrl)
       const models = normalizeModels(input.models, input.providerId)
       const existing = store.find(configId)
+      if (existing && existing.providerId !== input.providerId) {
+        throw new AiProviderConfigError("连接与所选协议不匹配。")
+      }
       let apiKeyCiphertext = existing?.apiKeyCiphertext ?? null
       if (input.removeApiKey) {
         apiKeyCiphertext = null
@@ -286,7 +292,7 @@ export function createAiProviderConfigService({
     },
 
     resolveConnection: (input) => {
-      if (!isRecord(input) || !isProviderId(input.providerId)) {
+      if (!isRecord(input) || !isAiProviderId(input.providerId)) {
         throw new AiProviderConfigError("不支持这个 AI 供应商。")
       }
       const configId = normalizeConfigId(input.configId, input.providerId)

@@ -18,17 +18,22 @@ import {
   readTypesetPreferences,
 } from "./typeset-preferences"
 
-export type ThemePreference = "system" | "light" | "dark"
-export type InterfaceFontPreference = "system" | "geist" | "open-sans"
-export type DefaultEditorMode = "rich" | "source"
-export type CornerRadiusPreference = "sharp" | "default" | "soft"
+const THEME_VALUES = ["system", "light", "dark"] as const
+const INTERFACE_FONT_VALUES = ["system", "geist", "open-sans"] as const
+const EDITOR_MODE_VALUES = ["rich", "source"] as const
+const CORNER_RADIUS_VALUES = ["sharp", "default", "soft"] as const
 
-export interface AppPreferences extends TypesetPreferences {
-  cornerRadius: CornerRadiusPreference
-  defaultEditorMode: DefaultEditorMode
-  interfaceFont: InterfaceFontPreference
-  spellCheck: boolean
-  theme: ThemePreference
+export type ThemePreference = (typeof THEME_VALUES)[number]
+export type InterfaceFontPreference = (typeof INTERFACE_FONT_VALUES)[number]
+export type DefaultEditorMode = (typeof EDITOR_MODE_VALUES)[number]
+export type CornerRadiusPreference = (typeof CORNER_RADIUS_VALUES)[number]
+
+export type AppPreferences = TypesetPreferences & {
+  readonly cornerRadius: CornerRadiusPreference
+  readonly defaultEditorMode: DefaultEditorMode
+  readonly interfaceFont: InterfaceFontPreference
+  readonly spellCheck: boolean
+  readonly theme: ThemePreference
 }
 
 export type UpdateAppPreference = <Key extends keyof AppPreferences>(
@@ -38,10 +43,6 @@ export type UpdateAppPreference = <Key extends keyof AppPreferences>(
 
 const PREFERENCES_STORAGE_KEY = "tessera.preferences.v2"
 const LEGACY_PREFERENCES_STORAGE_KEY = "tessera.preferences.v1"
-const THEME_VALUES = new Set<ThemePreference>(["system", "light", "dark"])
-const INTERFACE_FONT_VALUES = new Set<InterfaceFontPreference>(["system", "geist", "open-sans"])
-const EDITOR_MODE_VALUES = new Set<DefaultEditorMode>(["rich", "source"])
-const CORNER_RADIUS_VALUES = new Set<CornerRadiusPreference>(["sharp", "default", "soft"])
 
 const CORNER_RADIUS_CSS: Record<CornerRadiusPreference, string> = {
   sharp: "0rem",
@@ -58,17 +59,32 @@ const INTERFACE_FONT_CSS: Record<InterfaceFontPreference, string> = {
     "'Open Sans Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', ui-sans-serif, system-ui, sans-serif",
 }
 
-const DEFAULT_PREFERENCES: AppPreferences = {
+const DEFAULT_PREFERENCES = {
   ...TYPESET_REFERENCE_PRESET,
   cornerRadius: "default",
   defaultEditorMode: "rich",
   interfaceFont: "system",
   spellCheck: true,
   theme: "system",
-}
+} as const satisfies AppPreferences
 
 function isPreferenceRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function isPreferenceValue<const Values extends readonly string[]>(
+  values: Values,
+  value: unknown,
+): value is Values[number] {
+  return typeof value === "string" && values.some((candidate) => candidate === value)
+}
+
+export function isInterfaceFontPreference(value: unknown): value is InterfaceFontPreference {
+  return isPreferenceValue(INTERFACE_FONT_VALUES, value)
+}
+
+export function isDefaultEditorMode(value: unknown): value is DefaultEditorMode {
+  return isPreferenceValue(EDITOR_MODE_VALUES, value)
 }
 
 function readPreferences(): AppPreferences {
@@ -81,26 +97,17 @@ function readPreferences(): AppPreferences {
     const value = isPreferenceRecord(storedValue) ? storedValue : {}
     return {
       ...readTypesetPreferences(value),
-      cornerRadius:
-        typeof value.cornerRadius === "string" &&
-        CORNER_RADIUS_VALUES.has(value.cornerRadius as CornerRadiusPreference)
-          ? (value.cornerRadius as CornerRadiusPreference)
-          : DEFAULT_PREFERENCES.cornerRadius,
-      defaultEditorMode:
-        typeof value.defaultEditorMode === "string" &&
-        EDITOR_MODE_VALUES.has(value.defaultEditorMode as DefaultEditorMode)
-          ? (value.defaultEditorMode as DefaultEditorMode)
-          : DEFAULT_PREFERENCES.defaultEditorMode,
-      interfaceFont:
-        typeof value.interfaceFont === "string" &&
-        INTERFACE_FONT_VALUES.has(value.interfaceFont as InterfaceFontPreference)
-          ? (value.interfaceFont as InterfaceFontPreference)
-          : DEFAULT_PREFERENCES.interfaceFont,
+      cornerRadius: isPreferenceValue(CORNER_RADIUS_VALUES, value.cornerRadius)
+        ? value.cornerRadius
+        : DEFAULT_PREFERENCES.cornerRadius,
+      defaultEditorMode: isDefaultEditorMode(value.defaultEditorMode)
+        ? value.defaultEditorMode
+        : DEFAULT_PREFERENCES.defaultEditorMode,
+      interfaceFont: isInterfaceFontPreference(value.interfaceFont)
+        ? value.interfaceFont
+        : DEFAULT_PREFERENCES.interfaceFont,
       spellCheck: typeof value.spellCheck === "boolean" ? value.spellCheck : DEFAULT_PREFERENCES.spellCheck,
-      theme:
-        typeof value.theme === "string" && THEME_VALUES.has(value.theme as ThemePreference)
-          ? (value.theme as ThemePreference)
-          : DEFAULT_PREFERENCES.theme,
+      theme: isPreferenceValue(THEME_VALUES, value.theme) ? value.theme : DEFAULT_PREFERENCES.theme,
     }
   } catch {
     return DEFAULT_PREFERENCES

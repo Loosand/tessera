@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 具体 Agent 适配器定义的可序列化请求、取消信号与运行事件
- * [OUTPUT]: 支持具体运行时保留类型化请求/事件的可替换 AgentRuntime 泛型端口，以及基础权限事件契约
+ * [OUTPUT]: 支持按事件类型和工具输出收窄的 Agent 事件映射，以及保留具体请求/事件的泛型运行时端口
  * [POS]: Tessera 核心与具体 Agent 适配器之间的稳定端口
  * [DOC]: docs/architecture.md
  *
@@ -12,21 +12,34 @@
 
 export type PermissionEffect = "allow" | "ask" | "deny"
 
-export interface AgentRequest {
-  sessionId: string
-  prompt: string
-  workspaceRoot: string
+export type AgentRequest = {
+  readonly sessionId: string
+  readonly prompt: string
+  readonly workspaceRoot: string
 }
 
-export type AgentEvent =
-  | { type: "text.delta"; text: string }
-  | { type: "tool.started"; tool: string }
-  | { type: "tool.completed"; tool: string; output: unknown }
-  | { type: "permission.asked"; action: string; resources: readonly string[] }
-  | { type: "session.completed" }
-  | { type: "session.failed"; message: string }
+export type AgentEventMap<ToolOutput = unknown> = {
+  readonly "text.delta": { readonly type: "text.delta"; readonly text: string }
+  readonly "tool.started": { readonly type: "tool.started"; readonly tool: string }
+  readonly "tool.completed": {
+    readonly type: "tool.completed"
+    readonly tool: string
+    readonly output: ToolOutput
+  }
+  readonly "permission.asked": {
+    readonly type: "permission.asked"
+    readonly action: string
+    readonly resources: readonly string[]
+  }
+  readonly "session.completed": { readonly type: "session.completed" }
+  readonly "session.failed": { readonly type: "session.failed"; readonly message: string }
+}
 
-export interface AgentRuntime<REQUEST = AgentRequest, EVENT = AgentEvent> {
+export type AgentEventType = keyof AgentEventMap
+export type AgentEvent<ToolOutput = unknown> = AgentEventMap<ToolOutput>[AgentEventType]
+export type AgentEventOf<Type extends AgentEventType, ToolOutput = unknown> = AgentEventMap<ToolOutput>[Type]
+
+export type AgentRuntime<Request = AgentRequest, Event = AgentEvent> = {
   readonly id: string
-  run(request: REQUEST, signal: AbortSignal): AsyncIterable<EVENT>
+  run(request: Request, signal: AbortSignal): AsyncIterable<Event>
 }

@@ -3,7 +3,19 @@
 > 代码源头：`apps/desktop/src/renderer/src/components/editor/`、
 > `apps/desktop/src/renderer/src/hooks/use-workspace.ts`、`apps/desktop/src/main/index.ts`
 >
-> 状态：基础人工写作、兼容性保护与顶层区块连续多选已实现；嵌套操作、CodeMirror 和 Agent Diff 处于规划阶段。
+> 状态：基础人工写作、CodeMirror 源码表面、兼容性保护与顶层区块连续多选已实现；嵌套操作和编辑器内 Agent 文本补丁处于规划阶段，聊天内文档 Diff 审批已实现。
+
+## 当前迭代状态
+
+| 能力 | 状态 | 当前边界 |
+| --- | --- | --- |
+| Typeset Markdown 主题 | **已实现** | 设置页支持精选本地字体、字号、行高、区块流、版心、参考预设、随机搭配和实时预览；不写入 Markdown 正文。 |
+| TipTap 即时预览 | **已实现** | 常用 Markdown、GFM 表格、任务列表、斜杠菜单、顶层连续区块选择和结构化剪贴板已覆盖；原始 HTML、脚注和定义式链接仍进入源码保护。 |
+| CodeMirror 源码模式 | **已实现** | 按需加载，支持 Markdown 高亮、行号、折叠、搜索、括号匹配、历史、自动换行、Tab 缩进、IME 安全同步、文档会话恢复和引用跳行；不提供底部工具栏。 |
+| TipTap 真实 renderer 基准 | **已实现** | 已覆盖打开、输入、序列化、滚动、堆内存和块密度退化，预算检查暂不进入默认工程门禁。 |
+| CodeMirror 真实 renderer 基准 | **规划** | 下一轮补充打开、连续输入、文档切换、滚动、系统快捷键、selection 和中文 IME 指标。 |
+| 嵌套区块操作 | **规划** | 当前多选、拖动和结构操作只承诺文档直接子节点。 |
+| 编辑器内 Agent 文本补丁 | **规划** | 复用聊天内已实现的冻结候选、源码 Diff、人工审批与审计协议。 |
 
 ## 目标
 
@@ -21,8 +33,9 @@ Agent 建议 -> 文本补丁 -> 接受 --/
 ## 分层
 
 1. `RichTextEditor` 将 Markdown 正文解析为 TipTap 文档，在输入静默期后重新序列化。
-2. `useWorkspace` 持有完整草稿、脏状态、flush 注册、串行保存队列和外部冲突状态。
-3. Electron 主进程校验路径和磁盘版本，并在同目录内原子替换文件。
+2. `SourceCodeEditor` 按需加载 CodeMirror 6，以 Markdown 源码状态直接编辑同一份草稿。
+3. `useWorkspace` 持有完整草稿、脏状态、flush 注册、串行保存队列和外部冲突状态。
+4. Electron 主进程校验路径和磁盘版本，并在同目录内原子替换文件。
 
 编辑器组件不读取文件、不访问数据库，也不直接调用 IPC。TipTap 是内存中的编辑投影，Markdown 文件是正文事实源。
 
@@ -31,12 +44,16 @@ Agent 建议 -> 文本补丁 -> 接受 --/
 文档只有即时预览和 Markdown 源码两种编辑状态，不维护独立预览页。两种状态共享草稿、自动保存、冲突检测和
 窗口关闭协议，并可通过顶栏入口或 `⌘/` 切换。
 
+源码模式使用按需加载的 CodeMirror 6：首次进入后在当前文档内保持挂载，提供 Markdown 高亮、行号、折叠、括号匹配、
+搜索、历史、自动换行和 Tab 缩进。选区与滚动按文档身份恢复；大纲与聊天引用通过窄跳行事件定位 CodeMirror 行，
+不读取编辑器 DOM。主题继续消费 Typeset 的等宽字体、字号、行高、版心和语义颜色。
+
 编辑器偏好状态：
 
 - **已实现**：默认编辑模式、拼写检查，以及 Typeset 的标题/正文/等宽字体、基础字号、行高、区块流和版心保存在
   渲染层 `v2` 轻量偏好中；它们只改变编辑投影，不修改 Markdown 内容，旧版 `v1` 正文字体、字号和宽度偏好会只读迁移到等价配置。
 - **已实现**：即时预览使用项目持有的 Typeset CSS，通过 `size`、`leading` 与 `flow` 三项节奏变量派生标题、正文、
-  列表、引用和代码关系；设置页使用同一 CSS 与本地字体实时预览，`measure` 以 `ch` 作用于编辑器布局，TipTap 选区、任务列表与表格滚动使用局部适配。
+  列表、引用和代码关系；设置页使用同一 CSS 与精选本地字体实时预览，参考预设采用 `Nunito Sans / Oxanium / 18px / 1.9 / 1em / 70ch`，随机搭配只从已评审字体组合和可读节奏中采样；`measure` 以 `ch` 作用于编辑器布局，TipTap 选区、任务列表与表格滚动使用局部适配。
 - **规划**：浮动目录、Frontmatter 可视化开关、标题级别标记、彩色与可折叠标题、可折叠列表和标签美化。
   设置页先展示禁用入口并明确能力状态，不保存不会生效的伪偏好。
 
@@ -73,6 +90,7 @@ Agent 建议 -> 文本补丁 -> 接受 --/
 - 连续输入停止 300ms 后生成 Markdown 草稿，避免每次按键都执行全文序列化和顶层 React 更新。
 - 中文 IME composition 期间暂停静默期计时，不读取拼音等中间态；composition 结束后只提交最终文本。显式保存、
   切换模式和关闭窗口仍可强制 flush 当前内容。
+- CodeMirror 的普通 transaction 直接更新 Markdown 草稿；composition 期间不向 React 发出中间字符串，结束后只提交最终状态。
 - 保存、切换文档、切换模式和关闭窗口会先 flush 待处理编辑。
 - flush 记录调度时的文档路径，旧文档结果不能写入新文档。
 - 父级回传相同草稿时不重复调用 `setContent`，避免光标跳动和更新循环。
@@ -86,14 +104,15 @@ Agent 建议 -> 文本补丁 -> 接受 --/
 
 正文达到 100,000 字符或估算达到 750 个 Markdown 块的文档默认使用源码模式，不挂载 TipTap。字符与块数保护均先排除 frontmatter，
 再扫描正文行结构，把段落边界、标题、列表项、引用、表格行和围栏代码视为压力信号，但不解析围栏代码内部内容。用户可以明确覆盖保护。
-源码模式后续替换为 CodeMirror 6 时，仍需延迟物化完整字符串，并复用当前 flush、保存和冲突协议。
+源码模式已使用 CodeMirror 6 的可视区域虚拟渲染，并复用当前 flush、保存和冲突协议；`useWorkspace` 仍持有完整 Markdown
+字符串，后续需要把 CodeMirror 打开、输入、文档切换和滚动指标加入真实 renderer 基准，再判断是否需要进一步延迟物化。
 
 性能评测至少区分文本长度、块数量和复杂节点数量，重点记录输入到下一帧、Markdown 序列化、文档切换、滚动和
 内存峰值。块手柄使用单一浮层和事件委托，避免为每个段落常驻 React root、observer 和拖放监听器。
 
 ## 性能基准
 
-> 状态：真实 Electron renderer 基准、结构化报告与预算检查已实现；默认工程检查尚不阻断性能预算。
+> 状态：TipTap 真实 Electron renderer 基准、结构化报告与预算检查已实现；CodeMirror 源码模式尚未纳入，默认工程检查也尚不阻断性能预算。
 
 基准使用生产构建和独立 BrowserWindow，加载与产品相同的 TipTap schema、内容样式和顶层区块手柄。窗口关闭
 后台节流但保留 GPU 合成，避免把浏览器帧指标替换为 Node 定时器。固定语料将字符数、顶层块数量和复杂节点分开：
@@ -130,7 +149,7 @@ JSON、Markdown 和带时间戳的历史报告写入被 Git 忽略的 `artifacts
 parser 命令不挂载 DOM，按 100–1500 个固定短块生成 `MarkdownManager.parse` 增长曲线；`:cpu` 聚焦 1000 块并输出
 Bun CPU profile。报告写入 `artifacts/benchmarks/editor-parser/`，用于定位解析热区，不能替代真实 renderer 指标。
 
-### 首轮基线与结论
+### TipTap 首轮基线与结论
 
 2026-08-21 在 Apple M4、Electron 42.3.3 / Chrome 148 上得到以下 p95。数字用于确定优化方向，不代表其他机器的
 承诺值；比较回归时应使用相同硬件、电源状态和 Electron 版本。
@@ -167,12 +186,16 @@ Marked block lexer 的 Setext 标题、HTML、表格、引用和分隔线正则�
 - `markdown-compatibility.test.ts`：嵌套列表、复杂表格、HTML、脚注、定义式链接以及代码样例排除语料。
 - `markdown-clipboard.test.ts`：连续范围 Markdown 序列化、快捷键仲裁和剪贴板失败安全。
 - `markdown-paste.test.ts`：安全 Markdown 识别、网页富内容优先和结构化块粘贴 transaction。
-- `typeset-preferences.test.ts`：Markdown 主题参考预设、自定义值、旧设置迁移和 CSS 变量映射。
+- `typeset-preferences.test.ts`：Markdown 主题参考/随机预设、自定义值、旧设置迁移和 CSS 变量映射。
 - `editor-content-sync.test.ts`：输入合并、中文 IME 暂停/恢复、文档身份和强制提交。
 - `editor-interactions.test.ts`：保存/模式快捷键仲裁，以及中文 transaction 的单步撤销与重做。
+- `source-code-editor-state.test.ts`：源码选区/滚动快照边界、一基准跳行和按需加载期间的请求保留。
 - `editor-mode-policy.test.ts`：字符数、近似块密度、围栏代码排除和源码优先语法保护。
 - `top-level-block-operations.test.ts`：顶层相邻导航、连续范围定位、复制、删除、移动、转换和真实 Markdown schema 序列化。
 - `workspace-sidebar-model.test.ts`：侧栏排序、文件树和大纲提取。
+
+2026-08-22 的 CodeMirror 接入验收中，编辑器目录 63 项测试、相关 Biome 检查和桌面端生产构建通过；生产构建确认
+源码编辑器被拆为独立按需加载 chunk。全仓是否通过仍以当前 CI 为准，不能用这组编辑器专项结果替代仓库门禁。
 
 新增 schema 前需要补充对应往返用例。未知 HTML、脚注和定义式链接已有检测与源码保护但尚不能在即时预览中编辑；
 图片附件和数学公式仍缺少兼容性覆盖。现有 IME、键盘和撤销测试位于无 DOM 协议层，真实 Electron renderer 的
@@ -180,7 +203,7 @@ composition、selection 与系统快捷键集成仍需端到端覆盖。
 
 ## 后续顺序
 
-1. 在已实现的顶层连续选择、Markdown 剪贴板和拖动上，继续补充嵌套区块协议与真实 renderer 集成测试。
-2. 使用 CodeMirror 6 替换当前源码输入表面，并补充真实 renderer 的 IME、selection 与系统快捷键集成测试。
-3. 建立 Agent 文本补丁、引用和 Diff 审查流程。
+1. 为 CodeMirror 补充真实 renderer 的 IME、selection、系统快捷键和长文档性能基准。
+2. 在已实现的顶层连续选择、Markdown 剪贴板和拖动上，继续补充嵌套区块协议与真实 renderer 集成测试。
+3. 建立编辑器内 Agent 文本补丁、引用和逐项 Diff 审查流程，并复用聊天内已经实现的审批协议。
 4. 扩展图片附件、数学公式等兼容性语料；以真实长文档继续评测复杂节点性能，再决定是否引入按块源码保留。

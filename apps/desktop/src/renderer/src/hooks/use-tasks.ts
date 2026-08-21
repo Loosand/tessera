@@ -1,8 +1,8 @@
 /**
  * [INPUT]: 当前工作区 ID 与预加载层的任务会话 API
- * [OUTPUT]: 新任务草稿、工作区/最近任务列表、历史恢复、重命名、删除和幂等保存操作
+ * [OUTPUT]: 带执行模式和 Skill 选择的新任务草稿、工作区/最近任务列表、历史恢复、重命名、删除和幂等保存操作
  * [POS]: 渲染层中工作区任务导航与对话持久化的单一状态入口
- * [DOC]: docs/architecture/task-navigation.md
+ * [DOC]: docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -16,25 +16,32 @@ import type {
   TaskSessionSaveInput,
   TaskSessionStatus,
   TaskSessionSummary,
+  TaskSkillId,
 } from "@tessera/contracts"
 import { useCallback, useEffect, useRef, useState } from "react"
 
-export interface ActiveTask {
-  id: string
-  messages: TaskMessage[]
-  mode: TaskMode
-  persisted: boolean
-  status: TaskSessionStatus
-  title: string
-  workspaceId: string | null
+export type ActiveTask = {
+  readonly id: string
+  readonly messages: TaskMessage[]
+  readonly mode: TaskMode
+  readonly persisted: boolean
+  readonly skillId: TaskSkillId
+  readonly status: TaskSessionStatus
+  readonly title: string
+  readonly workspaceId: string | null
 }
 
-function createTaskDraft(mode: TaskMode = "chat", workspaceId: string | null = null): ActiveTask {
+function createTaskDraft(
+  mode: TaskMode = "chat",
+  workspaceId: string | null = null,
+  skillId: TaskSkillId = null,
+): ActiveTask {
   return {
     id: globalThis.crypto.randomUUID(),
     messages: [],
     mode,
     persisted: false,
+    skillId,
     status: "idle",
     title: "新任务",
     workspaceId,
@@ -124,9 +131,13 @@ export function useTasks(workspaceId: string | undefined) {
   }, [refreshRecentTasks, workspaceId])
 
   const startNewTask = useCallback(
-    (mode: TaskMode = "chat", nextWorkspaceId: string | null = workspaceId ?? null) => {
+    (
+      mode: TaskMode = "chat",
+      nextWorkspaceId: string | null = workspaceId ?? null,
+      skillId: TaskSkillId = null,
+    ) => {
       requestIdRef.current += 1
-      const draft = createTaskDraft(mode, nextWorkspaceId)
+      const draft = createTaskDraft(mode, nextWorkspaceId, skillId)
       activeTaskRef.current = draft
       setActiveTask(draft)
       setError(null)
@@ -149,6 +160,7 @@ export function useTasks(workspaceId: string | undefined) {
         messages: snapshot.messages,
         mode: snapshot.mode,
         persisted: true,
+        skillId: snapshot.skillId,
         status: snapshot.status,
         title: snapshot.title,
         workspaceId: snapshot.workspaceId,
@@ -180,6 +192,7 @@ export function useTasks(workspaceId: string | undefined) {
             messages: input.messages,
             mode: snapshot.mode,
             persisted: true,
+            skillId: snapshot.skillId,
             status: snapshot.status,
             title: snapshot.title,
             workspaceId: snapshot.workspaceId,
@@ -204,6 +217,7 @@ export function useTasks(workspaceId: string | undefined) {
         id: task.id,
         messages: task.messages,
         mode: task.mode,
+        skillId: task.skillId,
         status: "idle",
         title,
         workspaceId: task.workspaceId,
@@ -266,6 +280,7 @@ export function useTasks(workspaceId: string | undefined) {
         id: task.id,
         messages,
         mode: task.mode,
+        skillId: task.skillId,
         status,
         title: task.title,
         workspaceId: task.workspaceId,
@@ -278,6 +293,14 @@ export function useTasks(workspaceId: string | undefined) {
     const task = activeTaskRef.current
     if (task.persisted || task.messages.length > 0 || task.mode === mode) return
     const next = { ...task, mode }
+    activeTaskRef.current = next
+    setActiveTask(next)
+  }, [])
+
+  const setActiveTaskSkill = useCallback((skillId: TaskSkillId) => {
+    const task = activeTaskRef.current
+    if (task.persisted || task.messages.length > 0 || task.skillId === skillId) return
+    const next = { ...task, skillId }
     activeTaskRef.current = next
     setActiveTask(next)
   }, [])
@@ -296,6 +319,7 @@ export function useTasks(workspaceId: string | undefined) {
     refreshWorkspaceTasks,
     renameTask,
     setActiveTaskMode,
+    setActiveTaskSkill,
     startNewTask,
   }
 }

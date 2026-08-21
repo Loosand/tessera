@@ -12,7 +12,7 @@
 
 import type { DatabaseMigration } from "./types"
 
-export const workspaceRecentsMigration: DatabaseMigration = {
+export const workspaceRecentsMigration = {
   id: "0003-workspace-recents",
   statements: ["ALTER TABLE workspaces ADD COLUMN hidden_at INTEGER;"],
-}
+} as const satisfies DatabaseMigration

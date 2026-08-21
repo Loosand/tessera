@@ -12,6 +12,7 @@
 
 import { describe, expect, it } from "vitest"
 import {
+  AiProviderConfigError,
   type AiProviderConfigStore,
   type AiProviderConfigStoreRecord,
   createAiProviderConfigService,
@@ -116,5 +117,77 @@ describe("AI 供应商配置服务", () => {
       secretStorage: { ...secretStorage, isEncryptionAvailable: () => false },
     })
     expect(() => service.saveConfig({ ...CONFIG, apiKey: "secret-key" })).toThrow("安全凭据存储")
+  })
+
+  it("兼容协议允许保存多条具名连接，并按连接分别解析凭据", () => {
+    const store = createStore()
+    const service = createAiProviderConfigService({ store, secretStorage })
+
+    service.saveConfig({
+      ...CONFIG,
+      configId: "anthropic-compatible:deepseek",
+      displayName: "DeepSeek Messages",
+      providerId: "anthropic-compatible",
+      baseUrl: "https://api.deepseek.com/anthropic",
+      apiKey: "deepseek-key",
+    })
+    service.saveConfig({
+      ...CONFIG,
+      configId: "anthropic-compatible:relay",
+      displayName: "团队中转",
+      providerId: "anthropic-compatible",
+      baseUrl: "https://relay.example.com/anthropic",
+      apiKey: "relay-key",
+    })
+
+    expect(service.listConfigs()).toMatchObject([
+      {
+        configId: "anthropic-compatible:deepseek",
+        displayName: "DeepSeek Messages",
+        providerId: "anthropic-compatible",
+      },
+      {
+        configId: "anthropic-compatible:relay",
+        displayName: "团队中转",
+        providerId: "anthropic-compatible",
+      },
+    ])
+    expect(
+      service.resolveConnection({
+        configId: "anthropic-compatible:relay",
+        providerId: "anthropic-compatible",
+        baseUrl: "https://relay.example.com/anthropic",
+        apiKey: "",
+      }),
+    ).toMatchObject({
+      baseUrl: "https://relay.example.com/anthropic",
+      apiKey: "relay-key",
+    })
+  })
+
+  it("官方供应商保持单例，且连接 ID 不能跨协议复用", () => {
+    const store = createStore()
+    const service = createAiProviderConfigService({ store, secretStorage })
+
+    expect(() =>
+      service.saveConfig({ ...CONFIG, configId: "deepseek:relay", providerId: "deepseek" }),
+    ).toThrow("官方供应商只允许保存一条连接")
+
+    service.saveConfig({
+      ...CONFIG,
+      configId: "compatible:shared",
+      displayName: "OpenAI 中转",
+      providerId: "openai-compatible",
+    })
+    expect(() =>
+      service.saveConfig({
+        ...CONFIG,
+        configId: "compatible:shared",
+        displayName: "Anthropic 中转",
+        providerId: "anthropic-compatible",
+      }),
+    ).toThrow(AiProviderConfigError)
+    expect(service.listConfigs()).toHaveLength(1)
+    expect(service.listConfigs()[0]?.providerId).toBe("openai-compatible")
   })
 })

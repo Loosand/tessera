@@ -12,10 +12,11 @@
 
 import { HugeiconsIcon, type HugeiconsIconProps } from "@hugeicons/react"
 
-export interface IconProps extends Omit<HugeiconsIconProps, "strokeWidth"> {
-  label?: string
-  strokeWidth?: number
-}
+export type IconProps = Omit<HugeiconsIconProps, "strokeWidth"> &
+  Readonly<{
+    label?: string
+    strokeWidth?: number
+  }>
 
 export function Icon({ label, size = 18, strokeWidth = 1.7, ...props }: IconProps) {
   return (

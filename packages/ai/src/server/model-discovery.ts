@@ -10,28 +10,22 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import type {
-  AiModelCapabilities,
-  AiProviderConnectionInput,
-  AiProviderId,
-  AiProviderModel,
+import {
+  type AiModelCapabilities,
+  type AiProviderConnectionInput,
+  type AiProviderId,
+  type AiProviderModel,
+  isAiProviderId,
 } from "@tessera/contracts"
 
-const AI_PROVIDER_IDS = new Set<AiProviderId>([
-  "openai-compatible",
-  "anthropic-compatible",
-  "deepseek",
-  "grok",
-  "openrouter",
-])
 const DEFAULT_TIMEOUT_MS = 15_000
 const MAX_BASE_URL_LENGTH = 2_048
 const MAX_API_KEY_LENGTH = 16_384
 const MAX_ERROR_MESSAGE_LENGTH = 320
 const MAX_RESPONSE_BYTES = 2 * 1_024 * 1_024
-const INFERENCE_PATH_SUFFIXES = ["/chat/completions", "/responses", "/response", "/messages"]
+const INFERENCE_PATH_SUFFIXES = ["/chat/completions", "/responses", "/response", "/messages"] as const
 
-export interface AiModelDiscoveryOptions {
+export type AiModelDiscoveryOptions = {
   fetch?: typeof fetch
   timeoutMs?: number
 }
@@ -56,7 +50,7 @@ function optionalString(value: unknown): string | null {
 }
 
 function validateConnection(input: AiProviderConnectionInput) {
-  if (!isRecord(input) || !AI_PROVIDER_IDS.has(input.providerId)) {
+  if (!isRecord(input) || !isAiProviderId(input.providerId)) {
     throw new AiProviderConnectionError("不支持这个 AI 供应商。")
   }
 
@@ -75,7 +69,7 @@ function validateConnection(input: AiProviderConnectionInput) {
   } catch {
     throw new AiProviderConnectionError("API 地址必须是完整的 http(s) URL。")
   }
-  if (!(["http:", "https:"] as const).includes(parsedBaseUrl.protocol as "http:" | "https:")) {
+  if (parsedBaseUrl.protocol !== "http:" && parsedBaseUrl.protocol !== "https:") {
     throw new AiProviderConnectionError("API 地址只支持 http 或 https 协议。")
   }
   if (parsedBaseUrl.username || parsedBaseUrl.password) {
@@ -246,7 +240,7 @@ async function readLimitedResponse(response: Response): Promise<string> {
   return text + decoder.decode()
 }
 
-interface DiscoveryFailure {
+type DiscoveryFailure = {
   message: string
   status: number | null
 }

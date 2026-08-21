@@ -1,8 +1,8 @@
 /**
- * [INPUT]: SQLite 任务仓储、显式可空工作区归属的跨进程任务输入与主进程当前工作区
- * [OUTPUT]: 任务列表/读取/保存/重命名/删除、工作区归属校验、版本化消息校验与运行前 mode/工作区授权
+ * [INPUT]: SQLite 任务仓储、显式可空 Skill/工作区归属、等待输入状态的跨进程任务输入与主进程当前工作区
+ * [OUTPUT]: 任务列表/读取/保存/重命名/删除、等待输入恢复、工作区归属校验、版本化消息校验与运行前 mode/Skill/工作区授权
  * [POS]: Electron 主进程中的通用 Chat/Agent 任务会话领域服务
- * [DOC]: docs/architecture/database.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
+ * [DOC]: docs/architecture/database.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -10,16 +10,19 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import type {
-  AiProviderId,
-  TaskMessage,
-  TaskMessagePart,
-  TaskMode,
-  TaskSessionSaveInput,
-  TaskSessionSnapshot,
-  TaskSessionStatus,
-  TaskSessionSummary,
-  WorkspaceInfo,
+import {
+  AI_PROVIDER_IDS,
+  TASK_SKILL_IDS,
+  type TaskMessage,
+  type TaskMessagePart,
+  type TaskMode,
+  type TaskSessionSaveInput,
+  type TaskSessionSnapshot,
+  type TaskSessionStatus,
+  type TaskSessionSummary,
+  type TaskSkillId,
+  type TaskToolState,
+  type WorkspaceInfo,
 } from "@tessera/contracts"
 import {
   type DatabaseClient,
@@ -33,9 +36,16 @@ import {
 
 const MAX_TASK_MESSAGE_BYTES = 32 * 1024 * 1024
 const MAX_TASK_MESSAGES = 500
-const TASK_STATUSES = new Set<TaskSessionStatus>(["idle", "running", "completed", "failed", "cancelled"])
-const TASK_MODES = new Set<TaskMode>(["chat", "agent"])
-const TOOL_STATES = new Set([
+const TASK_STATUSES = [
+  "idle",
+  "running",
+  "waiting-input",
+  "completed",
+  "failed",
+  "cancelled",
+] as const satisfies readonly TaskSessionStatus[]
+const TASK_MODES = ["chat", "agent"] as const satisfies readonly TaskMode[]
+const TOOL_STATES = [
   "input-streaming",
   "input-available",
   "approval-requested",
@@ -43,19 +53,19 @@ const TOOL_STATES = new Set([
   "output-available",
   "output-error",
   "output-denied",
-])
-const PROVIDER_IDS = new Set<AiProviderId>([
-  "openai-compatible",
-  "anthropic-compatible",
-  "deepseek",
-  "grok",
-  "openrouter",
-])
+] as const satisfies readonly TaskToolState[]
 
 type TaskRecord = NonNullable<ReturnType<typeof findTaskSession>>
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value))
+}
+
+function isStringValue<const Values extends readonly string[]>(
+  values: Values,
+  value: unknown,
+): value is Values[number] {
+  return typeof value === "string" && values.some((candidate) => candidate === value)
 }
 
 function validateTaskId(value: string) {
@@ -69,13 +79,19 @@ function validateTaskTitle(value: string) {
 }
 
 function validateTaskMode(value: unknown): TaskMode {
-  if (!TASK_MODES.has(value as TaskMode)) throw new Error("任务模式无效。")
-  return value as TaskMode
+  if (!isStringValue(TASK_MODES, value)) throw new Error("任务模式无效。")
+  return value
+}
+
+function validateTaskSkillId(value: unknown): TaskSkillId {
+  if (value === null) return null
+  if (!isStringValue(TASK_SKILL_IDS, value)) throw new Error("任务 Skill 无效。")
+  return value
 }
 
 function validateTaskStatus(value: unknown): TaskSessionStatus {
-  if (!TASK_STATUSES.has(value as TaskSessionStatus)) throw new Error("任务状态无效。")
-  return value as TaskSessionStatus
+  if (!isStringValue(TASK_STATUSES, value)) throw new Error("任务状态无效。")
+  return value
 }
 
 function validateOptionalString(value: unknown) {
@@ -121,7 +137,7 @@ function validateTaskPart(part: unknown): part is TaskMessagePart {
   if (part.type !== "dynamic-tool" && !part.type.startsWith("tool-")) return false
   if (
     typeof part.toolCallId !== "string" ||
-    !TOOL_STATES.has(part.state as string) ||
+    !isStringValue(TOOL_STATES, part.state) ||
     !validateOptionalString(part.title) ||
     (part.type === "dynamic-tool" && typeof part.toolName !== "string") ||
     (part.preliminary !== undefined && typeof part.preliminary !== "boolean") ||
@@ -140,32 +156,30 @@ function validateTaskPart(part: unknown): part is TaskMessagePart {
   )
 }
 
+function validateTaskMessage(message: unknown): message is TaskMessage {
+  if (
+    !isRecord(message) ||
+    typeof message.id !== "string" ||
+    !message.id ||
+    message.id.length > 128 ||
+    (message.role !== "user" && message.role !== "assistant") ||
+    !Array.isArray(message.parts) ||
+    !message.parts.every(validateTaskPart)
+  ) {
+    return false
+  }
+  if (message.metadata === undefined) return true
+  return (
+    isRecord(message.metadata) &&
+    validateOptionalString(message.metadata.configId) &&
+    validateOptionalString(message.metadata.modelId) &&
+    (message.metadata.providerId === undefined || isStringValue(AI_PROVIDER_IDS, message.metadata.providerId))
+  )
+}
+
 function validateTaskMessages(value: unknown): TaskMessage[] {
   if (!Array.isArray(value) || value.length > MAX_TASK_MESSAGES) throw new Error("任务消息无效。")
-
-  for (const message of value) {
-    if (
-      !isRecord(message) ||
-      typeof message.id !== "string" ||
-      !message.id ||
-      message.id.length > 128 ||
-      (message.role !== "user" && message.role !== "assistant") ||
-      !Array.isArray(message.parts) ||
-      !message.parts.every(validateTaskPart)
-    ) {
-      throw new Error("任务消息无效。")
-    }
-    if (message.metadata !== undefined) {
-      if (
-        !isRecord(message.metadata) ||
-        !validateOptionalString(message.metadata.modelId) ||
-        (message.metadata.providerId !== undefined &&
-          !PROVIDER_IDS.has(message.metadata.providerId as AiProviderId))
-      ) {
-        throw new Error("任务消息元数据无效。")
-      }
-    }
-  }
+  if (!value.every(validateTaskMessage)) throw new Error("任务消息无效。")
 
   let payload: string
   try {
@@ -176,12 +190,13 @@ function validateTaskMessages(value: unknown): TaskMessage[] {
   if (Buffer.byteLength(payload, "utf8") > MAX_TASK_MESSAGE_BYTES) {
     throw new Error("任务消息超出本地保存上限。")
   }
-  return value as TaskMessage[]
+  return value
 }
 
 function toTaskSummary(record: ReturnType<typeof listRecentTaskSessions>[number]): TaskSessionSummary {
   return {
     ...record,
+    skillId: validateTaskSkillId(record.skillId),
     createdAt: record.createdAt.getTime(),
     updatedAt: record.updatedAt.getTime(),
   }
@@ -198,14 +213,19 @@ function toTaskSnapshot(record: TaskRecord): TaskSessionSnapshot {
   return { ...toTaskSummary(record), messages: validateTaskMessages(messages) }
 }
 
-export interface DesktopTaskService {
-  authorizeTurn(taskId: string, mode: TaskMode, workspace: WorkspaceInfo | null): void
-  listRecent(): TaskSessionSummary[]
-  listWorkspace(workspaceId: string): TaskSessionSummary[]
-  read(taskId: string): TaskSessionSnapshot
-  rename(taskId: string, title: string): TaskSessionSummary
-  delete(taskId: string): boolean
-  save(input: TaskSessionSaveInput, workspace: WorkspaceInfo | null): TaskSessionSnapshot
+export type DesktopTaskService = {
+  readonly authorizeTurn: (
+    taskId: string,
+    mode: TaskMode,
+    workspace: WorkspaceInfo | null,
+    skillId?: TaskSkillId,
+  ) => void
+  readonly delete: (taskId: string) => boolean
+  readonly listRecent: () => TaskSessionSummary[]
+  readonly listWorkspace: (workspaceId: string) => TaskSessionSummary[]
+  readonly read: (taskId: string) => TaskSessionSnapshot
+  readonly rename: (taskId: string, title: string) => TaskSessionSummary
+  readonly save: (input: TaskSessionSaveInput, workspace: WorkspaceInfo | null) => TaskSessionSnapshot
 }
 
 export function createDesktopTaskService(client: DatabaseClient): DesktopTaskService {
@@ -226,6 +246,7 @@ export function createDesktopTaskService(client: DatabaseClient): DesktopTaskSer
     save: (input, workspace) => {
       const id = validateTaskId(input?.id)
       const mode = validateTaskMode(input?.mode)
+      const skillId = validateTaskSkillId(input?.skillId)
       const status = validateTaskStatus(input?.status)
       const title = validateTaskTitle(input?.title ?? "")
       const messages = validateTaskMessages(input?.messages)
@@ -235,6 +256,7 @@ export function createDesktopTaskService(client: DatabaseClient): DesktopTaskSer
       }
       const existing = findTaskSession(client, id)
       if (existing?.mode && existing.mode !== mode) throw new Error("任务创建后不能切换模式。")
+      if (existing && existing.skillId !== skillId) throw new Error("任务创建后不能切换 Skill。")
       if (existing && existing.workspaceId !== requestedWorkspaceId) {
         throw new Error("任务创建后不能更改绑定的工作区。")
       }
@@ -250,6 +272,7 @@ export function createDesktopTaskService(client: DatabaseClient): DesktopTaskSer
       const record = saveTaskSession(client, {
         id,
         mode,
+        skillId,
         workspaceId,
         title,
         status,
@@ -259,10 +282,13 @@ export function createDesktopTaskService(client: DatabaseClient): DesktopTaskSer
       if (!record) throw new Error("任务保存失败。")
       return toTaskSnapshot(record)
     },
-    authorizeTurn: (taskId, mode, workspace) => {
+    authorizeTurn: (taskId, mode, workspace, skillId) => {
       const record = findTaskSession(client, validateTaskId(taskId))
       if (!record) throw new Error("请先创建任务再发送消息。")
       if (record.mode !== validateTaskMode(mode)) throw new Error("任务运行模式与已保存会话不一致。")
+      if (skillId !== undefined && record.skillId !== validateTaskSkillId(skillId)) {
+        throw new Error("任务 Skill 与已保存会话不一致。")
+      }
       if (record.mode === "agent" && record.workspaceId !== workspace?.id) {
         throw new Error("请先打开这个 Agent 任务绑定的工作区。")
       }

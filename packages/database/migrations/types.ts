@@ -10,7 +10,7 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-export interface DatabaseMigration {
-  id: string
-  statements: readonly string[]
+export type DatabaseMigration = {
+  readonly id: string
+  readonly statements: readonly string[]
 }

@@ -2,7 +2,7 @@
 
 > 代码源头：`packages/contracts/src/index.ts`、`packages/database/schema.ts`、
 > `packages/database/task-session-repository.ts`、`apps/desktop/src/main/task-service.ts`、
-> `apps/desktop/src/main/read-only-agent-tools.ts`、`packages/ai/src/server/agent-runtime.ts`、
+> `apps/desktop/src/main/read-only-agent-tools.ts`、`packages/skills/src/index.ts`、`packages/ai/src/server/agent-runtime.ts`、
 > `packages/ai/src/react/use-electron-chat.ts`、`apps/desktop/src/main/index.ts`、
 > `apps/desktop/src/renderer/src/hooks/use-tasks.ts`、`apps/desktop/src/renderer/src/components/app-shell.tsx`、
 > `apps/desktop/src/renderer/src/components/task-page.tsx`
@@ -14,20 +14,23 @@
 任务是 Chat 与 Agent 共用的产品会话。任务导航只决定会话归属和恢复位置，不向模型隐式提供工作区内容。
 普通 Chat 即使关联到某个工作区，也只能发送用户显式输入和当前历史；只有 Agent 运行时可以使用主进程注入的工作区工具。
 
-## 模式与工作区
+## 执行模式、Skill 与工作区
 
 - `chat` 可以不绑定工作区；一级侧栏的“新任务”默认创建这种独立草稿，只有从工作区二级页面新建时才关联当前工作区。
 - “草稿”只是未绑定 Chat 的导航标签，不创建工作区记录、磁盘目录或隐式文件上下文。
 - `agent` 必须绑定工作区。renderer 显式提交预期工作区 ID，主进程与当前窗口会话重新核对；工作区根路径只留在主进程闭包内。
 - mode 在首条消息前通过任务输入框内的分段控件选择；任务首次保存后不可切换。
+- Skill 与 mode 正交：`null`、`research`、`writing` 分别呈现为问答、研究、写作，并由第二组原生单选选择；任务首次保存后不可切换。问答不加载 Skill，研究/写作只按需加载当前 `SKILL.md`。
+- Skill 不授予工具权限。研究不会自动开启 Chat 联网或为 Agent 注册网络工具；写作不会自动切换 Agent，也不能绕过 Markdown Diff 审批。
 - Agent 仅允许使用已声明支持工具调用的模型；缺少工作区或工具能力时必须阻止发送并明确说明，禁止降级到普通 Chat。
 - 恢复 Agent 任务或开始运行前，主进程重新核对任务绑定与窗口当前工作区。
 
 ## 持久化
 
-`task_sessions` 保存 mode、可选工作区、标题、状态与时间；`task_messages` 按序保存应用自有的版本化消息 JSON。
+`task_sessions` 保存 mode、可选 `skill_id`、可选工作区、标题、状态与时间；`task_messages` 按序保存应用自有的版本化消息 JSON。
 消息契约保留正文、reasoning、来源、附件、工具状态、审批状态以及助手消息使用的供应商和模型。
 模型运行输入使用经主进程校验的完整 `UIMessage` 历史，再由 AI SDK `convertToModelMessages` 转换；工具结果与审批响应可以进入下一轮，应用元数据仍不会自动变成模型正文。
+主进程同时核对 IPC 请求中的 Skill 与已保存任务；当前 Skill 正文通过 AI SDK `instructions` 注入，不伪装为用户消息，也不把未选中 Skill 放入模型上下文。
 
 任务直到发送第一条消息时才落库。保存输入必须显式携带可空的工作区 ID：`null` 表示独立草稿；非空值必须与主进程当前窗口打开的工作区一致，防止渲染层把任务绑定到任意路径。
 

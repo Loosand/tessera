@@ -1,8 +1,8 @@
 /**
  * [INPUT]: 内存 SQLite、通用任务会话输入与模拟工作区
- * [OUTPUT]: Chat 空工作区、Agent 工作区约束、任务 mode 不可变和重命名/删除的回归验证
+ * [OUTPUT]: Chat 空工作区、Agent 工作区约束、任务 mode/Skill 不可变和重命名/删除的回归验证
  * [POS]: task-service 主进程权限边界的单元测试
- * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
+ * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -29,6 +29,7 @@ describe("DesktopTaskService", () => {
       {
         id: "chat-task",
         mode: "chat",
+        skillId: "research",
         status: "completed",
         title: "普通对话",
         workspaceId: null,
@@ -47,8 +48,11 @@ describe("DesktopTaskService", () => {
       null,
     )
 
-    expect(snapshot).toMatchObject({ mode: "chat", workspaceId: null })
-    expect(() => service.authorizeTurn("chat-task", "chat", null)).not.toThrow()
+    expect(snapshot).toMatchObject({ mode: "chat", skillId: "research", workspaceId: null })
+    expect(() => service.authorizeTurn("chat-task", "chat", null, "research")).not.toThrow()
+    expect(() => service.authorizeTurn("chat-task", "chat", null, "writing")).toThrow(
+      "Skill 与已保存会话不一致",
+    )
     expect(service.read("chat-task").messages[0]).toMatchObject({
       metadata: { modelId: "example/model" },
       parts: [
@@ -74,6 +78,7 @@ describe("DesktopTaskService", () => {
         {
           id: "agent-task",
           mode: "agent",
+          skillId: null,
           status: "idle",
           title: "Agent",
           messages: [],
@@ -87,6 +92,7 @@ describe("DesktopTaskService", () => {
       {
         id: "agent-task",
         mode: "agent",
+        skillId: "writing",
         status: "idle",
         title: "Agent",
         messages: [],
@@ -94,12 +100,13 @@ describe("DesktopTaskService", () => {
       },
       WORKSPACE,
     )
-    expect(() => service.authorizeTurn("agent-task", "agent", null)).toThrow("绑定的工作区")
+    expect(() => service.authorizeTurn("agent-task", "agent", null, "writing")).toThrow("绑定的工作区")
     expect(() =>
       service.save(
         {
           id: "agent-task",
           mode: "chat",
+          skillId: "writing",
           status: "idle",
           title: "Agent",
           messages: [],
@@ -125,6 +132,7 @@ describe("DesktopTaskService", () => {
       {
         id: "standalone-chat",
         mode: "chat",
+        skillId: null,
         status: "idle",
         title: "独立对话",
         messages: [],
@@ -145,6 +153,7 @@ describe("DesktopTaskService", () => {
       {
         id: "managed-chat",
         mode: "chat",
+        skillId: null,
         status: "completed",
         title: "旧标题",
         workspaceId: null,

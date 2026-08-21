@@ -12,27 +12,28 @@
 
 import { and, eq } from "drizzle-orm"
 import type { DatabaseClient } from "./client"
-import { agentChangeProposals } from "./schema"
+import { type AgentChangeProposal, agentChangeProposals } from "./schema"
 
-export type AgentChangeStatus = "pending" | "approved" | "rejected" | "applied" | "conflict" | "failed"
+export type AgentChangeStatus = AgentChangeProposal["status"]
 
-export interface AgentChangeProposalInput {
-  approvalId: string
-  baseContent: string | null
-  baseContentHash: string | null
-  baseModifiedAt: Date | null
-  createdAt: Date
-  modelId: string
-  operation: "create" | "update"
-  proposedContent: string
-  proposedContentHash: string
-  providerId: string
-  reason: string
-  relativePath: string
-  requestId: string
-  taskId: string
-  toolCallId: string
-}
+export type AgentChangeProposalInput = Pick<
+  AgentChangeProposal,
+  | "approvalId"
+  | "taskId"
+  | "requestId"
+  | "toolCallId"
+  | "providerId"
+  | "modelId"
+  | "operation"
+  | "relativePath"
+  | "reason"
+  | "baseContent"
+  | "baseModifiedAt"
+  | "baseContentHash"
+  | "proposedContent"
+  | "proposedContentHash"
+  | "createdAt"
+>
 
 export function saveAgentChangeProposal(client: DatabaseClient, input: AgentChangeProposalInput) {
   client.db
@@ -59,9 +60,7 @@ export function findAgentChangeProposalByToolCall(
   return client.db
     .select()
     .from(agentChangeProposals)
-    .where(
-      and(eq(agentChangeProposals.taskId, taskId), eq(agentChangeProposals.toolCallId, toolCallId)),
-    )
+    .where(and(eq(agentChangeProposals.taskId, taskId), eq(agentChangeProposals.toolCallId, toolCallId)))
     .get()
 }
 
@@ -78,12 +77,7 @@ export function decideAgentChangeProposal(
       decisionReason: reason ?? null,
       decidedAt: new Date(),
     })
-    .where(
-      and(
-        eq(agentChangeProposals.approvalId, approvalId),
-        eq(agentChangeProposals.status, "pending"),
-      ),
-    )
+    .where(and(eq(agentChangeProposals.approvalId, approvalId), eq(agentChangeProposals.status, "pending")))
     .run()
   return findAgentChangeProposal(client, approvalId)
 }

@@ -13,11 +13,12 @@
 import { cn } from "@tessera/design-system/lib/utils"
 import type { ComponentProps, ReactNode } from "react"
 
-export interface SettingSectionProps extends ComponentProps<"section"> {
-  title: string
-  description?: string
-  action?: ReactNode
-}
+export type SettingSectionProps = Omit<ComponentProps<"section">, "title"> &
+  Readonly<{
+    title: string
+    description?: string
+    action?: ReactNode
+  }>
 
 export function SettingSection({
   title,

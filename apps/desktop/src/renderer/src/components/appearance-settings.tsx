@@ -23,10 +23,11 @@ import type {
   ThemePreference,
   UpdateAppPreference,
 } from "../hooks/use-app-preferences"
+import { isInterfaceFontPreference } from "../hooks/use-app-preferences"
 
-interface AppearanceSettingsProps {
-  preferences: AppPreferences
-  onUpdatePreference: UpdateAppPreference
+type AppearanceSettingsProps = {
+  readonly preferences: AppPreferences
+  readonly onUpdatePreference: UpdateAppPreference
 }
 
 const THEME_OPTIONS = [
@@ -239,7 +240,8 @@ export function AppearanceSettings({ preferences, onUpdatePreference }: Appearan
               value={preferences.interfaceFont}
               aria-label="界面字体"
               onChange={(event) => {
-                onUpdatePreference("interfaceFont", event.currentTarget.value as InterfaceFontPreference)
+                const value = event.currentTarget.value
+                if (isInterfaceFontPreference(value)) onUpdatePreference("interfaceFont", value)
               }}
             >
               {Object.entries(INTERFACE_FONT_LABELS).map(([value, label]) => (

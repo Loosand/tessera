@@ -10,30 +10,40 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import { IPC_CHANNELS } from "./index"
+import type { IPC_CHANNELS } from "./index"
 import type {
+  AI_PROVIDER_IDS,
+  AiProviderId,
   DesktopApiArguments,
   DesktopApiChannel,
+  DesktopApiContract,
+  DesktopApiMethod,
+  DesktopApiMethodByChannel,
   DesktopApiMethodByKind,
   DesktopApiReturn,
   DocumentSnapshot,
+  IpcChannel,
   OperationResult,
 } from "./index"
 
-type Equal<Left, Right> =
-  (<Value>() => Value extends Left ? 1 : 2) extends <Value>() => Value extends Right ? 1 : 2
-    ? true
-    : false
+type Equal<Left, Right> = (<Value>() => Value extends Left ? 1 : 2) extends <Value>() => Value extends Right
+  ? 1
+  : 2
+  ? true
+  : false
 
 type Expect<Value extends true> = Value
 
 export type DesktopApiContractTypeTests = [
+  Expect<Equal<(typeof AI_PROVIDER_IDS)[number], AiProviderId>>,
   Expect<Equal<DesktopApiArguments<"readDocument">, [relativePath: string]>>,
   Expect<Equal<DesktopApiReturn<"readDocument">, Promise<DocumentSnapshot>>>,
   Expect<Equal<DesktopApiChannel<"readDocument">, typeof IPC_CHANNELS.documentRead>>,
+  Expect<Equal<DesktopApiContract[DesktopApiMethod]["channel"], IpcChannel>>,
   Expect<Equal<Extract<DesktopApiMethodByKind<"send">, "cancelAiChat">, "cancelAiChat">>,
   Expect<Equal<Extract<DesktopApiMethodByKind<"subscribe">, "onAiChatEvent">, "onAiChatEvent">>,
-  Expect<Equal<Extract<OperationResult, { ok: true }>, { ok: true }>>,
+  Expect<Equal<DesktopApiMethodByChannel<typeof IPC_CHANNELS.documentRead, "invoke">, "readDocument">>,
+  Expect<Equal<Extract<OperationResult, { ok: true }>["ok"], true>>,
 ]
 
 // @ts-expect-error readDocument 只能接收一个相对路径参数。

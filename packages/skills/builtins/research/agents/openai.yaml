@@ -1,0 +1,4 @@
+interface:
+  display_name: "研究"
+  short_description: "搜索、核验、比较并综合信息、证据和来源"
+  default_prompt: "使用 $research 调查这个主题，并给出带来源的核验结论。"

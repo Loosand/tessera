@@ -22,8 +22,8 @@ const PROVIDER_NAMES: Record<AiProviderId, string> = {
   openrouter: "OpenRouter",
 }
 
-export interface AvailableAiModel extends AiConfiguredModel {
-  providerName: string
+export type AvailableAiModel = AiConfiguredModel & {
+  readonly providerName: string
 }
 
 export function selectAvailableAiModels(configs: readonly AiProviderConfig[]): AvailableAiModel[] {
@@ -94,9 +94,12 @@ export function useAiModels() {
             configId: config.configId,
             providerId: config.providerId,
           })
-          if (!result.ok) throw new Error(`${PROVIDER_NAMES[config.providerId]}：${result.error}`)
+          if (!result.ok) {
+            if (result.code === "catalog-unsupported") return config
+            throw new Error(`${config.displayName}：${result.error}`)
+          }
           if (result.models.length === 0) {
-            throw new Error(`${PROVIDER_NAMES[config.providerId]}：供应商没有返回任何模型。`)
+            throw new Error(`${config.displayName}：供应商没有返回任何模型。`)
           }
           const saveResult = await desktopApi.saveAiProviderConfig({
             baseUrl: config.baseUrl,
@@ -106,7 +109,7 @@ export function useAiModels() {
             models: mergeModelsForTaskRefresh(config, result.models),
             providerId: config.providerId,
           })
-          if (!saveResult.ok) throw new Error(`${PROVIDER_NAMES[config.providerId]}：${saveResult.error}`)
+          if (!saveResult.ok) throw new Error(`${config.displayName}：${saveResult.error}`)
           return saveResult.config
         }),
       )

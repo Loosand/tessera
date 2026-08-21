@@ -12,7 +12,7 @@
 
 import type { DatabaseMigration } from "./types"
 
-export const taskSessionsMigration: DatabaseMigration = {
+export const taskSessionsMigration = {
   id: "0002-task-sessions",
   statements: [
     `CREATE TABLE task_sessions (
@@ -56,4 +56,4 @@ export const taskSessionsMigration: DatabaseMigration = {
       AND json_valid(events.payload)
       AND json_type(CASE WHEN json_valid(events.payload) THEN events.payload ELSE '[]' END) = 'array'`,
   ],
-}
+} as const satisfies DatabaseMigration

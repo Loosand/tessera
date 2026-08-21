@@ -1,8 +1,8 @@
 /**
- * [INPUT]: 对话草稿、任务模式、只读范围、附件、模型能力、生成状态与提交/停止回调
- * [OUTPUT]: 可按内容有限增高、以原生模式单选、图标能力入口、模型/范围状态和行内反馈组织的紧凑任务输入框
+ * [INPUT]: 对话草稿、执行模式、内置 Skill、只读范围、附件、模型能力、生成状态与提交/停止回调
+ * [OUTPUT]: 可按内容有限增高、以原生单选切换执行模式和问答/研究/写作、图标能力入口、模型/范围状态和行内反馈组织的紧凑任务输入框
  * [POS]: task-page 的可复用底部/空状态输入表面
- * [DOC]: design.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
+ * [DOC]: design.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -10,7 +10,7 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import type { AiChatReasoning, TaskMode } from "@tessera/contracts"
+import type { AiChatReasoning, TaskMode, TaskSkillId } from "@tessera/contracts"
 import {
   Add01Icon,
   AiWebBrowsingIcon,
@@ -29,50 +29,75 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@tessera/design-system/components/ui/tooltip"
+import { listBuiltInSkills } from "@tessera/skills"
 import { type FormEvent, type KeyboardEvent, useRef } from "react"
 import type { AvailableAiModel } from "../hooks/use-ai-models"
 import { ModelPicker } from "./model-picker"
 
-export interface ComposerImage {
-  filename: string
-  id: string
-  mediaType: string
-  url: string
+export type ComposerImage = {
+  readonly filename: string
+  readonly id: string
+  readonly mediaType: string
+  readonly url: string
 }
 
-interface TaskComposerProps {
-  agentReady: boolean
-  compact?: boolean
-  images: readonly ComposerImage[]
-  model: AvailableAiModel | undefined
-  models: readonly AvailableAiModel[]
-  notice: string
-  onAddImages: (files: FileList) => void
-  onChange: (value: string) => void
-  onModelChange: (key: string) => void
-  onModeChange: (mode: TaskMode) => void
-  onReasoningChange: (reasoning: AiChatReasoning) => void
-  onRemoveImage: (id: string) => void
-  onStop: () => void
-  onSubmit: () => void
-  onWebSearchChange: (enabled: boolean) => void
-  reasoning: AiChatReasoning
-  scope: string
-  mode: TaskMode
-  modeLocked: boolean
-  selectedModelKey: string
-  status: "error" | "ready" | "streaming" | "submitted"
-  value: string
-  webSearch: boolean
+type TaskComposerProps = {
+  readonly agentReady: boolean
+  readonly compact?: boolean
+  readonly images: readonly ComposerImage[]
+  readonly model: AvailableAiModel | undefined
+  readonly models: readonly AvailableAiModel[]
+  readonly notice: string
+  readonly onAddImages: (files: FileList) => void
+  readonly onChange: (value: string) => void
+  readonly onModelChange: (key: string) => void
+  readonly onModeChange: (mode: TaskMode) => void
+  readonly onSkillChange: (skillId: TaskSkillId) => void
+  readonly onReasoningChange: (reasoning: AiChatReasoning) => void
+  readonly onRemoveImage: (id: string) => void
+  readonly onStop: () => void
+  readonly onSubmit: () => void
+  readonly onWebSearchChange: (enabled: boolean) => void
+  readonly reasoning: AiChatReasoning
+  readonly scope: string
+  readonly mode: TaskMode
+  readonly modeLocked: boolean
+  readonly selectedModelKey: string
+  readonly skillId: TaskSkillId
+  readonly skillLocked: boolean
+  readonly status: "error" | "ready" | "streaming" | "submitted"
+  readonly value: string
+  readonly webSearch: boolean
 }
 
-const REASONING_LABELS: Record<AiChatReasoning, string> = {
-  auto: "自动思考",
-  none: "不思考",
-  low: "简短思考",
-  medium: "深入思考",
-  high: "充分思考",
+const REASONING_OPTIONS = [
+  { id: "auto", label: "自动思考" },
+  { id: "none", label: "不思考" },
+  { id: "low", label: "简短思考" },
+  { id: "medium", label: "深入思考" },
+  { id: "high", label: "充分思考" },
+] as const satisfies readonly { readonly id: AiChatReasoning; readonly label: string }[]
+
+function isAiChatReasoning(value: unknown): value is AiChatReasoning {
+  return typeof value === "string" && REASONING_OPTIONS.some((option) => option.id === value)
 }
+
+function reasoningLabel(reasoning: AiChatReasoning) {
+  return REASONING_OPTIONS.find((option) => option.id === reasoning)?.label ?? reasoning
+}
+
+const TASK_SKILL_OPTIONS = [
+  { id: null, displayName: "问答", shortDescription: "不加载内置 Skill" },
+  ...listBuiltInSkills().map((skill) => ({
+    id: skill.name,
+    displayName: skill.displayName,
+    shortDescription: `${skill.shortDescription}；实际能力仍受当前工具授权约束`,
+  })),
+] satisfies readonly {
+  id: TaskSkillId
+  displayName: string
+  shortDescription: string
+}[]
 
 export function TaskComposer({
   agentReady,
@@ -85,6 +110,7 @@ export function TaskComposer({
   onChange,
   onModelChange,
   onModeChange,
+  onSkillChange,
   onReasoningChange,
   onRemoveImage,
   onStop,
@@ -95,6 +121,8 @@ export function TaskComposer({
   mode,
   modeLocked,
   selectedModelKey,
+  skillId,
+  skillLocked,
   status,
   value,
   webSearch,
@@ -225,12 +253,13 @@ export function TaskComposer({
                       disabled={!supportsReasoning}
                       aria-label="思考模式"
                       onChange={(event) => {
-                        onReasoningChange(event.currentTarget.value as AiChatReasoning)
+                        const nextReasoning = event.currentTarget.value
+                        if (isAiChatReasoning(nextReasoning)) onReasoningChange(nextReasoning)
                       }}
                     >
-                      {(Object.keys(REASONING_LABELS) as AiChatReasoning[]).map((level) => (
-                        <option key={level} value={level}>
-                          {REASONING_LABELS[level]}
+                      {REASONING_OPTIONS.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.label}
                         </option>
                       ))}
                     </NativeSelect>
@@ -239,7 +268,7 @@ export function TaskComposer({
               />
               <TooltipContent>
                 {supportsReasoning
-                  ? `思考模式：${REASONING_LABELS[reasoning]}`
+                  ? `思考模式：${reasoningLabel(reasoning)}`
                   : "当前模型不支持思考强度控制"}
               </TooltipContent>
             </Tooltip>
@@ -262,6 +291,30 @@ export function TaskComposer({
             </div>
 
             <div className="flex min-w-0 shrink-0 items-center gap-1.5">
+              <fieldset
+                className="flex shrink-0 rounded-md bg-muted/70 p-0.5"
+                aria-label="对话 Skill"
+                disabled={skillLocked || running}
+              >
+                {TASK_SKILL_OPTIONS.map((option) => (
+                  <label
+                    key={option.id ?? "question-answering"}
+                    title={option.shortDescription}
+                    className="relative cursor-pointer rounded-[5px] px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors has-[:checked]:bg-background has-[:checked]:text-foreground has-[:checked]:shadow-xs has-[:disabled]:cursor-default has-[:disabled]:opacity-70 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring"
+                  >
+                    <input
+                      type="radio"
+                      name={`task-skill-${compact ? "compact" : "empty"}`}
+                      value={option.id ?? "question-answering"}
+                      checked={skillId === option.id}
+                      className="sr-only"
+                      onChange={() => onSkillChange(option.id)}
+                    />
+                    {option.displayName}
+                  </label>
+                ))}
+              </fieldset>
+
               <fieldset
                 className="flex shrink-0 rounded-md bg-muted/70 p-0.5"
                 aria-label="任务模式"

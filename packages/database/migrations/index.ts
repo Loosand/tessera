@@ -17,18 +17,24 @@ import { taskSessionsMigration } from "./0002-task-sessions"
 import { workspaceRecentsMigration } from "./0003-workspace-recents"
 import { agentRunsAndChangesMigration } from "./0004-agent-runs-and-changes"
 import { aiProviderConnectionsMigration } from "./0005-ai-provider-connections"
+import { taskSkillsMigration } from "./0006-task-skills"
+import { taskWaitingInputMigration } from "./0007-task-waiting-input"
 import type { DatabaseMigration } from "./types"
 
 export type { DatabaseMigration } from "./types"
 
-export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
+export const DATABASE_MIGRATIONS = [
   foundationMigration,
   aiProviderConfigsMigration,
   taskSessionsMigration,
   workspaceRecentsMigration,
   agentRunsAndChangesMigration,
   aiProviderConnectionsMigration,
-]
+  taskSkillsMigration,
+  taskWaitingInputMigration,
+] as const satisfies readonly DatabaseMigration[]
+
+export type DatabaseMigrationId = (typeof DATABASE_MIGRATIONS)[number]["id"]
 
 export function applyDatabaseMigrations(database: BetterSqlite3.Database) {
   database.exec(`CREATE TABLE IF NOT EXISTS __tessera_migrations (

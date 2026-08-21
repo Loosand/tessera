@@ -25,6 +25,7 @@ import { openDatabase } from "./client"
 import { DATABASE_MIGRATIONS, applyDatabaseMigrations } from "./migrations"
 import { foundationMigration } from "./migrations/0000-foundation"
 import { taskSessionsMigration } from "./migrations/0002-task-sessions"
+import { appendTaskRunEvent, findLatestTaskRun, finishTaskRun, startTaskRun } from "./task-run-repository"
 import {
   deleteTaskSession,
   findTaskSession,
@@ -33,12 +34,6 @@ import {
   renameTaskSession,
   saveTaskSession,
 } from "./task-session-repository"
-import {
-  appendTaskRunEvent,
-  findLatestTaskRun,
-  finishTaskRun,
-  startTaskRun,
-} from "./task-run-repository"
 import {
   findMostRecentWorkspace,
   findWorkspaceById,
@@ -51,8 +46,8 @@ describe("本地数据库基建", () => {
   test("首次打开会创建全部基础表", () => {
     const client = openDatabase({ path: ":memory:" })
     const tables = client.connection
-      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
-      .all() as Array<{ name: string }>
+      .prepare<[], { name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+      .all()
 
     expect(tables.map((table) => table.name)).toEqual([
       "__tessera_migrations",
@@ -74,11 +69,11 @@ describe("本地数据库基建", () => {
   test("重复执行迁移不会重复应用", () => {
     const client = openDatabase({ path: ":memory:" })
     applyDatabaseMigrations(client.connection)
-    const result = client.connection.prepare("SELECT count(*) AS count FROM __tessera_migrations").get() as {
-      count: number
-    }
+    const result = client.connection
+      .prepare<[], { count: number }>("SELECT count(*) AS count FROM __tessera_migrations")
+      .get()
 
-    expect(result.count).toBe(DATABASE_MIGRATIONS.length)
+    expect(result?.count).toBe(DATABASE_MIGRATIONS.length)
     client.close()
   })
 
@@ -132,11 +127,11 @@ describe("本地数据库基建", () => {
       .run("document-1", "workspace-1", "README.md", "hash", Date.now(), Date.now())
 
     client.connection.prepare("DELETE FROM workspaces WHERE id = ?").run("workspace-1")
-    const result = client.connection.prepare("SELECT count(*) AS count FROM document_index").get() as {
-      count: number
-    }
+    const result = client.connection
+      .prepare<[], { count: number }>("SELECT count(*) AS count FROM document_index")
+      .get()
 
-    expect(result.count).toBe(0)
+    expect(result?.count).toBe(0)
     client.close()
   })
 
@@ -233,6 +228,7 @@ describe("本地数据库基建", () => {
     saveTaskSession(client, {
       id: "chat-task",
       mode: "chat",
+      skillId: "research",
       workspaceId: null,
       title: "无工作区对话",
       status: "completed",
@@ -249,7 +245,7 @@ describe("本地数据库基建", () => {
     })
 
     expect(listRecentTaskSessions(client)).toMatchObject([
-      { id: "chat-task", mode: "chat", workspaceId: null, workspaceName: null },
+      { id: "chat-task", mode: "chat", skillId: "research", workspaceId: null, workspaceName: null },
     ])
     expect(findTaskSession(client, "chat-task")?.messagePayloads).toHaveLength(2)
     client.close()
@@ -389,6 +385,44 @@ describe("本地数据库基建", () => {
 
     deleteAiProviderConfigRecord(client, "openrouter")
     expect(findAiProviderConfigRecord(client, "openrouter")).toBeNull()
+    client.close()
+  })
+
+  test("同一兼容协议可以持久化多条独立连接", () => {
+    const client = openDatabase({ path: ":memory:" })
+    upsertAiProviderConfigRecord(client, {
+      configId: "anthropic-compatible:deepseek",
+      displayName: "DeepSeek Messages",
+      providerId: "anthropic-compatible",
+      enabled: true,
+      baseUrl: "https://api.deepseek.com/anthropic",
+      modelsJson: '[{"id":"deepseek-chat","enabled":true}]',
+      apiKeyCiphertext: "deepseek-ciphertext",
+      updatedAt: new Date(100),
+    })
+    upsertAiProviderConfigRecord(client, {
+      configId: "anthropic-compatible:relay",
+      displayName: "团队中转",
+      providerId: "anthropic-compatible",
+      enabled: true,
+      baseUrl: "https://relay.example.com/anthropic",
+      modelsJson: '[{"id":"claude-relay","enabled":true}]',
+      apiKeyCiphertext: "relay-ciphertext",
+      updatedAt: new Date(200),
+    })
+
+    expect(listAiProviderConfigRecords(client)).toMatchObject([
+      {
+        configId: "anthropic-compatible:deepseek",
+        providerId: "anthropic-compatible",
+        baseUrl: "https://api.deepseek.com/anthropic",
+      },
+      {
+        configId: "anthropic-compatible:relay",
+        providerId: "anthropic-compatible",
+        baseUrl: "https://relay.example.com/anthropic",
+      },
+    ])
     client.close()
   })
 

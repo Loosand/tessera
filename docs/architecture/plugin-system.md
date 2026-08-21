@@ -3,7 +3,7 @@
 > 代码源头：`apps/desktop/src/main/index.ts`、`apps/desktop/src/preload/index.ts`、
 > `packages/contracts/src/index.ts`、`packages/skills/src/index.ts`、`packages/agent-runtime/src/index.ts`
 >
-> 状态：规划。Electron 渲染层沙箱、窄 IPC、工作区路径校验、Skill 权限描述和 Agent 权限事件已存在；
+> 状态：规划。Electron 渲染层沙箱、窄 IPC、工作区路径校验、内置 Skill 渐进式加载/权限描述和 Agent 权限事件已存在；
 > 插件包协议、发现与安装、贡献点、插件运行容器、权限授权和社区目录均未实现。
 
 ## TL;DR
@@ -38,7 +38,7 @@ Tessera 需要让社区围绕真实工作流增加文件导入、阅读处理、
 
 | 概念 | 定义 | 状态 |
 | --- | --- | --- |
-| Skill | 可阅读、可修改的 `SKILL.md` 工作流与权限声明，不提供任意应用代码和 UI | 部分实现 |
+| Skill | 可阅读、可修改的 `SKILL.md` 工作流与权限声明，不提供任意应用代码和 UI；内置研究/写作已按需注入模型 | 部分实现 |
 | 插件包 | 清单、单文件逻辑包、可选隔离 UI、样式和文档组成的不可变发布物 | 规划 |
 | 贡献点 | 命令、设置、菜单、视图、文件处理器等宿主认可的扩展位置 | 规划 |
 | 标准插件 | 在无 Node.js 的隔离运行时中执行，只能调用授予的 Tessera API | 规划 |

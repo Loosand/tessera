@@ -111,13 +111,7 @@ describe("Agent Markdown 变更审批", () => {
       approvedMessage("approval-update", "tool-update", change, true),
     ])
     await expect(
-      service.execute(
-        "agent-change-task",
-        "tool-update",
-        change,
-        rootPath,
-        new AbortController().signal,
-      ),
+      service.execute("agent-change-task", "tool-update", change, rootPath, new AbortController().signal),
     ).resolves.toMatchObject({ status: "saved", path: "README.md" })
     expect(await readFile(join(rootPath, "README.md"), "utf8")).toBe(change.content)
     expect(service.preview("agent-change-task", "approval-update").status).toBe("applied")
@@ -188,6 +182,37 @@ describe("Agent Markdown 变更审批", () => {
       ),
     ).resolves.toMatchObject({ status: "conflict" })
     expect(await readFile(join(rootPath, "README.md"), "utf8")).toBe("# 外部版本\n")
+
+    const createRaceChange = {
+      operation: "create" as const,
+      path: "race.md",
+      content: "# Agent 候选\n",
+      reason: "测试创建竞态",
+    }
+    await service.register({
+      approvalId: "approval-create-race",
+      taskId: "agent-change-task",
+      requestId: "request-change",
+      toolCallId: "tool-create-race",
+      providerId: "deepseek",
+      modelId: "deepseek-chat",
+      rootPath,
+      change: createRaceChange,
+    })
+    service.reconcileDecisions("agent-change-task", [
+      approvedMessage("approval-create-race", "tool-create-race", createRaceChange, true),
+    ])
+    await writeFile(join(rootPath, "race.md"), "# 外部创建\n", "utf8")
+    await expect(
+      service.execute(
+        "agent-change-task",
+        "tool-create-race",
+        createRaceChange,
+        rootPath,
+        new AbortController().signal,
+      ),
+    ).resolves.toMatchObject({ status: "conflict", path: "race.md" })
+    expect(await readFile(join(rootPath, "race.md"), "utf8")).toBe("# 外部创建\n")
     client.close()
   })
 })

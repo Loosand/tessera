@@ -234,6 +234,28 @@ describe("AI 模型目录发现", () => {
     expect(new Headers(fetcher.mock.calls[1]?.[1]?.headers).get("x-api-key")).toBe("relay-key")
   })
 
+  it("兼容端点未实现模型目录时允许用户改为手动添加模型", async () => {
+    const fetcher = vi.fn<typeof fetch>(
+      async () => new Response(JSON.stringify({ error: { message: "Not Found" } }), { status: 404 }),
+    )
+
+    const request = listAiProviderModels(
+      {
+        configId: "anthropic-compatible:deepseek",
+        providerId: "anthropic-compatible",
+        apiKey: "deepseek-key",
+        baseUrl: "https://api.deepseek.com/anthropic",
+      },
+      { fetch: fetcher },
+    )
+
+    await expect(request).rejects.toMatchObject({
+      code: "catalog-unsupported",
+      message: "此兼容端点未提供模型目录；这不影响推理，请手动添加模型 ID。",
+    })
+    expect(fetcher).toHaveBeenCalledTimes(2)
+  })
+
   it("错误信息不会回显 API Key", async () => {
     const fetcher = vi.fn<typeof fetch>(
       async () => new Response(JSON.stringify({ error: { message: "invalid secret-key" } }), { status: 401 }),

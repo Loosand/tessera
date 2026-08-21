@@ -20,21 +20,41 @@ import {
   type TypesetMonoFontPreference,
   type TypesetProportionalFontPreference,
   createTypesetCssVariables,
+  isTypesetMonoFontPreference,
+  isTypesetProportionalFontPreference,
 } from "../hooks/typeset-preferences"
 import type { AppPreferences, UpdateAppPreference } from "../hooks/use-app-preferences"
 
-interface TypesetThemeBuilderProps {
-  onUpdatePreference: UpdateAppPreference
-  preferences: AppPreferences
+type TypesetThemeBuilderProps = {
+  readonly onUpdatePreference: UpdateAppPreference
+  readonly preferences: AppPreferences
 }
 
-interface TypesetRangeControlProps {
-  label: string
-  limits: { max: number; min: number; step: number }
-  onChange: (value: number) => void
-  unit: string
-  value: number
+type TypesetRangeControlProps = {
+  readonly label: string
+  readonly limits: { readonly max: number; readonly min: number; readonly step: number }
+  readonly onChange: (value: number) => void
+  readonly unit: string
+  readonly value: number
 }
+
+type TypesetFontControlProps =
+  | {
+      readonly id: string
+      readonly kind: "proportional"
+      readonly label: string
+      readonly onChange: (value: TypesetProportionalFontPreference) => void
+      readonly value: TypesetProportionalFontPreference
+    }
+  | {
+      readonly id: string
+      readonly kind: "mono"
+      readonly label: string
+      readonly onChange: (value: TypesetMonoFontPreference) => void
+      readonly value: TypesetMonoFontPreference
+    }
+
+type TypesetPreviewStyle = CSSProperties & Partial<Record<`--${string}`, string | number>>
 
 function formatValue(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/0+$/, "").replace(/\.$/, "")
@@ -75,29 +95,24 @@ function TypesetRangeControl({ label, limits, onChange, unit, value }: TypesetRa
   )
 }
 
-function TypesetFontControl({
-  id,
-  label,
-  mono = false,
-  value,
-  onChange,
-}: {
-  id: string
-  label: string
-  mono?: boolean
-  onChange: (value: string) => void
-  value: string
-}) {
-  const options = mono ? TYPESET_MONO_FONT_OPTIONS : TYPESET_PROPORTIONAL_FONT_OPTIONS
+function TypesetFontControl(props: TypesetFontControlProps) {
+  const options = props.kind === "mono" ? TYPESET_MONO_FONT_OPTIONS : TYPESET_PROPORTIONAL_FONT_OPTIONS
   return (
-    <label className="grid gap-1.5" htmlFor={id}>
-      <span className="text-xs font-medium text-foreground">{label}</span>
+    <label className="grid gap-1.5" htmlFor={props.id}>
+      <span className="text-xs font-medium text-foreground">{props.label}</span>
       <NativeSelect
-        id={id}
+        id={props.id}
         className="w-full"
         containerClassName="w-full"
-        value={value}
-        onChange={(event) => onChange(event.currentTarget.value)}
+        value={props.value}
+        onChange={(event) => {
+          const nextValue = event.currentTarget.value
+          if (props.kind === "mono") {
+            if (isTypesetMonoFontPreference(nextValue)) props.onChange(nextValue)
+            return
+          }
+          if (isTypesetProportionalFontPreference(nextValue)) props.onChange(nextValue)
+        }}
       >
         {options.map((option) => (
           <option key={option.id} value={option.id}>
@@ -110,10 +125,10 @@ function TypesetFontControl({
 }
 
 export function TypesetThemeBuilder({ preferences, onUpdatePreference }: TypesetThemeBuilderProps) {
-  const previewStyle = {
+  const previewStyle: TypesetPreviewStyle = {
     ...createTypesetCssVariables(preferences),
     maxWidth: `${preferences.typesetMeasure}ch`,
-  } as CSSProperties
+  }
 
   return (
     <div className="grid min-h-150 lg:grid-cols-[260px_minmax(0,1fr)]">
@@ -125,26 +140,24 @@ export function TypesetThemeBuilder({ preferences, onUpdatePreference }: Typeset
           </div>
           <TypesetFontControl
             id="typeset-heading-font"
+            kind="proportional"
             label="标题字体"
             value={preferences.typesetHeadingFont}
-            onChange={(value) =>
-              onUpdatePreference("typesetHeadingFont", value as TypesetProportionalFontPreference)
-            }
+            onChange={(value) => onUpdatePreference("typesetHeadingFont", value)}
           />
           <TypesetFontControl
             id="typeset-body-font"
+            kind="proportional"
             label="正文字体"
             value={preferences.typesetBodyFont}
-            onChange={(value) =>
-              onUpdatePreference("typesetBodyFont", value as TypesetProportionalFontPreference)
-            }
+            onChange={(value) => onUpdatePreference("typesetBodyFont", value)}
           />
           <TypesetFontControl
             id="typeset-mono-font"
+            kind="mono"
             label="等宽字体"
-            mono
             value={preferences.typesetMonoFont}
-            onChange={(value) => onUpdatePreference("typesetMonoFont", value as TypesetMonoFontPreference)}
+            onChange={(value) => onUpdatePreference("typesetMonoFont", value)}
           />
         </div>
 

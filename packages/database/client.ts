@@ -17,13 +17,13 @@ import { type BetterSQLite3Database, drizzle } from "drizzle-orm/better-sqlite3"
 import { applyDatabaseMigrations } from "./migrations"
 import * as schema from "./schema"
 
-export interface OpenDatabaseOptions {
-  path: string
-  readonly?: boolean
-  migrate?: boolean
+export type OpenDatabaseOptions = {
+  readonly path: string
+  readonly readonly?: boolean
+  readonly migrate?: boolean
 }
 
-export interface DatabaseClient {
+export type DatabaseClient = {
   readonly connection: BetterSqlite3.Database
   readonly db: BetterSQLite3Database<typeof schema>
   close(): void

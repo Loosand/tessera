@@ -99,11 +99,11 @@ export async function resolveAgentPath(rootPath: string, inputPath: string, allo
   return { absolutePath: canonicalTarget, relativePath: canonicalRelation }
 }
 
-interface WorkspaceFileRecord {
-  absolutePath: string
-  modifiedAt: number
-  path: string
-  size: number
+type WorkspaceFileRecord = {
+  readonly absolutePath: string
+  readonly modifiedAt: number
+  readonly path: string
+  readonly size: number
 }
 
 async function collectMarkdownFiles(
@@ -216,6 +216,11 @@ export async function resolveAgentCreatePath(rootPath: string, inputPath: string
   ) {
     throw new ReadonlyAgentToolError("工具路径不能通过链接或隐藏目录扩大访问范围。")
   }
+  const existing = await stat(candidate).catch((error: unknown) => {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return null
+    throw error
+  })
+  if (existing) throw new ReadonlyAgentToolError(`工作区内已经存在「${relation}」。`)
   return { absolutePath: candidate, relativePath: relation }
 }
 
@@ -235,8 +240,8 @@ export async function writeAgentMarkdownFile(
   const existingMetadata =
     operation === "update"
       ? await stat(target.absolutePath)
-      : await stat(target.absolutePath).catch((error: NodeJS.ErrnoException) => {
-          if (error.code === "ENOENT") return null
+      : await stat(target.absolutePath).catch((error: unknown) => {
+          if (error instanceof Error && "code" in error && error.code === "ENOENT") return null
           throw error
         })
   if (operation === "create" && existingMetadata) {
@@ -269,9 +274,9 @@ export async function writeAgentMarkdownFile(
   return readAgentMarkdownFile(rootPath, target.relativePath, new AbortController().signal)
 }
 
-export interface ReadonlyWorkspaceAgentToolOptions {
-  currentDocumentPath?: string
-  rootPath: string
+export type ReadonlyWorkspaceAgentToolOptions = {
+  readonly currentDocumentPath?: string
+  readonly rootPath: string
 }
 
 export function createReadonlyWorkspaceAgentTools({

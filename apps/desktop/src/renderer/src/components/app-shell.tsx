@@ -1,8 +1,8 @@
 /**
- * [INPUT]: 应用信息、useWorkspace 文档会话与 useTasks 任务导航状态
- * [OUTPUT]: 首页/任务/工作区保活视图、跨工作区任务恢复、平台标题栏安全区与文档主区域
+ * [INPUT]: 应用信息、useWorkspace 文档会话与含执行模式/Skill 的 useTasks 任务导航状态
+ * [OUTPUT]: 首页/Skill/任务/工作区保活视图、任务 Skill 选择协调、跨工作区任务恢复、源码行导航、平台标题栏安全区与文档主区域
  * [POS]: Tessera 桌面端的顶层产品壳层
- * [DOC]: design.md、docs/architecture.md、docs/architecture/task-navigation.md
+ * [DOC]: design.md、docs/architecture.md、docs/architecture/editor.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -10,7 +10,7 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import type { AppInfo, TaskSessionSummary } from "@tessera/contracts"
+import type { AppInfo, BuiltInTaskSkillId, TaskSessionSummary } from "@tessera/contracts"
 import { AnimatePresence, m, useReducedMotion } from "motion/react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { type DefaultEditorMode, useAppPreferences } from "../hooks/use-app-preferences"
@@ -21,8 +21,10 @@ import { AgentSidebar } from "./agent-sidebar"
 import { DocumentEditor } from "./document-editor"
 import { DocumentHeader } from "./document-header"
 import { getRichTextEditorGuard } from "./editor/editor-mode-policy"
+import { requestSourceEditorLine } from "./editor/source-code-editor-state"
 import { HomeSidebar } from "./home-sidebar"
 import { SettingsPage } from "./settings-page"
+import { SkillManagementPage } from "./skill-management-page"
 import { TaskPage } from "./task-page"
 import { WorkspaceHomePage } from "./workspace-home-page"
 import { WorkspaceSidebar } from "./workspace-sidebar"
@@ -31,7 +33,7 @@ interface AppShellProps {
   appInfo: AppInfo | undefined
 }
 
-type PrimaryView = "home" | "task" | "workspace"
+type PrimaryView = "home" | "skills" | "task" | "workspace"
 type AppView = PrimaryView | "settings"
 
 export function AppShell({ appInfo }: AppShellProps) {
@@ -96,6 +98,7 @@ export function AppShell({ appInfo }: AppShellProps) {
     renameTask,
     deleteTask,
     setActiveTaskMode,
+    setActiveTaskSkill,
     startNewTask,
   } = useTasks(workspace?.id)
 
@@ -153,15 +156,7 @@ export function AppShell({ appInfo }: AppShellProps) {
         return
       }
 
-      const sourceEditor = window.document.querySelector<HTMLTextAreaElement>("[data-source-editor]")
-      if (!sourceEditor) return
-      const position = sourceEditor.value
-        .split(/\r?\n/)
-        .slice(0, Math.max(0, line - 1))
-        .reduce((length, currentLine) => length + currentLine.length + 1, 0)
-      sourceEditor.focus()
-      sourceEditor.setSelectionRange(position, position)
-      sourceEditor.scrollTop = Math.max(0, (line - 4) * 24)
+      requestSourceEditorLine(line)
     },
     [effectiveEditorMode],
   )
@@ -245,6 +240,23 @@ export function AppShell({ appInfo }: AppShellProps) {
     setView("home")
   }, [flushPendingEdits])
 
+  const showSkills = useCallback(() => {
+    flushPendingEdits()
+    setAgentOpen(false)
+    if (compactRef.current) setSidebarOpen(false)
+    setView("skills")
+  }, [flushPendingEdits])
+
+  const createSkillTask = useCallback(
+    (skillId: BuiltInTaskSkillId) => {
+      flushPendingEdits()
+      setAgentOpen(false)
+      startNewTask("chat", null, skillId)
+      setView("task")
+    },
+    [flushPendingEdits, startNewTask],
+  )
+
   const showDocument = useCallback(
     async (relativePath: string, line?: number) => {
       if (line) {
@@ -256,15 +268,7 @@ export function AppShell({ appInfo }: AppShellProps) {
       const opened = await openDocument(relativePath)
       if (!opened || !line) return
       window.setTimeout(() => {
-        const sourceEditor = window.document.querySelector<HTMLTextAreaElement>("[data-source-editor]")
-        if (!sourceEditor) return
-        const position = sourceEditor.value
-          .split(/\r?\n/u)
-          .slice(0, Math.max(0, line - 1))
-          .reduce((length, currentLine) => length + currentLine.length + 1, 0)
-        sourceEditor.focus()
-        sourceEditor.setSelectionRange(position, position)
-        sourceEditor.scrollTop = Math.max(0, (line - 4) * 24)
+        requestSourceEditorLine(line)
       })
     },
     [flushPendingEdits, openDocument],
@@ -292,7 +296,7 @@ export function AppShell({ appInfo }: AppShellProps) {
   }, [view])
 
   const standaloneTask = view === "task" && activeTask.workspaceId === null
-  const showHomeSidebar = view === "home" || !workspace || standaloneTask
+  const showHomeSidebar = view === "home" || view === "skills" || !workspace || standaloneTask
 
   return (
     <>
@@ -336,7 +340,9 @@ export function AppShell({ appInfo }: AppShellProps) {
             >
               {showHomeSidebar ? (
                 <HomeSidebar
-                  activeItem={standaloneTask ? "new-task" : "workspaces"}
+                  activeItem={
+                    view === "skills" ? "skills" : standaloneTask ? "new-task" : "workspaces"
+                  }
                   recentTasks={recentTasks}
                   workspaces={recentWorkspaces}
                   onCollapse={() => setSidebarOpen(false)}
@@ -349,6 +355,7 @@ export function AppShell({ appInfo }: AppShellProps) {
                   onRevealWorkspace={(workspaceId) => void revealWorkspace(workspaceId)}
                   onCopyWorkspacePath={(workspaceId) => void copyWorkspacePath(workspaceId)}
                   onRemoveWorkspace={(workspaceId) => void removeRecentWorkspace(workspaceId)}
+                  onShowSkills={showSkills}
                   onShowWorkspaces={showHome}
                 />
               ) : (
@@ -410,6 +417,14 @@ export function AppShell({ appInfo }: AppShellProps) {
               onRemoveWorkspace={(workspaceId) => void removeRecentWorkspace(workspaceId)}
               onSelectWorkspace={() => void chooseWorkspace()}
               onToggleSidebar={() => setSidebarOpen((current) => !current)}
+            />
+          </div>
+
+          <div className={`${view === "skills" ? "block" : "hidden"} min-h-0 flex-1`}>
+            <SkillManagementPage
+              sidebarOpen={sidebarOpen}
+              onToggleSidebar={() => setSidebarOpen((current) => !current)}
+              onUseSkill={createSkillTask}
             />
           </div>
 
@@ -483,6 +498,7 @@ export function AppShell({ appInfo }: AppShellProps) {
               onEnsureTask={ensureActiveTask}
               onPersistTask={persistActiveTask}
               onModeChange={setActiveTaskMode}
+              onSkillChange={setActiveTaskSkill}
               onOpenDocument={showDocument}
               onToggleSidebar={() => setSidebarOpen((current) => !current)}
               onOpenSettings={openSettings}

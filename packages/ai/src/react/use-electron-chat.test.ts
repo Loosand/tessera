@@ -2,7 +2,7 @@
  * [INPUT]: 合成 Electron IPC 正文/工具增量事件与 AI SDK React Chat 状态机
  * [OUTPUT]: Transport 按顺序消费与恢复 reasoning、正文和工具 Part，并保留任务消息的回归验证
  * [POS]: use-electron-chat Transport 的流式集成测试
- * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
+ * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -74,6 +74,7 @@ describe("ElectronChatTransport", () => {
       chatId: "chat-test",
       configId: "openai-compatible",
       mode: "chat",
+      skillId: "research",
       providerId: "openai-compatible",
       modelId: "test-model",
       reasoning: "auto",
@@ -99,7 +100,7 @@ describe("ElectronChatTransport", () => {
       expect(request).toBeDefined()
       expect(listener).toBeTypeOf("function")
     })
-    expect(request).toMatchObject({ taskId: "chat-test", mode: "chat" })
+    expect(request).toMatchObject({ taskId: "chat-test", mode: "chat", skillId: "research" })
 
     const emit = (chunk: AiChatStreamChunk) => {
       if (!request || !listener) throw new Error("测试流尚未建立。")
@@ -251,6 +252,7 @@ describe("ElectronChatTransport", () => {
       chatId: "chat-detach",
       configId: "deepseek",
       mode: "chat",
+      skillId: null,
       providerId: "deepseek",
       modelId: "deepseek-v4-flash",
       reasoning: "auto",
@@ -339,6 +341,7 @@ describe("ElectronChatTransport", () => {
       chatId: "chat-resume",
       configId: "deepseek",
       mode: "chat",
+      skillId: null,
       providerId: "deepseek",
       modelId: "deepseek-v4-flash",
       reasoning: "auto",

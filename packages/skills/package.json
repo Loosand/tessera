@@ -6,10 +6,15 @@
   "type": "module",
   "exports": "./src/index.ts",
   "scripts": {
+    "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@tessera/agent-runtime": "workspace:*"
+    "@tessera/agent-runtime": "workspace:*",
+    "@tessera/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.11"
   }
 }

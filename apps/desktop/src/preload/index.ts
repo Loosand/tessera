@@ -10,91 +10,56 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import type {
-  AiChatStartInput,
-  AiChatStreamEvent,
-  AiProviderConnectionInput,
-  AiProviderSaveInput,
-  DesktopApi,
-  TaskSessionSaveInput,
-  WorkspaceChangeEvent,
-  WorkspaceEntryKind,
-} from "@tessera/contracts"
+import type { DesktopApi } from "@tessera/contracts"
 import { IPC_CHANNELS } from "@tessera/contracts"
-import { contextBridge, ipcRenderer } from "electron"
+import { contextBridge } from "electron"
+import { invokeDesktop, sendDesktop, subscribeDesktop } from "./ipc-contract"
 
-const api: DesktopApi = Object.freeze({
-  getAppInfo: () => ipcRenderer.invoke(IPC_CHANNELS.appInfo),
-  deleteAiProviderConfig: (configId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.aiProviderDeleteConfig, configId),
-  listAiProviderConfigs: () => ipcRenderer.invoke(IPC_CHANNELS.aiProviderListConfigs),
-  listAiProviderModels: (input: AiProviderConnectionInput) =>
-    ipcRenderer.invoke(IPC_CHANNELS.aiProviderListModels, input),
-  saveAiProviderConfig: (input: AiProviderSaveInput) =>
-    ipcRenderer.invoke(IPC_CHANNELS.aiProviderSaveConfig, input),
-  startAiChat: (input: AiChatStartInput) => ipcRenderer.invoke(IPC_CHANNELS.aiChatStart, input),
-  resumeAiChat: (taskId: string) => ipcRenderer.invoke(IPC_CHANNELS.aiChatResume, taskId),
-  cancelAiChat: (requestId: string) => ipcRenderer.send(IPC_CHANNELS.aiChatCancel, requestId),
-  readAgentChangePreview: (taskId: string, approvalId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.agentChangePreview, taskId, approvalId),
-  listRecentTasks: () => ipcRenderer.invoke(IPC_CHANNELS.taskListRecent),
-  listWorkspaceTasks: () => ipcRenderer.invoke(IPC_CHANNELS.taskListWorkspace),
-  readTask: (taskId: string) => ipcRenderer.invoke(IPC_CHANNELS.taskRead, taskId),
-  saveTask: (input: TaskSessionSaveInput) => ipcRenderer.invoke(IPC_CHANNELS.taskSave, input),
-  renameTask: (taskId: string, title: string) => ipcRenderer.invoke(IPC_CHANNELS.taskRename, taskId, title),
-  deleteTask: (taskId: string) => ipcRenderer.invoke(IPC_CHANNELS.taskDelete, taskId),
-  cancelClose: () => ipcRenderer.send(IPC_CHANNELS.appCancelClose),
-  confirmClose: () => ipcRenderer.send(IPC_CHANNELS.appConfirmClose),
-  getCurrentWorkspace: () => ipcRenderer.invoke(IPC_CHANNELS.workspaceCurrent),
-  selectWorkspace: () => ipcRenderer.invoke(IPC_CHANNELS.workspaceSelect),
-  listRecentWorkspaces: () => ipcRenderer.invoke(IPC_CHANNELS.workspaceRecent),
-  openRecentWorkspace: (workspaceId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.workspaceOpenRecent, workspaceId),
-  revealCurrentWorkspace: () => ipcRenderer.invoke(IPC_CHANNELS.workspaceReveal),
-  revealWorkspace: (workspaceId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.workspaceRevealRecent, workspaceId),
-  copyWorkspacePath: (workspaceId: string) => ipcRenderer.invoke(IPC_CHANNELS.workspaceCopyPath, workspaceId),
-  removeRecentWorkspace: (workspaceId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.workspaceRemoveRecent, workspaceId),
-  listWorkspaceDocuments: () => ipcRenderer.invoke(IPC_CHANNELS.workspaceListDocuments),
-  listWorkspaceDirectories: () => ipcRenderer.invoke(IPC_CHANNELS.workspaceListDirectories),
-  readDocument: (relativePath: string) => ipcRenderer.invoke(IPC_CHANNELS.documentRead, relativePath),
-  createDocument: (parentRelativePath?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.documentCreate, parentRelativePath),
-  createDirectory: (parentRelativePath?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.workspaceEntryCreateDirectory, parentRelativePath),
-  renameDocument: (relativePath: string) => ipcRenderer.invoke(IPC_CHANNELS.documentRename, relativePath),
-  renameDirectory: (relativePath: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.workspaceEntryRenameDirectory, relativePath),
-  deleteWorkspaceEntry: (relativePath: string, kind: WorkspaceEntryKind) =>
-    ipcRenderer.invoke(IPC_CHANNELS.workspaceEntryDelete, relativePath, kind),
-  revealWorkspaceEntry: (relativePath: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.workspaceEntryReveal, relativePath),
-  copyWorkspaceEntryPath: (relativePath: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.workspaceEntryCopyPath, relativePath),
-  writeDocument: (relativePath: string, content: string, expectedModifiedAt: number) =>
-    ipcRenderer.invoke(IPC_CHANNELS.documentWrite, relativePath, content, expectedModifiedAt),
-  onAiProviderConfigsChanged: (listener: () => void) => {
-    const handler = () => listener()
-    ipcRenderer.on(IPC_CHANNELS.aiProviderConfigsChanged, handler)
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.aiProviderConfigsChanged, handler)
-  },
-  onAiChatEvent: (listener: (event: AiChatStreamEvent) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, streamEvent: AiChatStreamEvent) =>
-      listener(streamEvent)
-    ipcRenderer.on(IPC_CHANNELS.aiChatEvent, handler)
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.aiChatEvent, handler)
-  },
-  onWorkspaceChanged: (listener: (event: WorkspaceChangeEvent) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, change: WorkspaceChangeEvent) => listener(change)
-    ipcRenderer.on(IPC_CHANNELS.workspaceChanged, handler)
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.workspaceChanged, handler)
-  },
-  onCloseRequested: (listener: () => void) => {
-    const handler = () => listener()
-    ipcRenderer.on(IPC_CHANNELS.appCloseRequested, handler)
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.appCloseRequested, handler)
-  },
-})
+const api = Object.freeze({
+  getAppInfo: () => invokeDesktop(IPC_CHANNELS.appInfo),
+  deleteAiProviderConfig: (configId) => invokeDesktop(IPC_CHANNELS.aiProviderDeleteConfig, configId),
+  listAiProviderConfigs: () => invokeDesktop(IPC_CHANNELS.aiProviderListConfigs),
+  listAiProviderModels: (input) => invokeDesktop(IPC_CHANNELS.aiProviderListModels, input),
+  saveAiProviderConfig: (input) => invokeDesktop(IPC_CHANNELS.aiProviderSaveConfig, input),
+  startAiChat: (input) => invokeDesktop(IPC_CHANNELS.aiChatStart, input),
+  resumeAiChat: (taskId) => invokeDesktop(IPC_CHANNELS.aiChatResume, taskId),
+  cancelAiChat: (requestId) => sendDesktop(IPC_CHANNELS.aiChatCancel, requestId),
+  readAgentChangePreview: (taskId, approvalId) =>
+    invokeDesktop(IPC_CHANNELS.agentChangePreview, taskId, approvalId),
+  listRecentTasks: () => invokeDesktop(IPC_CHANNELS.taskListRecent),
+  listWorkspaceTasks: () => invokeDesktop(IPC_CHANNELS.taskListWorkspace),
+  readTask: (taskId) => invokeDesktop(IPC_CHANNELS.taskRead, taskId),
+  saveTask: (input) => invokeDesktop(IPC_CHANNELS.taskSave, input),
+  renameTask: (taskId, title) => invokeDesktop(IPC_CHANNELS.taskRename, taskId, title),
+  deleteTask: (taskId) => invokeDesktop(IPC_CHANNELS.taskDelete, taskId),
+  cancelClose: () => sendDesktop(IPC_CHANNELS.appCancelClose),
+  confirmClose: () => sendDesktop(IPC_CHANNELS.appConfirmClose),
+  getCurrentWorkspace: () => invokeDesktop(IPC_CHANNELS.workspaceCurrent),
+  selectWorkspace: () => invokeDesktop(IPC_CHANNELS.workspaceSelect),
+  listRecentWorkspaces: () => invokeDesktop(IPC_CHANNELS.workspaceRecent),
+  openRecentWorkspace: (workspaceId) => invokeDesktop(IPC_CHANNELS.workspaceOpenRecent, workspaceId),
+  revealCurrentWorkspace: () => invokeDesktop(IPC_CHANNELS.workspaceReveal),
+  revealWorkspace: (workspaceId) => invokeDesktop(IPC_CHANNELS.workspaceRevealRecent, workspaceId),
+  copyWorkspacePath: (workspaceId) => invokeDesktop(IPC_CHANNELS.workspaceCopyPath, workspaceId),
+  removeRecentWorkspace: (workspaceId) => invokeDesktop(IPC_CHANNELS.workspaceRemoveRecent, workspaceId),
+  listWorkspaceDocuments: () => invokeDesktop(IPC_CHANNELS.workspaceListDocuments),
+  listWorkspaceDirectories: () => invokeDesktop(IPC_CHANNELS.workspaceListDirectories),
+  readDocument: (relativePath) => invokeDesktop(IPC_CHANNELS.documentRead, relativePath),
+  createDocument: (parentRelativePath) => invokeDesktop(IPC_CHANNELS.documentCreate, parentRelativePath),
+  createDirectory: (parentRelativePath) =>
+    invokeDesktop(IPC_CHANNELS.workspaceEntryCreateDirectory, parentRelativePath),
+  renameDocument: (relativePath) => invokeDesktop(IPC_CHANNELS.documentRename, relativePath),
+  renameDirectory: (relativePath) => invokeDesktop(IPC_CHANNELS.workspaceEntryRenameDirectory, relativePath),
+  deleteWorkspaceEntry: (relativePath, kind) =>
+    invokeDesktop(IPC_CHANNELS.workspaceEntryDelete, relativePath, kind),
+  revealWorkspaceEntry: (relativePath) => invokeDesktop(IPC_CHANNELS.workspaceEntryReveal, relativePath),
+  copyWorkspaceEntryPath: (relativePath) => invokeDesktop(IPC_CHANNELS.workspaceEntryCopyPath, relativePath),
+  writeDocument: (relativePath, content, expectedModifiedAt) =>
+    invokeDesktop(IPC_CHANNELS.documentWrite, relativePath, content, expectedModifiedAt),
+  onAiProviderConfigsChanged: (listener) => subscribeDesktop(IPC_CHANNELS.aiProviderConfigsChanged, listener),
+  onAiChatEvent: (listener) => subscribeDesktop(IPC_CHANNELS.aiChatEvent, listener),
+  onWorkspaceChanged: (listener) => subscribeDesktop(IPC_CHANNELS.workspaceChanged, listener),
+  onCloseRequested: (listener) => subscribeDesktop(IPC_CHANNELS.appCloseRequested, listener),
+} satisfies DesktopApi)
 
 contextBridge.exposeInMainWorld("tessera", api)

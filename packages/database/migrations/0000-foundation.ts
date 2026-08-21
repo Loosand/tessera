@@ -12,7 +12,7 @@
 
 import type { DatabaseMigration } from "./types"
 
-export const foundationMigration: DatabaseMigration = {
+export const foundationMigration = {
   id: "0000-foundation",
   statements: [
     `CREATE TABLE workspaces (
@@ -61,4 +61,4 @@ export const foundationMigration: DatabaseMigration = {
     )`,
     "CREATE INDEX permission_decisions_session_created_idx ON permission_decisions (session_id, created_at)",
   ],
-}
+} as const satisfies DatabaseMigration

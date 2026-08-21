@@ -20,11 +20,11 @@ import { AgentChangeReview } from "./agent-change-review"
 type MessagePart = UIMessage["parts"][number]
 type ToolMessagePart = Extract<MessagePart, { type: "dynamic-tool" | `tool-${string}` }>
 
-interface ToolPartProps {
-  loadAgentChangePreview?: ((approvalId: string) => Promise<AgentChangePreview>) | undefined
-  onOpenDocument?: ((path: string) => void) | undefined
-  onToolApproval?: ((approvalId: string, approved: boolean) => void) | undefined
-  part: ToolMessagePart
+type ToolPartProps = {
+  readonly loadAgentChangePreview?: ((approvalId: string) => Promise<AgentChangePreview>) | undefined
+  readonly onOpenDocument?: ((path: string) => void) | undefined
+  readonly onToolApproval?: ((approvalId: string, approved: boolean) => void) | undefined
+  readonly part: ToolMessagePart
 }
 
 const stateLabels: Record<ToolMessagePart["state"], string> = {
@@ -47,11 +47,13 @@ const toolLabels: Record<string, string> = {
   web_search: "联网搜索",
 }
 
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
 function toolResource(part: ToolMessagePart) {
-  if (!("input" in part) || !part.input || typeof part.input !== "object" || Array.isArray(part.input)) {
-    return ""
-  }
-  const input = part.input as Record<string, unknown>
+  if (!("input" in part) || !isUnknownRecord(part.input)) return ""
+  const input = part.input
   if (typeof input.path === "string") return input.path
   if (typeof input.directory === "string" && input.directory) return input.directory
   if (typeof input.query === "string") return `“${input.query}”`
@@ -76,6 +78,10 @@ export function ToolPart({ loadAgentChangePreview, onOpenDocument, onToolApprova
 
   const changeApproval =
     toolName === "write-workspace-document" && part.approval && loadAgentChangePreview ? part.approval : null
+  const manualApproval =
+    part.state === "approval-requested" && part.approval && !part.approval.isAutomatic && onToolApproval
+      ? part.approval
+      : null
 
   return (
     <div className="my-3" aria-busy={busy}>
@@ -93,20 +99,17 @@ export function ToolPart({ loadAgentChangePreview, onOpenDocument, onToolApprova
           {errorText ? ` · ${errorText}` : ""}
         </span>
       </div>
-      {changeApproval ? (
+      {changeApproval && loadAgentChangePreview ? (
         <AgentChangeReview
           approvalId={changeApproval.id}
           canDecide={
             part.state === "approval-requested" && !changeApproval.isAutomatic && Boolean(onToolApproval)
           }
-          loadPreview={loadAgentChangePreview!}
+          loadPreview={loadAgentChangePreview}
           onOpenDocument={onOpenDocument}
           onDecision={(approved) => onToolApproval?.(changeApproval.id, approved)}
         />
-      ) : part.state === "approval-requested" &&
-        part.approval &&
-        !part.approval.isAutomatic &&
-        onToolApproval ? (
+      ) : manualApproval && onToolApproval ? (
         <div className="mt-2 rounded-xl border border-border bg-background px-3.5 py-3 text-xs">
           <p className="font-medium text-foreground">这个工具需要你的确认</p>
           {part.input !== undefined ? (
@@ -119,11 +122,11 @@ export function ToolPart({ loadAgentChangePreview, onOpenDocument, onToolApprova
               type="button"
               variant="outline"
               size="xs"
-              onClick={() => onToolApproval(part.approval!.id, false)}
+              onClick={() => onToolApproval(manualApproval.id, false)}
             >
               拒绝
             </Button>
-            <Button type="button" size="xs" onClick={() => onToolApproval(part.approval!.id, true)}>
+            <Button type="button" size="xs" onClick={() => onToolApproval(manualApproval.id, true)}>
               允许执行
             </Button>
           </div>

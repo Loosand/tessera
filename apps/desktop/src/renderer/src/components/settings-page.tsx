@@ -110,9 +110,7 @@ const SETTINGS_NAVIGATION: SettingsNavigationItem[] = [
 async function listAiProviderModels(input: AiProviderConnectionInput) {
   const desktopApi = window.tessera
   if (!desktopApi) throw new Error("桌面安全桥尚未就绪，请重新打开应用。")
-  const result = await desktopApi.listAiProviderModels(input)
-  if (!result.ok) throw new Error(result.error)
-  return result.models
+  return desktopApi.listAiProviderModels(input)
 }
 
 async function listAiProviderConfigs(): Promise<AiProviderConfig[]> {

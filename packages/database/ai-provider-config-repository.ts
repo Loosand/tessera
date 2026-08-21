@@ -24,8 +24,7 @@ export function listAiProviderConfigRecords(client: DatabaseClient) {
 
 export function findAiProviderConfigRecord(client: DatabaseClient, configId: string) {
   return (
-    client.db.select().from(aiProviderConfigs).where(eq(aiProviderConfigs.configId, configId)).get() ??
-    null
+    client.db.select().from(aiProviderConfigs).where(eq(aiProviderConfigs.configId, configId)).get() ?? null
   )
 }
 

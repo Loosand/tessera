@@ -14,6 +14,7 @@ export {
   AI_PROVIDER_DEFINITIONS,
   type AiProviderDefinition,
   type AiProviderDraft,
+  type AiProviderDraftUpdate,
   type AiProviderDrafts,
   type AiProviderId,
   type AiProviderModelDraft,

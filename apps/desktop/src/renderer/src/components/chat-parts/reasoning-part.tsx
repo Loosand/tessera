@@ -1,6 +1,6 @@
 /**
  * [INPUT]: AI SDK 单个 reasoning Part 及当前回复流式状态
- * [OUTPUT]: 可展开、计时并渲染 Markdown 语义的模型思考过程块
+ * [OUTPUT]: 可展开、计时、限高滚动并渲染 Markdown 语义的模型思考过程块
  * [POS]: ChatMessage 内按原始 Part 顺序呈现的 reasoning 单元
  * [DOC]: design.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/ai-providers.md
  *
@@ -13,7 +13,7 @@
 import type { UIMessage } from "@tessera/ai/react"
 import { ArrowDown01Icon, BrainCircuitIcon } from "@tessera/design-system/components/icons"
 import { Icon } from "@tessera/design-system/components/ui/icon"
-import { useEffect, useRef, useState } from "react"
+import React, { useEffect, useRef, useState } from "react"
 import { ChatMarkdown } from "./chat-markdown"
 
 type ReasoningMessagePart = Extract<UIMessage["parts"][number], { type: "reasoning" }>
@@ -31,6 +31,8 @@ function reasoningLabel(streaming: boolean, elapsedSeconds: number) {
 export function ReasoningPart({ part, streaming }: ReasoningPartProps) {
   const [expanded, setExpanded] = useState(true)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
+  const contentRef = useRef<HTMLElement>(null)
+  const followTailRef = useRef(true)
   const startedAtRef = useRef<number | null>(null)
 
   useEffect(() => {
@@ -47,13 +49,34 @@ export function ReasoningPart({ part, streaming }: ReasoningPartProps) {
     return () => window.clearInterval(timer)
   }, [streaming])
 
+  useEffect(() => {
+    const content = contentRef.current
+    const markdown = content?.firstElementChild
+    if (!content || !markdown || !expanded || !streaming) return
+
+    const followTail = () => {
+      if (followTailRef.current) content.scrollTop = content.scrollHeight
+    }
+    followTail()
+    const observer = new ResizeObserver(followTail)
+    observer.observe(markdown)
+    return () => observer.disconnect()
+  }, [expanded, streaming])
+
+  const toggleExpanded = () => {
+    setExpanded((current) => {
+      if (!current) followTailRef.current = true
+      return !current
+    })
+  }
+
   return (
     <section className="my-3 text-muted-foreground" aria-busy={streaming}>
       <button
         type="button"
         className="flex items-center gap-2 rounded-md py-1 text-sm transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         aria-expanded={expanded}
-        onClick={() => setExpanded((current) => !current)}
+        onClick={toggleExpanded}
       >
         <Icon icon={BrainCircuitIcon} size={15} />
         <span>{reasoningLabel(streaming, elapsedSeconds)}</span>
@@ -65,9 +88,19 @@ export function ReasoningPart({ part, streaming }: ReasoningPartProps) {
       </button>
       {expanded ? (
         <div className="mt-2 ml-[7px] border-l border-border pl-[23px]">
-          <ChatMarkdown compact className="text-[13px] leading-6 text-muted-foreground/90">
-            {part.text || (streaming ? "正在生成思考过程…" : "模型未返回可展示的思考文本。")}
-          </ChatMarkdown>
+          <section
+            aria-label="模型思考过程"
+            className="max-h-48 overflow-y-auto pr-2 [scrollbar-gutter:stable] focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            onScroll={(event) => {
+              const content = event.currentTarget
+              followTailRef.current = content.scrollHeight - content.scrollTop - content.clientHeight <= 24
+            }}
+            ref={contentRef}
+          >
+            <ChatMarkdown compact className="text-[13px] leading-6 text-muted-foreground/90">
+              {part.text || (streaming ? "正在生成思考过程…" : "模型未返回可展示的思考文本。")}
+            </ChatMarkdown>
+          </section>
         </div>
       ) : null}
     </section>

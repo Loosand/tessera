@@ -1,8 +1,8 @@
 /**
- * [INPUT]: Electron 生命周期、共享 IPC 契约、AI Chat/Agent 配置、Agent 变更服务、模型服务、safeStorage 与 Tessera 核心服务
- * [OUTPUT]: 受限工作区条目/Agent 工具、SQLite 可恢复后台 AI 运行、Diff 审批、持久化 AI 配置/任务会话、关闭保存握手和桌面窗口
+ * [INPUT]: Electron 生命周期、共享 IPC 契约、AI Chat/Agent/Skill 配置、Agent 变更服务、模型服务、safeStorage 与 Tessera 核心服务
+ * [OUTPUT]: 受限工作区条目/Agent 工具、Skill 校验后的 SQLite 可恢复后台 AI 运行、Diff 审批、持久化 AI 配置/任务会话、关闭保存握手和桌面窗口
  * [POS]: Electron 主进程入口与平台安全边界
- * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/database.md、docs/architecture/task-navigation.md
+ * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/database.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -22,34 +22,31 @@ import {
   streamAiAgent,
   streamAiChat,
 } from "@tessera/ai/server"
-import type { DesktopApi } from "@tessera/contracts"
 import {
   type AiChatStartInput,
   type AiChatStreamChunk,
   type AiChatStreamEvent,
-  type AiProviderConnectionInput,
   type AiProviderId,
-  type AiProviderSaveInput,
   type DocumentSnapshot,
   type DocumentWriteResult,
   IPC_CHANNELS,
-  type TaskSessionSaveInput,
   type WorkspaceDirectoryEntry,
   type WorkspaceDocumentEntry,
   type WorkspaceEntryKind,
   type WorkspaceInfo,
+  isAiProviderId,
 } from "@tessera/contracts"
 import { createAppInfo } from "@tessera/core"
 import {
-  appendTaskRunEvent,
   type DatabaseClient,
+  appendTaskRunEvent,
   findLatestTaskRun,
   findMostRecentWorkspace,
   findWorkspaceById,
   finishTaskRun,
   hideRecentWorkspace,
-  listRunningTaskRuns,
   listRecentWorkspaces,
+  listRunningTaskRuns,
   openDatabase,
   saveWorkspace,
   startTaskRun,
@@ -62,11 +59,11 @@ import {
   app,
   clipboard,
   dialog,
-  ipcMain,
   shell,
 } from "electron"
+import { AgentChangeError, type AgentChangeService, createAgentChangeService } from "./agent-change-service"
 import { type DesktopAiService, createDesktopAiService } from "./ai-service"
-import { type AgentChangeService, createAgentChangeService } from "./agent-change-service"
+import { handleDesktopInvoke, onDesktopSend } from "./ipc-contract"
 import { createReadonlyWorkspaceAgentTools } from "./read-only-agent-tools"
 import { type DesktopTaskService, createDesktopTaskService } from "./task-service"
 
@@ -76,7 +73,7 @@ const MARKDOWN_EXTENSIONS = new Set([".md", ".markdown"])
 const IGNORED_DIRECTORIES = new Set([".git", ".tessera", "node_modules"])
 const WORKSPACE_CHANGE_DEBOUNCE_MS = 120
 
-interface WorkspaceSession {
+type WorkspaceSession = {
   workspace: WorkspaceInfo
   watcher: FSWatcher
   pendingPaths: Set<string>
@@ -93,7 +90,7 @@ let agentChangeService: AgentChangeService | null = null
 let appQuitApproved = false
 let appQuitRequested = false
 
-interface ActiveAiChat {
+type ActiveAiChat = {
   active: boolean
   abortController: AbortController
   configId: string
@@ -202,8 +199,12 @@ function abortAiChatsForWebContents(webContentsId: number) {
 }
 
 function aiChatErrorMessage(error: unknown) {
-  if (error instanceof AiProviderConfigError) return error.message
+  if (error instanceof AiProviderConfigError || error instanceof AgentChangeError) return error.message
   return "模型请求失败，请检查供应商配置、模型状态与网络连接。"
+}
+
+function hasErrorCode(error: unknown, code: string) {
+  return error instanceof Error && "code" in error && error.code === code
 }
 
 function isSafeExternalUrl(value: string) {
@@ -493,7 +494,7 @@ async function renameDocument(
     await stat(destinationPath)
     throw new Error("同一位置已存在同名文档。")
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+    if (!hasErrorCode(error, "ENOENT")) throw error
   }
 
   await rename(sourcePath, destinationPath)
@@ -518,7 +519,7 @@ async function renameDirectory(
     await stat(destinationPath)
     throw new Error("同一位置已存在同名文件夹。")
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+    if (!hasErrorCode(error, "ENOENT")) throw error
   }
 
   await rename(sourcePath, destinationPath)
@@ -586,16 +587,16 @@ async function writeDocument(
 }
 
 function registerIpcHandlers() {
-  const getAppInfo: DesktopApi["getAppInfo"] = async () =>
+  const getAppInfo = async () =>
     createAppInfo({
       name: app.getName(),
       version: app.getVersion(),
       platform: process.platform,
     })
 
-  ipcMain.handle(IPC_CHANNELS.appInfo, getAppInfo)
-  ipcMain.handle(IPC_CHANNELS.aiProviderListConfigs, () => requireDesktopAiService().listConfigs())
-  ipcMain.handle(IPC_CHANNELS.aiProviderSaveConfig, (_event, input: AiProviderSaveInput) => {
+  handleDesktopInvoke(IPC_CHANNELS.appInfo, getAppInfo)
+  handleDesktopInvoke(IPC_CHANNELS.aiProviderListConfigs, () => requireDesktopAiService().listConfigs())
+  handleDesktopInvoke(IPC_CHANNELS.aiProviderSaveConfig, (_event, input) => {
     try {
       const config = requireDesktopAiService().saveConfig(input)
       notifyAiProviderConfigsChanged()
@@ -607,7 +608,7 @@ function registerIpcHandlers() {
       }
     }
   })
-  ipcMain.handle(IPC_CHANNELS.aiProviderDeleteConfig, (_event, configId: string) => {
+  handleDesktopInvoke(IPC_CHANNELS.aiProviderDeleteConfig, (_event, configId) => {
     try {
       requireDesktopAiService().deleteConfig(configId)
       notifyAiProviderConfigsChanged()
@@ -619,7 +620,7 @@ function registerIpcHandlers() {
       }
     }
   })
-  ipcMain.handle(IPC_CHANNELS.aiProviderListModels, async (_event, input: AiProviderConnectionInput) => {
+  handleDesktopInvoke(IPC_CHANNELS.aiProviderListModels, async (_event, input) => {
     try {
       const connection = requireDesktopAiService().resolveDiscoveryConnection(input)
       return { ok: true, models: await listAiProviderModels(connection) }
@@ -634,7 +635,7 @@ function registerIpcHandlers() {
       }
     }
   })
-  ipcMain.handle(IPC_CHANNELS.aiChatStart, async (event, input: AiChatStartInput) => {
+  handleDesktopInvoke(IPC_CHANNELS.aiChatStart, async (event, input) => {
     try {
       if (activeAiChats.has(input.requestId)) {
         throw new AiProviderConfigError("这个对话请求正在运行，请先停止后重试。")
@@ -645,7 +646,7 @@ function registerIpcHandlers() {
       }
       if (previousRun) releaseAiChatRun(previousRun)
       const workspace = activeWorkspaces.get(event.sender.id)?.workspace ?? null
-      requireDesktopTaskService().authorizeTurn(input.taskId, input.mode, workspace)
+      requireDesktopTaskService().authorizeTurn(input.taskId, input.mode, workspace, input.skillId)
       if (input.mode === "agent") {
         requireAgentChangeService().reconcileDecisions(input.taskId, input.messages)
       }
@@ -696,7 +697,7 @@ function registerIpcHandlers() {
               providerId: input.providerId,
               modelId: input.modelId,
               rootPath: workspace.rootPath,
-              change: pending.input as Parameters<AgentChangeService["register"]>[0]["change"],
+              change: pending.input,
             })
           }
         }
@@ -744,7 +745,7 @@ function registerIpcHandlers() {
       return { ok: false, error: aiChatErrorMessage(error) }
     }
   })
-  ipcMain.handle(IPC_CHANNELS.aiChatResume, (event, taskId: string) => {
+  handleDesktopInvoke(IPC_CHANNELS.aiChatResume, (event, taskId) => {
     try {
       const task = requireDesktopTaskService().read(taskId)
       const run = aiChatRunsByTask.get(taskId)
@@ -764,16 +765,15 @@ function registerIpcHandlers() {
       if (task.status !== "running" || !databaseClient) return { ok: true, run: null }
       const persisted = findLatestTaskRun(databaseClient, taskId)
       if (!persisted) return { ok: true, run: null }
+      if (!isAiProviderId(persisted.providerId)) throw new Error("任务使用了不支持的 AI 供应商。")
       return {
         ok: true,
         run: {
           active: persisted.status === "running",
           configId: persisted.configId ?? persisted.providerId,
-          events: persisted.events.map(
-            (record) => JSON.parse(record.payloadJson) as AiChatStreamEvent,
-          ),
+          events: persisted.events.map((record) => JSON.parse(record.payloadJson) as AiChatStreamEvent),
           modelId: persisted.modelId,
-          providerId: persisted.providerId as AiProviderId,
+          providerId: persisted.providerId,
           requestId: persisted.requestId,
         },
       }
@@ -781,32 +781,32 @@ function registerIpcHandlers() {
       return { ok: false, error: "无法恢复这个任务的生成流。" }
     }
   })
-  ipcMain.handle(IPC_CHANNELS.agentChangePreview, (event, taskId: string, approvalId: string) => {
+  handleDesktopInvoke(IPC_CHANNELS.agentChangePreview, (event, taskId, approvalId) => {
     const workspace = activeWorkspaces.get(event.sender.id)?.workspace ?? null
     requireDesktopTaskService().authorizeTurn(taskId, "agent", workspace)
     return requireAgentChangeService().preview(taskId, approvalId)
   })
-  ipcMain.on(IPC_CHANNELS.aiChatCancel, (event, requestId: string) => {
+  onDesktopSend(IPC_CHANNELS.aiChatCancel, (event, requestId) => {
     const active = activeAiChats.get(requestId)
     if (!active || active.webContentsId !== event.sender.id) return
     active.abortController.abort("用户已停止生成")
   })
-  ipcMain.on(IPC_CHANNELS.appCancelClose, (event) => {
+  onDesktopSend(IPC_CHANNELS.appCancelClose, (event) => {
     requestedWindowCloseIds.delete(event.sender.id)
     appQuitRequested = false
   })
-  ipcMain.on(IPC_CHANNELS.appConfirmClose, (event) => {
+  onDesktopSend(IPC_CHANNELS.appConfirmClose, (event) => {
     const window = BrowserWindow.fromWebContents(event.sender)
     if (!window || !requestedWindowCloseIds.has(event.sender.id)) return
     requestedWindowCloseIds.delete(event.sender.id)
     approvedWindowCloseIds.add(event.sender.id)
     window.close()
   })
-  ipcMain.handle(
+  handleDesktopInvoke(
     IPC_CHANNELS.workspaceCurrent,
     (event) => activeWorkspaces.get(event.sender.id)?.workspace ?? null,
   )
-  ipcMain.handle(IPC_CHANNELS.workspaceSelect, async (event) => {
+  handleDesktopInvoke(IPC_CHANNELS.workspaceSelect, async (event) => {
     const window = BrowserWindow.fromWebContents(event.sender)
     const options: OpenDialogOptions = {
       title: "打开工作区",
@@ -829,33 +829,33 @@ function registerIpcHandlers() {
     persistWorkspace(workspace)
     return workspace
   })
-  ipcMain.handle(IPC_CHANNELS.workspaceRecent, () => {
+  handleDesktopInvoke(IPC_CHANNELS.workspaceRecent, () => {
     if (!databaseClient) return []
     return listRecentWorkspaces(databaseClient)
       .map(workspaceFromRecord)
       .filter((workspace): workspace is WorkspaceInfo => workspace !== null)
   })
-  ipcMain.handle(IPC_CHANNELS.taskListRecent, () => {
+  handleDesktopInvoke(IPC_CHANNELS.taskListRecent, () => {
     return requireDesktopTaskService().listRecent()
   })
-  ipcMain.handle(IPC_CHANNELS.taskListWorkspace, (event) => {
+  handleDesktopInvoke(IPC_CHANNELS.taskListWorkspace, (event) => {
     const workspace = workspaceForEvent(event)
     return requireDesktopTaskService().listWorkspace(workspace.id)
   })
-  ipcMain.handle(IPC_CHANNELS.taskRead, (_event, taskId: string) => {
+  handleDesktopInvoke(IPC_CHANNELS.taskRead, (_event, taskId) => {
     return requireDesktopTaskService().read(taskId)
   })
-  ipcMain.handle(IPC_CHANNELS.taskSave, (event, input: TaskSessionSaveInput) => {
+  handleDesktopInvoke(IPC_CHANNELS.taskSave, (event, input) => {
     const workspace = activeWorkspaces.get(event.sender.id)?.workspace ?? null
     const snapshot = requireDesktopTaskService().save(input, workspace)
     const run = aiChatRunsByTask.get(input.id)
     if (snapshot.status !== "running" && run && !run.active) releaseAiChatRun(run)
     return snapshot
   })
-  ipcMain.handle(IPC_CHANNELS.taskRename, (_event, taskId: string, title: string) => {
+  handleDesktopInvoke(IPC_CHANNELS.taskRename, (_event, taskId, title) => {
     return requireDesktopTaskService().rename(taskId, title)
   })
-  ipcMain.handle(IPC_CHANNELS.taskDelete, async (event, taskId: string) => {
+  handleDesktopInvoke(IPC_CHANNELS.taskDelete, async (event, taskId) => {
     const taskService = requireDesktopTaskService()
     const task = taskService.read(taskId)
     const options = {
@@ -880,7 +880,7 @@ function registerIpcHandlers() {
     }
     return taskService.delete(taskId)
   })
-  ipcMain.handle(IPC_CHANNELS.workspaceOpenRecent, (event, workspaceId: string) => {
+  handleDesktopInvoke(IPC_CHANNELS.workspaceOpenRecent, (event, workspaceId) => {
     if (!databaseClient || !workspaceId) throw new Error("找不到这个最近工作区。")
     const record = findWorkspaceById(databaseClient, workspaceId)
     const workspace = record ? workspaceFromRecord(record) : null
@@ -889,23 +889,23 @@ function registerIpcHandlers() {
     persistWorkspace(workspace)
     return workspace
   })
-  ipcMain.handle(IPC_CHANNELS.workspaceReveal, (event) => {
+  handleDesktopInvoke(IPC_CHANNELS.workspaceReveal, (event) => {
     shell.showItemInFolder(workspaceForEvent(event).rootPath)
   })
-  ipcMain.handle(IPC_CHANNELS.workspaceRevealRecent, (_event, workspaceId: string) => {
+  handleDesktopInvoke(IPC_CHANNELS.workspaceRevealRecent, (_event, workspaceId) => {
     if (!databaseClient || !workspaceId) throw new Error("找不到这个最近工作区。")
     const record = findWorkspaceById(databaseClient, workspaceId)
     const workspace = record ? workspaceFromRecord(record) : null
     if (!workspace) throw new Error("工作区文件夹已经移动或不可访问。")
     shell.showItemInFolder(workspace.rootPath)
   })
-  ipcMain.handle(IPC_CHANNELS.workspaceCopyPath, (_event, workspaceId: string) => {
+  handleDesktopInvoke(IPC_CHANNELS.workspaceCopyPath, (_event, workspaceId) => {
     if (!databaseClient || !workspaceId) throw new Error("找不到这个最近工作区。")
     const record = findWorkspaceById(databaseClient, workspaceId)
     if (!record) throw new Error("找不到这个最近工作区。")
     clipboard.writeText(record.rootPath)
   })
-  ipcMain.handle(IPC_CHANNELS.workspaceRemoveRecent, async (event, workspaceId: string) => {
+  handleDesktopInvoke(IPC_CHANNELS.workspaceRemoveRecent, async (event, workspaceId) => {
     if (!databaseClient || !workspaceId) throw new Error("找不到这个最近工作区。")
     const record = findWorkspaceById(databaseClient, workspaceId)
     if (!record) throw new Error("找不到这个最近工作区。")
@@ -925,27 +925,27 @@ function registerIpcHandlers() {
       : await dialog.showMessageBox(options)
     return result.response === 0 ? hideRecentWorkspace(databaseClient, workspaceId) : false
   })
-  ipcMain.handle(IPC_CHANNELS.workspaceListDocuments, async (event) => {
+  handleDesktopInvoke(IPC_CHANNELS.workspaceListDocuments, async (event) => {
     const workspace = workspaceForEvent(event)
     return listMarkdownDocuments(workspace.rootPath)
   })
-  ipcMain.handle(IPC_CHANNELS.workspaceListDirectories, async (event) => {
+  handleDesktopInvoke(IPC_CHANNELS.workspaceListDirectories, async (event) => {
     const workspace = workspaceForEvent(event)
     return listWorkspaceDirectories(workspace.rootPath)
   })
-  ipcMain.handle(IPC_CHANNELS.documentRead, async (event, relativePath: string) => {
+  handleDesktopInvoke(IPC_CHANNELS.documentRead, async (event, relativePath) => {
     const workspace = workspaceForEvent(event)
     return readDocument(workspace.rootPath, relativePath)
   })
-  ipcMain.handle(IPC_CHANNELS.documentCreate, async (event, parentRelativePath?: string) => {
+  handleDesktopInvoke(IPC_CHANNELS.documentCreate, async (event, parentRelativePath) => {
     const workspace = workspaceForEvent(event)
     return createDocument(workspace.rootPath, parentRelativePath)
   })
-  ipcMain.handle(IPC_CHANNELS.workspaceEntryCreateDirectory, async (event, parentRelativePath?: string) => {
+  handleDesktopInvoke(IPC_CHANNELS.workspaceEntryCreateDirectory, async (event, parentRelativePath) => {
     const workspace = workspaceForEvent(event)
     return createDirectory(workspace.rootPath, parentRelativePath)
   })
-  ipcMain.handle(IPC_CHANNELS.documentRename, async (event, relativePath: string) => {
+  handleDesktopInvoke(IPC_CHANNELS.documentRename, async (event, relativePath) => {
     const workspace = workspaceForEvent(event)
     const sourcePath = await resolveWorkspacePath(workspace.rootPath, relativePath)
     const window = BrowserWindow.fromWebContents(event.sender)
@@ -964,7 +964,7 @@ function registerIpcHandlers() {
     if (selection.canceled || !selection.filePath) return null
     return renameDocument(workspace.rootPath, relativePath, selection.filePath)
   })
-  ipcMain.handle(IPC_CHANNELS.workspaceEntryRenameDirectory, async (event, relativePath: string) => {
+  handleDesktopInvoke(IPC_CHANNELS.workspaceEntryRenameDirectory, async (event, relativePath) => {
     const workspace = workspaceForEvent(event)
     const sourcePath = await resolveWorkspacePath(workspace.rootPath, relativePath)
     const window = BrowserWindow.fromWebContents(event.sender)
@@ -982,30 +982,27 @@ function registerIpcHandlers() {
     if (selection.canceled || !selection.filePath) return null
     return renameDirectory(workspace.rootPath, relativePath, selection.filePath)
   })
-  ipcMain.handle(
-    IPC_CHANNELS.workspaceEntryDelete,
-    async (event, relativePath: string, kind: WorkspaceEntryKind) => {
-      if (kind !== "document" && kind !== "directory") throw new Error("工作区条目类型无效。")
-      const workspace = workspaceForEvent(event)
-      return deleteWorkspaceEntry(
-        BrowserWindow.fromWebContents(event.sender),
-        workspace.rootPath,
-        relativePath,
-        kind,
-      )
-    },
-  )
-  ipcMain.handle(IPC_CHANNELS.workspaceEntryReveal, async (event, relativePath: string) => {
+  handleDesktopInvoke(IPC_CHANNELS.workspaceEntryDelete, async (event, relativePath, kind) => {
+    if (kind !== "document" && kind !== "directory") throw new Error("工作区条目类型无效。")
+    const workspace = workspaceForEvent(event)
+    return deleteWorkspaceEntry(
+      BrowserWindow.fromWebContents(event.sender),
+      workspace.rootPath,
+      relativePath,
+      kind,
+    )
+  })
+  handleDesktopInvoke(IPC_CHANNELS.workspaceEntryReveal, async (event, relativePath) => {
     const workspace = workspaceForEvent(event)
     shell.showItemInFolder(await resolveWorkspacePath(workspace.rootPath, relativePath))
   })
-  ipcMain.handle(IPC_CHANNELS.workspaceEntryCopyPath, async (event, relativePath: string) => {
+  handleDesktopInvoke(IPC_CHANNELS.workspaceEntryCopyPath, async (event, relativePath) => {
     const workspace = workspaceForEvent(event)
     clipboard.writeText(await resolveWorkspacePath(workspace.rootPath, relativePath))
   })
-  ipcMain.handle(
+  handleDesktopInvoke(
     IPC_CHANNELS.documentWrite,
-    async (event, relativePath: string, content: string, expectedModifiedAt: number) => {
+    async (event, relativePath, content, expectedModifiedAt) => {
       const workspace = workspaceForEvent(event)
       return writeDocument(workspace.rootPath, relativePath, content, expectedModifiedAt)
     },

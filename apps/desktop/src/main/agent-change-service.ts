@@ -30,24 +30,37 @@ import {
 
 const MAX_REASON_CHARACTERS = 2_000
 
-export interface WorkspaceDocumentChangeInput {
-  baseContentHash?: string
-  baseModifiedAt?: number
-  content: string
-  operation: "create" | "update"
-  path: string
-  reason: string
+export class AgentChangeError extends Error {
+  override readonly name = "AgentChangeError"
 }
 
-interface RegisterAgentChangeInput {
-  approvalId: string
-  change: WorkspaceDocumentChangeInput
-  modelId: string
-  providerId: string
-  requestId: string
-  rootPath: string
-  taskId: string
-  toolCallId: string
+type WorkspaceDocumentChangeBase = {
+  readonly content: string
+  readonly path: string
+  readonly reason: string
+}
+
+export type WorkspaceDocumentChangeInput =
+  | (WorkspaceDocumentChangeBase & {
+      readonly baseContentHash?: never
+      readonly baseModifiedAt?: never
+      readonly operation: "create"
+    })
+  | (WorkspaceDocumentChangeBase & {
+      readonly baseContentHash: string
+      readonly baseModifiedAt: number
+      readonly operation: "update"
+    })
+
+type RegisterAgentChangeInput = {
+  readonly approvalId: string
+  readonly change: unknown
+  readonly modelId: string
+  readonly providerId: string
+  readonly requestId: string
+  readonly rootPath: string
+  readonly taskId: string
+  readonly toolCallId: string
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -55,7 +68,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export function parseWorkspaceDocumentChange(value: unknown): WorkspaceDocumentChangeInput {
-  if (!isRecord(value)) throw new Error("Agent 变更输入无效。")
+  if (!isRecord(value)) throw new AgentChangeError("Agent 变更输入无效。")
   const operation = value.operation
   const path = value.path
   const content = value.content
@@ -71,25 +84,24 @@ export function parseWorkspaceDocumentChange(value: unknown): WorkspaceDocumentC
     reason.length > MAX_REASON_CHARACTERS ||
     Buffer.byteLength(content, "utf8") > MAX_AGENT_MARKDOWN_BYTES
   ) {
-    throw new Error("Agent 变更输入无效。")
-  }
-  if (
-    operation === "update" &&
-    (typeof baseModifiedAt !== "number" ||
-      !Number.isFinite(baseModifiedAt) ||
-      typeof baseContentHash !== "string" ||
-      !/^[a-f0-9]{64}$/u.test(baseContentHash))
-  ) {
-    throw new Error("更新文档必须携带读取时的基准版本。")
+    throw new AgentChangeError("Agent 变更输入无效。")
   }
   if (operation === "update") {
+    if (
+      typeof baseModifiedAt !== "number" ||
+      !Number.isFinite(baseModifiedAt) ||
+      typeof baseContentHash !== "string" ||
+      !/^[a-f0-9]{64}$/u.test(baseContentHash)
+    ) {
+      throw new AgentChangeError("更新文档必须携带读取时的基准版本。")
+    }
     return {
       operation,
       path,
       content,
       reason: reason.trim(),
-      baseModifiedAt: baseModifiedAt as number,
-      baseContentHash: baseContentHash as string,
+      baseModifiedAt,
+      baseContentHash,
     }
   }
   return { operation, path, content, reason: reason.trim() }
@@ -109,13 +121,12 @@ function proposalMatchesChange(proposal: AgentChangeProposal, change: WorkspaceD
 function toolParts(messages: readonly TaskMessage[]) {
   return messages.flatMap((message) =>
     message.parts.filter(
-      (part): part is TaskToolMessagePart =>
-        part.type === "dynamic-tool" || part.type.startsWith("tool-"),
+      (part): part is TaskToolMessagePart => part.type === "dynamic-tool" || part.type.startsWith("tool-"),
     ),
   )
 }
 
-export interface AgentChangeService {
+export type AgentChangeService = {
   execute(
     taskId: string,
     toolCallId: string,
@@ -131,29 +142,22 @@ export interface AgentChangeService {
 export function createAgentChangeService(client: DatabaseClient): AgentChangeService {
   return {
     register: async (input) => {
-      const change = parseWorkspaceDocumentChange(input.change)
+      let change = parseWorkspaceDocumentChange(input.change)
       let baseContent: string | null = null
       let baseModifiedAt: Date | null = null
       let baseContentHash: string | null = null
 
       if (change.operation === "update") {
-        const current = await readAgentMarkdownFile(
-          input.rootPath,
-          change.path,
-          new AbortController().signal,
-        )
-        if (
-          current.modifiedAt !== change.baseModifiedAt ||
-          current.contentHash !== change.baseContentHash
-        ) {
-          throw new Error(`文档「${current.path}」已发生变化，请重新读取后再提出修改。`)
+        const current = await readAgentMarkdownFile(input.rootPath, change.path, new AbortController().signal)
+        if (current.modifiedAt !== change.baseModifiedAt || current.contentHash !== change.baseContentHash) {
+          throw new AgentChangeError(`文档「${current.path}」已发生变化，请重新读取后再提出修改。`)
         }
         baseContent = current.content
         baseModifiedAt = new Date(current.modifiedAt)
         baseContentHash = current.contentHash
       } else {
         const target = await resolveAgentCreatePath(input.rootPath, change.path)
-        change.path = target.relativePath
+        change = { ...change, path: target.relativePath }
       }
 
       const proposal = saveAgentChangeProposal(client, {
@@ -174,7 +178,7 @@ export function createAgentChangeService(client: DatabaseClient): AgentChangeSer
         createdAt: new Date(),
       })
       if (!proposal || !proposalMatchesChange(proposal, change)) {
-        throw new Error("这个 Agent 审批请求与已冻结的候选内容不一致。")
+        throw new AgentChangeError("这个 Agent 审批请求与已冻结的候选内容不一致。")
       }
     },
     reconcileDecisions: (taskId, messages) => {
@@ -182,11 +186,11 @@ export function createAgentChangeService(client: DatabaseClient): AgentChangeSer
         if (part.state !== "approval-responded" || !part.approval) continue
         const proposal = findAgentChangeProposal(client, part.approval.id)
         if (!proposal || proposal.taskId !== taskId || proposal.toolCallId !== part.toolCallId) {
-          throw new Error("找不到对应的 Agent 变更提案，无法继续执行。")
+          throw new AgentChangeError("找不到对应的 Agent 变更提案，无法继续执行。")
         }
         const change = parseWorkspaceDocumentChange(part.input)
         if (!proposalMatchesChange(proposal, change)) {
-          throw new Error("Agent 变更提案在审批后发生了变化，已阻止执行。")
+          throw new AgentChangeError("Agent 变更提案在审批后发生了变化，已阻止执行。")
         }
         if (proposal.status === "pending") {
           decideAgentChangeProposal(
@@ -199,11 +203,11 @@ export function createAgentChangeService(client: DatabaseClient): AgentChangeSer
       }
     },
     execute: async (taskId, toolCallId, value, rootPath, signal) => {
-      if (signal.aborted) throw new Error("Agent 运行已停止。")
+      if (signal.aborted) throw new AgentChangeError("Agent 运行已停止。")
       const change = parseWorkspaceDocumentChange(value)
       const proposal = findAgentChangeProposalByToolCall(client, taskId, toolCallId)
       if (!proposal || proposal.status !== "approved" || !proposalMatchesChange(proposal, change)) {
-        throw new Error("这个变更尚未获得有效批准。")
+        throw new AgentChangeError("这个变更尚未获得有效批准。")
       }
 
       try {
@@ -221,12 +225,7 @@ export function createAgentChangeService(client: DatabaseClient): AgentChangeSer
             }
           }
         }
-        const document = await writeAgentMarkdownFile(
-          rootPath,
-          change.path,
-          change.content,
-          change.operation,
-        )
+        const document = await writeAgentMarkdownFile(rootPath, change.path, change.content, change.operation)
         completeAgentChangeProposal(client, proposal.approvalId, "applied")
         return {
           status: "saved",
@@ -237,13 +236,27 @@ export function createAgentChangeService(client: DatabaseClient): AgentChangeSer
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : "写入 Markdown 文档失败。"
+        const createConflict =
+          change.operation === "create" &&
+          ((error instanceof Error && "code" in error && error.code === "EEXIST") ||
+            message.includes("已经存在"))
+        if (createConflict) {
+          completeAgentChangeProposal(client, proposal.approvalId, "conflict", "目标文档已存在")
+          return {
+            status: "conflict",
+            path: change.path,
+            message: "审批期间目标文档已被创建，未覆盖任何内容。请重新选择路径或生成新的候选修改。",
+          }
+        }
         completeAgentChangeProposal(client, proposal.approvalId, "failed", message)
-        throw new Error(message)
+        throw new AgentChangeError(message)
       }
     },
     preview: (taskId, approvalId) => {
       const proposal = findAgentChangeProposal(client, approvalId)
-      if (!proposal || proposal.taskId !== taskId) throw new Error("找不到这个 Agent 变更提案。")
+      if (!proposal || proposal.taskId !== taskId) {
+        throw new AgentChangeError("找不到这个 Agent 变更提案。")
+      }
       return {
         approvalId: proposal.approvalId,
         toolCallId: proposal.toolCallId,

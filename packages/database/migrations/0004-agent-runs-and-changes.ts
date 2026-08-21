@@ -12,7 +12,7 @@
 
 import type { DatabaseMigration } from "./types"
 
-export const agentRunsAndChangesMigration: DatabaseMigration = {
+export const agentRunsAndChangesMigration = {
   id: "0004-agent-runs-and-changes",
   statements: [
     `CREATE TABLE task_runs (
@@ -60,4 +60,4 @@ export const agentRunsAndChangesMigration: DatabaseMigration = {
     "CREATE UNIQUE INDEX agent_change_proposals_task_tool_unique ON agent_change_proposals (task_id, tool_call_id)",
     "CREATE INDEX agent_change_proposals_task_created_idx ON agent_change_proposals (task_id, created_at)",
   ],
-}
+} as const satisfies DatabaseMigration

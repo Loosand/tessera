@@ -12,11 +12,15 @@
 
 import type { DocumentSnapshot } from "@tessera/contracts"
 import { Button } from "@tessera/design-system/components/ui/button"
-import { useEffect, useState } from "react"
+import { Suspense, lazy, useEffect, useState } from "react"
 import type { DefaultEditorMode } from "../hooks/use-app-preferences"
 import type { RichTextEditorGuard } from "./editor/editor-mode-policy"
 import { resolveEditorShortcut } from "./editor/editor-shortcuts"
 import { RichTextEditor } from "./editor/rich-text-editor"
+
+const SourceCodeEditor = lazy(() =>
+  import("./editor/source-code-editor").then((module) => ({ default: module.SourceCodeEditor })),
+)
 
 interface DocumentEditorProps {
   document: DocumentSnapshot | null
@@ -54,6 +58,7 @@ export function DocumentEditor({
   onReload,
 }: DocumentEditorProps) {
   const [richMountedDocumentPath, setRichMountedDocumentPath] = useState<string | null>(null)
+  const [sourceMountedDocumentPath, setSourceMountedDocumentPath] = useState<string | null>(null)
   const documentPath = document?.relativePath
 
   useEffect(() => {
@@ -61,6 +66,10 @@ export function DocumentEditor({
       setRichMountedDocumentPath(documentPath)
     }
   }, [documentPath, mode, richEditorGuard])
+
+  useEffect(() => {
+    if (mode === "source" && documentPath) setSourceMountedDocumentPath(documentPath)
+  }, [documentPath, mode])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -116,6 +125,7 @@ export function DocumentEditor({
 
   const shouldRenderRichEditor =
     !richEditorGuard && (mode === "rich" || richMountedDocumentPath === document.relativePath)
+  const shouldRenderSourceEditor = mode === "source" || sourceMountedDocumentPath === document.relativePath
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -148,15 +158,28 @@ export function DocumentEditor({
         </div>
       ) : null}
 
-      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-background">
-        <textarea
-          data-source-editor
-          className={`${mode === "source" ? "block" : "hidden"} mx-auto min-h-full w-full max-w-205 resize-none border-0 bg-transparent px-[clamp(24px,6vw,64px)] pt-12 pb-[40vh] font-mono text-[13px] leading-6 text-foreground outline-none`}
-          aria-label={`编辑 ${document.name} 源码`}
-          value={content}
-          onChange={(event) => onContentChange(document.relativePath, event.currentTarget.value)}
-          spellCheck={spellCheck}
-        />
+      <div
+        className={`min-h-0 min-w-0 flex-1 bg-background ${mode === "source" ? "overflow-hidden" : "overflow-y-auto"}`}
+      >
+        {shouldRenderSourceEditor ? (
+          <Suspense
+            fallback={
+              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                正在载入 Markdown 源码编辑器…
+              </div>
+            }
+          >
+            <SourceCodeEditor
+              active={mode === "source"}
+              content={content}
+              documentName={document.name}
+              documentPath={document.relativePath}
+              spellCheck={spellCheck}
+              onContentChange={onContentChange}
+              onFlushPendingEditsReady={onFlushPendingEditsReady}
+            />
+          </Suspense>
+        ) : null}
         {shouldRenderRichEditor ? (
           <div className={mode === "rich" ? "min-h-full" : "hidden"}>
             <RichTextEditor

@@ -1,8 +1,8 @@
 /**
- * [INPUT]: 已解析供应商连接、完整 AI SDK UIMessage 历史、主进程注入的受限工作区能力与中止信号
- * [OUTPUT]: 受步骤/时间/token 边界约束、保留工具 Part 并使用标准 toolApproval 的 AI SDK ToolLoopAgent 增量流
+ * [INPUT]: 已解析供应商连接、当前 Skill、客户端交互/研究计划工具、完整 AI SDK UIMessage 历史、主进程注入的受限工作区能力与中止信号
+ * [OUTPUT]: 注入当前 Skill instructions、可暂停等待用户并发布研究计划、受步骤/时间/token 边界约束且使用标准 toolApproval 的 AI SDK ToolLoopAgent 增量流
  * [POS]: @tessera/ai/server 中可读并可经人工批准修改 Markdown 的工作区 Agent 编排边界
- * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
+ * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -10,8 +10,8 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import type { AiChatStreamChunk } from "@tessera/contracts"
 import type { AgentRuntime } from "@tessera/agent-runtime"
+import type { AiChatStreamChunk } from "@tessera/contracts"
 import { ToolLoopAgent, createAgentUIStream, isStepCount, tool } from "ai"
 import type { InferUITools, UIMessage } from "ai"
 import { z } from "zod"
@@ -23,61 +23,63 @@ import {
   safeErrorMessage,
   toUiMessages,
 } from "./chat-runtime"
+import { buildTaskSkillInstructions } from "./skill-instructions"
+import { createTaskInteractionTools } from "./task-interaction-tools"
 
 const MAX_AGENT_STEPS = 8
 const MAX_AGENT_TOTAL_TOKENS = 80_000
 
-export interface ListWorkspaceFilesInput {
+export type ListWorkspaceFilesInput = Readonly<{
   directory?: string | undefined
-}
+}>
 
-export interface ReadWorkspaceFileInput {
+export type ReadWorkspaceFileInput = Readonly<{
   path: string
-}
+}>
 
-export interface SearchWorkspaceTextInput {
+export type SearchWorkspaceTextInput = Readonly<{
   directory?: string | undefined
   query: string
+}>
+
+export type ReadonlyWorkspaceAgentTools = {
+  readonly listWorkspaceFiles: (input: ListWorkspaceFilesInput, signal: AbortSignal) => Promise<unknown>
+  readonly readCurrentDocument: (signal: AbortSignal) => Promise<unknown>
+  readonly readWorkspaceFile: (input: ReadWorkspaceFileInput, signal: AbortSignal) => Promise<unknown>
+  readonly searchWorkspaceText: (input: SearchWorkspaceTextInput, signal: AbortSignal) => Promise<unknown>
 }
 
-export interface ReadonlyWorkspaceAgentTools {
-  listWorkspaceFiles(input: ListWorkspaceFilesInput, signal: AbortSignal): Promise<unknown>
-  readCurrentDocument(signal: AbortSignal): Promise<unknown>
-  readWorkspaceFile(input: ReadWorkspaceFileInput, signal: AbortSignal): Promise<unknown>
-  searchWorkspaceText(input: SearchWorkspaceTextInput, signal: AbortSignal): Promise<unknown>
-}
-
-export interface WorkspaceDocumentChangeInput {
-  baseContentHash?: string | undefined
-  baseModifiedAt?: number | undefined
+export type WorkspaceDocumentChangeInput = Readonly<{
+  baseContentHash?: string
+  baseModifiedAt?: number
   content: string
   operation: "create" | "update"
   path: string
   reason: string
-}
+}>
 
-export interface WorkspaceAgentTools extends ReadonlyWorkspaceAgentTools {
-  writeWorkspaceDocument(
+export type WorkspaceAgentTools = ReadonlyWorkspaceAgentTools & {
+  readonly writeWorkspaceDocument: (
     input: WorkspaceDocumentChangeInput,
-    context: { signal: AbortSignal; toolCallId: string },
-  ): Promise<unknown>
+    context: Readonly<{ signal: AbortSignal; toolCallId: string }>,
+  ) => Promise<unknown>
 }
 
-export interface AiAgentRuntimeOptions {
+export type AiAgentRuntimeOptions = Readonly<{
   abortSignal: AbortSignal
   onChunk: (chunk: AiChatStreamChunk) => void | Promise<void>
   tools: WorkspaceAgentTools
   workspaceName: string
-}
+}>
 
-export interface AiSdkAgentRuntimeRequest {
+export type AiSdkAgentRuntimeRequest = Readonly<{
   input: AiChatRuntimeInput
   tools: WorkspaceAgentTools
   workspaceName: string
-}
+}>
 
-function agentInstructions(workspaceName: string) {
-  return `你是 Tessera 的工作区 Agent，当前授权范围是工作区「${workspaceName}」中的 Markdown 文档。
+function agentInstructions(workspaceName: string, skillInstructions?: string) {
+  const instructions = `你是 Tessera 的工作区 Agent，当前授权范围是工作区「${workspaceName}」中的 Markdown 文档。
 
 规则：
 1. 需要工作区事实时先调用读取工具，不要猜测文件内容。
@@ -88,6 +90,7 @@ function agentInstructions(workspaceName: string) {
 6. 工具返回冲突时重新读取文件并说明差异，不得覆盖磁盘新版本。
 7. 跨越很多文件、会明显挤占主对话上下文的独立研究可以委派给只读研究子 Agent；简单问题直接使用读取工具。
 8. 不能删除、重命名、运行 Shell 或扩大访问范围；工具返回截断或限制信息时明确说明。`
+  return skillInstructions ? `${instructions}\n\n${skillInstructions}` : instructions
 }
 
 async function* runAiSdkAgent(
@@ -95,6 +98,7 @@ async function* runAiSdkAgent(
   abortSignal: AbortSignal,
 ): AsyncIterable<AiChatStreamChunk> {
   const model = createAiSdkLanguageModel(input)
+  const skillInstructions = await buildTaskSkillInstructions(input.skillId)
   const readonlyTools = {
     "list-workspace-files": tool({
       description: "列出工作区或指定目录中的 Markdown 文件，返回相对路径、大小和更新时间。",
@@ -138,6 +142,7 @@ async function* runAiSdkAgent(
   })
   const tools = {
     ...readonlyTools,
+    ...createTaskInteractionTools(input.skillId),
     "delegate-workspace-research": tool({
       description: "把跨多个 Markdown 文件、上下文消耗较大的独立研究委派给只读子 Agent。",
       inputSchema: z.strictObject({
@@ -167,7 +172,10 @@ async function* runAiSdkAgent(
           content: z.string().max(262_144).describe("完整候选 Markdown 内容"),
           reason: z.string().min(1).max(2_000).describe("本次修改的简短理由"),
           baseModifiedAt: z.number().nonnegative().describe("读取文件时返回的 modifiedAt"),
-          baseContentHash: z.string().regex(/^[a-f0-9]{64}$/u).describe("读取文件时返回的 contentHash"),
+          baseContentHash: z
+            .string()
+            .regex(/^[a-f0-9]{64}$/u)
+            .describe("读取文件时返回的 contentHash"),
         }),
       ]),
       execute: (toolInput, options) =>
@@ -179,7 +187,7 @@ async function* runAiSdkAgent(
   }
   const agent = new ToolLoopAgent({
     model,
-    instructions: agentInstructions(workspaceName),
+    instructions: agentInstructions(workspaceName, skillInstructions),
     tools,
     toolApproval: { "write-workspace-document": "user-approval" },
     reasoning: reasoningLevel(input.reasoning),
@@ -190,11 +198,8 @@ async function* runAiSdkAgent(
         steps.reduce((total, step) => total + (step.usage.totalTokens ?? 0), 0) >= MAX_AGENT_TOTAL_TOKENS,
     ],
   })
-  const originalMessages = (await toUiMessages(input.messages)) as UIMessage<
-    unknown,
-    never,
-    InferUITools<typeof tools>
-  >[]
+  type AgentUiMessage = UIMessage<unknown, never, InferUITools<typeof tools>>
+  const originalMessages = await toUiMessages<AgentUiMessage>(input.messages, { tools })
   const stream = await createAgentUIStream({
     agent,
     uiMessages: originalMessages,

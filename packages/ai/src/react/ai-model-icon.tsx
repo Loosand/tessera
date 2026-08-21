@@ -17,7 +17,7 @@ const ModelIcon = lazy(async () => {
   return { default: icons.ModelIcon }
 })
 
-export interface AiModelIconProps {
+export type AiModelIconProps = {
   className?: string
   modelId: string
   size?: number

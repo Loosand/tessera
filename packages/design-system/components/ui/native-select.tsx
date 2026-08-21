@@ -15,11 +15,12 @@ import { HugeiconsIcon } from "@hugeicons/react"
 import { cn } from "@tessera/design-system/lib/utils"
 import type { ComponentProps, ReactNode } from "react"
 
-export interface NativeSelectProps extends Omit<ComponentProps<"select">, "size"> {
-  containerClassName?: string
-  size?: "sm" | "default"
-  startAdornment?: ReactNode
-}
+export type NativeSelectProps = Omit<ComponentProps<"select">, "size"> &
+  Readonly<{
+    containerClassName?: string
+    size?: "sm" | "default"
+    startAdornment?: ReactNode
+  }>
 
 export function NativeSelect({
   children,

@@ -1,6 +1,6 @@
 <!--
   [INPUT]: Electron Vite 渲染入口、内容安全策略与 React 挂载脚本
-  [OUTPUT]: 使用中文语言环境和窄 CSP 的桌面页面根节点
+  [OUTPUT]: 使用中文语言环境、允许 HTTPS 来源图标且保持其余能力收窄的桌面页面根节点
   [POS]: Electron 渲染层的唯一 HTML 入口
   [DOC]: docs/architecture.md
 
@@ -16,7 +16,7 @@
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws: wss:; font-src 'self' data:"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' ws: wss:; font-src 'self' data:"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Tessera</title>

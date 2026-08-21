@@ -10,30 +10,6 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-export type TypesetProportionalFontPreference =
-  | "system-sans"
-  | "geist"
-  | "open-sans"
-  | "space-grotesk"
-  | "montserrat"
-  | "nunito-sans"
-  | "outfit"
-  | "oxanium"
-  | "lora"
-  | "system-serif"
-
-export type TypesetMonoFontPreference = "system-mono" | "jetbrains-mono"
-
-export interface TypesetPreferences {
-  typesetBodyFont: TypesetProportionalFontPreference
-  typesetFlow: number
-  typesetHeadingFont: TypesetProportionalFontPreference
-  typesetLeading: number
-  typesetMeasure: number
-  typesetMonoFont: TypesetMonoFontPreference
-  typesetSize: number
-}
-
 export const TYPESET_PROPORTIONAL_FONT_OPTIONS = [
   { id: "system-sans", label: "系统无衬线" },
   { id: "geist", label: "Geist" },
@@ -45,12 +21,25 @@ export const TYPESET_PROPORTIONAL_FONT_OPTIONS = [
   { id: "oxanium", label: "Oxanium" },
   { id: "lora", label: "Lora" },
   { id: "system-serif", label: "系统衬线" },
-] as const satisfies readonly { id: TypesetProportionalFontPreference; label: string }[]
+] as const
 
 export const TYPESET_MONO_FONT_OPTIONS = [
   { id: "system-mono", label: "系统等宽" },
   { id: "jetbrains-mono", label: "JetBrains Mono" },
-] as const satisfies readonly { id: TypesetMonoFontPreference; label: string }[]
+] as const
+
+export type TypesetProportionalFontPreference = (typeof TYPESET_PROPORTIONAL_FONT_OPTIONS)[number]["id"]
+export type TypesetMonoFontPreference = (typeof TYPESET_MONO_FONT_OPTIONS)[number]["id"]
+
+export type TypesetPreferences = {
+  readonly typesetBodyFont: TypesetProportionalFontPreference
+  readonly typesetFlow: number
+  readonly typesetHeadingFont: TypesetProportionalFontPreference
+  readonly typesetLeading: number
+  readonly typesetMeasure: number
+  readonly typesetMonoFont: TypesetMonoFontPreference
+  readonly typesetSize: number
+}
 
 export const TYPESET_LIMITS = {
   flow: { max: 2.5, min: 0.75, step: 0.05 },
@@ -59,7 +48,7 @@ export const TYPESET_LIMITS = {
   size: { max: 24, min: 12, step: 1 },
 } as const
 
-export const TYPESET_REFERENCE_PRESET: TypesetPreferences = {
+export const TYPESET_REFERENCE_PRESET = {
   typesetBodyFont: "oxanium",
   typesetFlow: 1,
   typesetHeadingFont: "nunito-sans",
@@ -67,7 +56,7 @@ export const TYPESET_REFERENCE_PRESET: TypesetPreferences = {
   typesetMeasure: 70,
   typesetMonoFont: "jetbrains-mono",
   typesetSize: 18,
-}
+} as const satisfies TypesetPreferences
 
 export const TYPESET_PROPORTIONAL_FONT_CSS: Record<TypesetProportionalFontPreference, string> = {
   geist:
@@ -96,12 +85,6 @@ export const TYPESET_MONO_FONT_CSS: Record<TypesetMonoFontPreference, string> = 
   "system-mono": "'SFMono-Regular', Consolas, 'Liberation Mono', ui-monospace, monospace",
 }
 
-const PROPORTIONAL_FONT_VALUES = new Set<TypesetProportionalFontPreference>(
-  TYPESET_PROPORTIONAL_FONT_OPTIONS.map((option) => option.id),
-)
-const MONO_FONT_VALUES = new Set<TypesetMonoFontPreference>(
-  TYPESET_MONO_FONT_OPTIONS.map((option) => option.id),
-)
 const LEGACY_MEASURE: Record<string, number> = {
   compact: 64,
   comfortable: 80,
@@ -156,16 +139,29 @@ function hasLegacyTypesetPreference(value: Record<string, unknown>) {
   return "editorFont" in value || "editorFontSize" in value || "editorWidth" in value
 }
 
+function isOptionId<const Options extends readonly { readonly id: string }[]>(
+  options: Options,
+  value: unknown,
+): value is Options[number]["id"] {
+  return typeof value === "string" && options.some((option) => option.id === value)
+}
+
+export function isTypesetProportionalFontPreference(
+  value: unknown,
+): value is TypesetProportionalFontPreference {
+  return isOptionId(TYPESET_PROPORTIONAL_FONT_OPTIONS, value)
+}
+
+export function isTypesetMonoFontPreference(value: unknown): value is TypesetMonoFontPreference {
+  return isOptionId(TYPESET_MONO_FONT_OPTIONS, value)
+}
+
 function readProportionalFont(value: unknown, fallback: TypesetProportionalFontPreference) {
-  return typeof value === "string" && PROPORTIONAL_FONT_VALUES.has(value as TypesetProportionalFontPreference)
-    ? (value as TypesetProportionalFontPreference)
-    : fallback
+  return isTypesetProportionalFontPreference(value) ? value : fallback
 }
 
 function readMonoFont(value: unknown, fallback: TypesetMonoFontPreference) {
-  return typeof value === "string" && MONO_FONT_VALUES.has(value as TypesetMonoFontPreference)
-    ? (value as TypesetMonoFontPreference)
-    : fallback
+  return isTypesetMonoFontPreference(value) ? value : fallback
 }
 
 function migrateLegacyTypesetPreferences(value: Record<string, unknown>): TypesetPreferences {

@@ -12,7 +12,7 @@
 
 import type { DatabaseMigration } from "./types"
 
-export const aiProviderConfigsMigration: DatabaseMigration = {
+export const aiProviderConfigsMigration = {
   id: "0001-ai-provider-configs",
   statements: [
     `CREATE TABLE ai_provider_configs (
@@ -24,4 +24,4 @@ export const aiProviderConfigsMigration: DatabaseMigration = {
       updated_at INTEGER NOT NULL
     )`,
   ],
-}
+} as const satisfies DatabaseMigration

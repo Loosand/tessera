@@ -12,24 +12,16 @@
 
 import { asc, desc, eq } from "drizzle-orm"
 import type { DatabaseClient } from "./client"
-import { taskRunEvents, taskRuns } from "./schema"
+import { type TaskRun, type TaskRunEventRecord, taskRunEvents, taskRuns } from "./schema"
 
-export type TaskRunStatus = "running" | "completed" | "failed" | "cancelled" | "interrupted"
+export type TaskRunStatus = TaskRun["status"]
 
-export interface TaskRunInput {
-  configId: string
-  modelId: string
-  providerId: string
-  requestId: string
-  startedAt: Date
-  taskId: string
-}
+export type TaskRunInput = Pick<
+  TaskRun,
+  "requestId" | "taskId" | "configId" | "providerId" | "modelId" | "startedAt"
+>
 
-export interface TaskRunEventInput {
-  payloadJson: string
-  requestId: string
-  sequence: number
-}
+export type TaskRunEventInput = Pick<TaskRunEventRecord, "requestId" | "sequence" | "payloadJson">
 
 export function startTaskRun(client: DatabaseClient, input: TaskRunInput) {
   client.db

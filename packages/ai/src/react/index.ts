@@ -1,6 +1,6 @@
 /**
  * [INPUT]: AI 设置组件、Electron 任务 React Transport 与版本化消息转换器
- * [OUTPUT]: @tessera/ai/react 的设置组件、消息类型、任务消息转换与 useElectronChat 公开入口
+ * [OUTPUT]: @tessera/ai/react 的设置组件、消息类型、等待输入识别、任务消息转换与 useElectronChat 公开入口
  * [POS]: AI 包的 React 子路径边界
  * [DOC]: design.md、docs/architecture/ai-providers.md、docs/architecture/task-navigation.md
  *
@@ -16,6 +16,8 @@ export { AiSettings } from "./ai-settings"
 export {
   type UIMessage,
   type UseElectronChatOptions,
+  hasPendingTaskUserInput,
+  shouldAutomaticallyContinueTask,
   toAiChatMessages,
   toTaskMessages,
   toUiMessages,

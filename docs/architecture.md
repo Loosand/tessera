@@ -35,8 +35,9 @@ Markdown 是正文事实源。SQLite 保存工作区登记、可重建索引和�
 
 - **已实现**：渲染层运行在沙箱中，不直接访问 Node.js、文件系统或数据库。
 - **已实现**：平台操作只通过 `packages/contracts` 定义的预加载接口调用。
-- **已实现**：TipTap 与源码表面共享同一份 Markdown 草稿和保存协议。
-- **部分实现**：主导航「新任务」已接入普通 Chat 与工作区 Agent，支持模式锁定、模型、思考、Chat 联网/图片、Markdown、来源、工具状态、停止、重试、完整工具历史、文件引用跳转、任务/运行事件恢复，以及 Markdown 渲染 Diff 审批。
+- **已实现**：渲染层 CSP 保持脚本与主动连接同源，只额外允许以无 Referer 的 HTTPS 图片请求加载联网搜索来源 favicon。
+- **已实现**：TipTap 与按需加载的 CodeMirror 6 源码表面共享同一份 Markdown 草稿、flush 和保存协议。
+- **部分实现**：主导航「新任务」已接入普通 Chat 与工作区 Agent，并以独立原生单选提供问答、研究、写作三种对话方式；支持执行模式/Skill 锁定、模型、思考、Chat 联网/图片、Markdown、来源、工具状态、停止、重试、完整工具历史、文件引用跳转、任务/运行事件恢复，以及 Markdown 渲染 Diff 审批。
 - **部分实现**：Agent 的只读范围、工具访问路径和失败状态使用独立可见语义；建议、权限请求和 Diff 仍需可审查界面。
 
 ### 主进程与核心层
@@ -53,8 +54,8 @@ Markdown 是正文事实源。SQLite 保存工作区登记、可重建索引和�
 - **已实现**：`AgentRuntime` 泛型端口已承载 AI SDK `ToolLoopAgent` 的类型化 `UIMessageChunk` 异步流、取消信号和审批事件；产品运行链路不再绕过独立端口。
 - **部分实现**：`@tessera/ai` 独立封装 OpenAI 兼容、Anthropic 兼容、DeepSeek、Grok 与 OpenRouter。已实现普通对话、受限工作区读写工具循环、AI SDK 标准工具审批和只读研究子 Agent；MCP、Shell 与 durable 自动续跑尚未接入。
 - **已实现**：Agent 工作区根目录只存在于主进程闭包；Markdown 列表、读取、搜索、当前文档和经批准写入统一执行真实路径、符号链接、文件类型、版本冲突与资源上限校验。删除、重命名、Shell 和任意 MCP/网络工具保持不可达。
-- **部分实现**：`packages/skills` 已定义用户级、工作区级 Skill 描述和权限声明，尚未实现发现与执行。
-- **规划**：Skill 只描述工作流和所需资源；具体权限在每次执行时由 Tessera 判断。
+- **部分实现**：`packages/skills` 已实现标准 `SKILL.md` 校验、内置/用户级/工作区级描述、权限声明和内置渐进式加载注册表；研究与写作正文只在当前任务选中后通过 AI SDK `instructions` 注入 Chat/Agent。用户级与工作区级发现、安装和版本仍待实现。
+- **已实现**：Skill 只描述工作流和所需资源，不提升任务权限；具体工具仍由 Chat/Agent 模式、模型能力、主进程边界与人工审批共同决定。
 - **规划**：Agent 对文件的修改以文本补丁提出，批准后由核心层写入。
 
 ## 已实现的数据流
@@ -95,7 +96,7 @@ Markdown 是正文事实源。SQLite 保存工作区登记、可重建索引和�
 | `core` | 平台无关的应用服务与领域编排 |
 | `ai` | 模型供应商目录、AI SDK 适配边界与可复用 React 界面 |
 | `agent-runtime` | 可替换 Agent 运行时端口 |
-| `skills` | `SKILL.md` 描述、作用域和权限契约 |
+| `skills` | `SKILL.md` 描述、作用域、权限契约、内置注册表和渐进式加载 |
 | `database` | SQLite 连接、迁移、索引与运行状态 |
 | `design-system` | 语义 token、交互原语和共享组件 |
 
@@ -110,4 +111,5 @@ Markdown 是正文事实源。SQLite 保存工作区登记、可重建索引和�
 - [插件系统](architecture/plugin-system.md)
 - [AI 供应商与模型发现](architecture/ai-providers.md)
 - [AI 对话与工作区 Agent 实施 TODO](architecture/ai-chat-agent-todo.md)
+- [Skill 系统](architecture/skill-system.md)
 - [设计规范](../design.md)

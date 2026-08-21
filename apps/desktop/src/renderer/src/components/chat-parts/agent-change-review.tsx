@@ -84,7 +84,9 @@ function DiffView({ preview }: { preview: AgentChangePreview }) {
           >
             <span className="select-none text-right opacity-55">{row.oldLine ?? ""}</span>
             <span className="select-none text-right opacity-55">{row.newLine ?? ""}</span>
-            <span className="select-none text-center">{row.kind === "added" ? "+" : row.kind === "removed" ? "−" : ""}</span>
+            <span className="select-none text-center">
+              {row.kind === "added" ? "+" : row.kind === "removed" ? "−" : ""}
+            </span>
             <span className="whitespace-pre-wrap break-words">{row.text || " "}</span>
           </div>
         ))}
@@ -167,7 +169,9 @@ export function AgentChangeReview({
               onChange={() => setView("diff")}
               className="sr-only"
             />
-            <span className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] ${view === "diff" ? "bg-background shadow-xs" : "text-muted-foreground"}`}>
+            <span
+              className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] ${view === "diff" ? "bg-background shadow-xs" : "text-muted-foreground"}`}
+            >
               <Icon icon={SourceCodeIcon} size={12} /> Diff
             </span>
           </label>
@@ -180,12 +184,16 @@ export function AgentChangeReview({
               onChange={() => setView("preview")}
               className="sr-only"
             />
-            <span className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] ${view === "preview" ? "bg-background shadow-xs" : "text-muted-foreground"}`}>
+            <span
+              className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] ${view === "preview" ? "bg-background shadow-xs" : "text-muted-foreground"}`}
+            >
               <Icon icon={EyeIcon} size={12} /> 文档预览
             </span>
           </label>
         </div>
-        <span className="text-[11px] text-muted-foreground">+{added} / −{removed}</span>
+        <span className="text-[11px] text-muted-foreground">
+          +{added} / −{removed}
+        </span>
       </div>
 
       <div className="px-3.5 pb-3">

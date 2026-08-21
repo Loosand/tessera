@@ -12,14 +12,9 @@
 
 import { desc, eq, isNull } from "drizzle-orm"
 import type { DatabaseClient } from "./client"
-import { workspaces } from "./schema"
+import { type Workspace, workspaces } from "./schema"
 
-export interface WorkspaceRecordInput {
-  id: string
-  rootPath: string
-  displayName: string
-  lastOpenedAt: Date
-}
+export type WorkspaceRecordInput = Pick<Workspace, "id" | "rootPath" | "displayName" | "lastOpenedAt">
 
 export function saveWorkspace(client: DatabaseClient, workspace: WorkspaceRecordInput) {
   client.db

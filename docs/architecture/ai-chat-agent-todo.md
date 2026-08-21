@@ -1,7 +1,7 @@
 # AI 对话与工作区 Agent 实施 TODO
 
 > 代码源头：`packages/ai/src/server/ai-sdk-runtime.ts`、`packages/ai/src/react/ai-provider-settings.tsx`、
-> `packages/agent-runtime/src/index.ts`、`packages/contracts/src/index.ts`、`packages/database/schema.ts`、
+> `packages/agent-runtime/src/index.ts`、`packages/skills/src/index.ts`、`packages/contracts/src/index.ts`、`packages/database/schema.ts`、
 > `apps/desktop/src/main/index.ts`、`apps/desktop/src/renderer/src/components/task-page.tsx`、
 > `apps/desktop/src/renderer/src/components/chat-parts/`、`packages/ai/src/react/use-electron-chat.test.ts`
 >
@@ -22,17 +22,19 @@
 
 | 能力 | 状态 | 现状 |
 | --- | --- | --- |
-| 供应商适配 | 部分实现 | `@tessera/ai` 已能创建 OpenAI 兼容、Anthropic、DeepSeek、Grok 和 OpenRouter 模型，并能发现模型与测试连接。 |
-| 供应商配置 | 部分实现 | API Key 由系统安全存储加密，Base URL、启用状态和模型目录持久化；模型操作会即时保存并通知任务页，默认模型规则仍待确定。 |
-| 新任务界面 | 部分实现 | 已接入模型选择、Chat/Agent 原生单选、流式消息、停止、重试、首次发送懒创建、历史/工具上下文恢复、文件引用跳转和文档 Diff 审批。 |
+| 供应商适配 | 部分实现 | `@tessera/ai` 已能创建 OpenAI 兼容、Anthropic 兼容、DeepSeek、Grok 和 OpenRouter 模型；兼容协议允许多条具名连接，官方服务保持单例。 |
+| 供应商配置 | 部分实现 | API Key 由系统安全存储加密，Base URL、启用状态和手动模型持久化；模型目录是可选能力，404/405 不判定推理连接失效。 |
+| 新任务界面 | 部分实现 | 已接入问答/研究/写作 Skill 与 Chat/Agent 两组原生单选、模型选择、流式消息、停止、重试、首次发送懒创建、历史/工具上下文恢复、文件引用跳转和文档 Diff 审批。 |
+| Skill 基建 | 部分实现 | 标准 `SKILL.md` 校验、研究/写作内置注册表、任务持久化和 AI SDK `instructions` 渐进式注入已接通；用户/工作区发现、安装和资源路由待实现。 |
 | Agent 协议 | 部分实现 | AI SDK `ToolLoopAgent` 已通过统一 `AgentRuntime` 端口运行读写工具和只读研究子 Agent；MCP、Shell 与 durable 自动续跑尚未接入。 |
 | 文件读写 | 已实现 | 主进程冻结候选内容，AI SDK 标准 `toolApproval` 暂停写工具；批准后复核路径、内容哈希与磁盘版本并原子写入，拒绝和冲突不改磁盘。 |
-| 会话数据 | 部分实现 | `task_sessions` / `task_messages` 已区分 mode、可选工作区并保存版本化消息；完成原因、用量与耗时仍待补齐。 |
+| 会话数据 | 部分实现 | `task_sessions` / `task_messages` 已区分 mode、可选 Skill、可选工作区并保存版本化消息；完成原因、用量与耗时仍待补齐。 |
 
 ## 固定边界
 
 - 渲染层不持有供应商密钥，不直接请求模型，也不直接访问文件系统。
 - 普通对话默认只发送用户显式输入和当前会话历史，不读取工作区、当前文档或剪贴板。
+- 当前选中 Skill 通过 AI SDK instructions 注入，只改变任务方法；Skill 声明不授予联网、工作区或写入权限。
 - Agent 的工作区根目录由主进程注入，模型不得通过参数自行选择或扩大目录。
 - 只读 Agent 不暴露写入、删除、重命名、Shell 或任意网络工具。
 - 可写 Agent 第一版只创建或更新 Markdown，不删除或重命名文件。
@@ -68,8 +70,8 @@
 
 - [ ] 定义供应商配置契约：供应商类型、显示名称、Base URL、默认模型、启用状态和凭据引用。
 - [ ] 在主进程使用系统安全能力加密保存 API Key；数据库或配置文件只保存非敏感字段和凭据引用。
-- [ ] 增加读取、保存、删除、测试连接和列出可用模型的窄 IPC；返回渲染层的对象不得包含完整 API Key。
-- [ ] 将设置页中的供应商草稿从组件局部状态提升为持久化配置状态，并区分「已保存」「有未保存修改」「连接测试中」和「连接失败」。
+- [ ] 增加读取、保存、删除、检查模型目录和列出可用模型的窄 IPC；返回渲染层的对象不得包含完整 API Key。
+- [ ] 将设置页中的连接草稿从组件局部状态提升为持久化配置状态，并区分「已保存」「有未保存修改」「目录检查中」和「目录不可用」；目录不可用不代表推理连接失败。
 - [ ] 为默认供应商和默认模型建立唯一解析规则；配置失效时不静默切换到其他供应商。
 
 ### 运行时

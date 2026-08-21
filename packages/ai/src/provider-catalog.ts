@@ -15,7 +15,7 @@ import { resolveAiModelCapabilities } from "./model-capabilities"
 
 export type { AiProviderId } from "@tessera/contracts"
 
-export interface AiProviderDefinition {
+export type AiProviderDefinition = Readonly<{
   adapter: string
   apiKeyPlaceholder: string
   defaultBaseUrl: string
@@ -25,26 +25,33 @@ export interface AiProviderDefinition {
   name: string
   publicModelCatalog: boolean
   protocol: string
-}
+}>
 
-export interface AiProviderModelDraft extends AiProviderModel {
-  enabled: boolean
-}
+export type AiProviderModelDraft = Readonly<AiProviderModel> &
+  Readonly<{
+    enabled: boolean
+  }>
 
-export interface AiProviderDraft {
+export type AiProviderDraft = Readonly<{
   apiKeyConfigured: boolean
   baseUrl: string
   configId: string
   displayName: string
   enabled: boolean
-  models: AiProviderModelDraft[]
+  models: readonly AiProviderModelDraft[]
   providerId: AiProviderId
-}
+}>
 
+/** 界面允许修改的连接字段；连接标识与协议标识创建后保持不变。 */
+export type AiProviderDraftUpdate = Partial<
+  Pick<AiProviderDraft, "apiKeyConfigured" | "baseUrl" | "displayName" | "enabled" | "models">
+>
+
+/** 内置连接始终存在；用户建立的命名连接按配置 ID 可选存在。 */
 export type AiProviderDrafts = Record<AiProviderId, AiProviderDraft> &
-  Record<string, AiProviderDraft>
+  Partial<Record<string, AiProviderDraft>>
 
-export const AI_PROVIDER_DEFINITIONS: readonly AiProviderDefinition[] = [
+export const AI_PROVIDER_DEFINITIONS = [
   {
     id: "openai-compatible",
     multiple: true,
@@ -100,24 +107,29 @@ export const AI_PROVIDER_DEFINITIONS: readonly AiProviderDefinition[] = [
     defaultBaseUrl: "https://openrouter.ai/api/v1",
     publicModelCatalog: true,
   },
-] as const
+] as const satisfies readonly AiProviderDefinition[]
 
 export function createInitialAiProviderDrafts(configs: readonly AiProviderConfig[] = []): AiProviderDrafts {
-  const drafts = {} as AiProviderDrafts
+  const drafts: AiProviderDrafts = {
+    "anthropic-compatible": createAiProviderDraft(AI_PROVIDER_DEFINITIONS[1]),
+    deepseek: createAiProviderDraft(AI_PROVIDER_DEFINITIONS[2]),
+    grok: createAiProviderDraft(AI_PROVIDER_DEFINITIONS[3]),
+    "openai-compatible": createAiProviderDraft(AI_PROVIDER_DEFINITIONS[0]),
+    openrouter: createAiProviderDraft(AI_PROVIDER_DEFINITIONS[4]),
+  }
 
   for (const provider of AI_PROVIDER_DEFINITIONS) {
-    const config = configs.find((candidate) => candidate.providerId === provider.id)
-    drafts[provider.id] = config
-      ? {
-          apiKeyConfigured: config.apiKeyConfigured,
-          baseUrl: config.baseUrl,
-          configId: config.configId,
-          displayName: config.displayName,
-          enabled: config.enabled,
-          models: config.models.map((model) => ({ ...model })),
-          providerId: config.providerId,
-        }
-      : createAiProviderDraft(provider)
+    const config = configs.find((candidate) => candidate.configId === provider.id)
+    if (!config) continue
+    drafts[provider.id] = {
+      apiKeyConfigured: config.apiKeyConfigured,
+      baseUrl: config.baseUrl,
+      configId: config.configId,
+      displayName: config.displayName,
+      enabled: config.enabled,
+      models: config.models.map((model) => ({ ...model })),
+      providerId: config.providerId,
+    }
   }
 
   for (const config of configs) {
@@ -138,8 +150,8 @@ export function createInitialAiProviderDrafts(configs: readonly AiProviderConfig
 
 export function createAiProviderDraft(
   provider: AiProviderDefinition,
-  configId = provider.id,
-  displayName = provider.name,
+  configId: string = provider.id,
+  displayName: string = provider.name,
 ): AiProviderDraft {
   return {
     apiKeyConfigured: false,

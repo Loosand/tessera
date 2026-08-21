@@ -21,11 +21,12 @@ import {
   createRandomTypesetPreferences,
 } from "../hooks/typeset-preferences"
 import type { AppPreferences, DefaultEditorMode, UpdateAppPreference } from "../hooks/use-app-preferences"
+import { isDefaultEditorMode } from "../hooks/use-app-preferences"
 import { TypesetThemeBuilder } from "./typeset-theme-builder"
 
-interface EditorSettingsProps {
-  preferences: AppPreferences
-  onUpdatePreference: UpdateAppPreference
+type EditorSettingsProps = {
+  readonly preferences: AppPreferences
+  readonly onUpdatePreference: UpdateAppPreference
 }
 
 const EDITOR_MODE_LABELS: Record<DefaultEditorMode, string> = {
@@ -77,7 +78,8 @@ export function EditorSettings({ preferences, onUpdatePreference }: EditorSettin
               value={preferences.defaultEditorMode}
               aria-label="默认编辑模式"
               onChange={(event) => {
-                onUpdatePreference("defaultEditorMode", event.currentTarget.value as DefaultEditorMode)
+                const value = event.currentTarget.value
+                if (isDefaultEditorMode(value)) onUpdatePreference("defaultEditorMode", value)
               }}
             >
               {Object.entries(EDITOR_MODE_LABELS).map(([value, label]) => (

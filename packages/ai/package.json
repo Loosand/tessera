@@ -26,6 +26,7 @@
     "@tessera/agent-runtime": "workspace:*",
     "@tessera/contracts": "workspace:*",
     "@tessera/design-system": "workspace:*",
+    "@tessera/skills": "workspace:*",
     "ai": "^7.0.73",
     "zod": "^4.4.3"
   },

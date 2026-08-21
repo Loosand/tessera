@@ -1,6 +1,6 @@
 /**
- * [INPUT]: AI SDK 消息中的 URL 与文档来源 Part
- * [OUTPUT]: 去重后的轻量来源入口
+ * [INPUT]: AI SDK 消息中的 URL/文档来源 Part 与 URL 来源显示策略
+ * [OUTPUT]: 可排除已由搜索轨迹消费 URL 的去重轻量来源入口
  * [POS]: ChatMessage 内的来源呈现单元
  * [DOC]: design.md、docs/architecture/ai-chat-agent-todo.md
  *
@@ -16,6 +16,7 @@ type MessagePart = UIMessage["parts"][number]
 type SourceMessagePart = Extract<MessagePart, { type: "source-document" | "source-url" }>
 
 interface SourcePartProps {
+  includeUrlSources?: boolean
   parts: readonly MessagePart[]
   streaming: boolean
 }
@@ -32,9 +33,10 @@ function sourceKey(source: SourceMessagePart) {
   return source.type === "source-url" ? source.url : `${source.sourceId}:${source.filename ?? source.title}`
 }
 
-export function SourcePart({ parts, streaming }: SourcePartProps) {
+export function SourcePart({ includeUrlSources = true, parts, streaming }: SourcePartProps) {
   const sources = parts.filter(
-    (part): part is SourceMessagePart => part.type === "source-url" || part.type === "source-document",
+    (part): part is SourceMessagePart =>
+      part.type === "source-document" || (includeUrlSources && part.type === "source-url"),
   )
   const uniqueSources = [...new Map(sources.map((source) => [sourceKey(source), source])).values()]
 

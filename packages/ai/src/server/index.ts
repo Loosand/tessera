@@ -1,5 +1,5 @@
 /**
- * [INPUT]: AI SDK Chat/Agent 运行时适配器、受限工作区工具契约与模型目录发现服务
+ * [INPUT]: AI SDK Chat/Agent 运行时适配器、客户端交互/研究计划工具、受限工作区工具契约与模型目录发现服务
  * [OUTPUT]: @tessera/ai/server 的主进程安全公开入口
  * [POS]: AI 包服务端子路径边界
  * [DOC]: docs/architecture/ai-providers.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
@@ -41,6 +41,7 @@ export {
   listAiProviderModels,
 } from "./model-discovery"
 export {
+  type CreateAiProviderConfigServiceOptions,
   type AiProviderConfigService,
   type AiProviderConfigStore,
   type AiProviderConfigStoreRecord,
@@ -48,3 +49,12 @@ export {
   type AiProviderSecretStorage,
   createAiProviderConfigService,
 } from "./provider-config-service"
+export {
+  createTaskInteractionTools,
+  publishResearchPlanTool,
+  requestUserInputTool,
+  taskResearchPlanInputSchema,
+  taskResearchPlanOutputSchema,
+  taskUserInputRequestSchema,
+  taskUserInputResultSchema,
+} from "./task-interaction-tools"

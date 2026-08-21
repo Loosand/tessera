@@ -32,12 +32,12 @@ import {
 } from "@tessera/database"
 import { safeStorage } from "electron"
 
-export interface DesktopAiService {
-  deleteConfig(configId: string): void
-  listConfigs(): AiProviderConfig[]
-  resolveChatInput(input: AiChatStartInput): AiChatRuntimeInput
-  resolveDiscoveryConnection(input: AiProviderConnectionInput): AiProviderConnectionInput
-  saveConfig(input: AiProviderSaveInput): AiProviderConfig
+export type DesktopAiService = {
+  readonly deleteConfig: (configId: string) => void
+  readonly listConfigs: () => AiProviderConfig[]
+  readonly resolveChatInput: (input: AiChatStartInput) => AiChatRuntimeInput
+  readonly resolveDiscoveryConnection: (input: AiProviderConnectionInput) => AiProviderConnectionInput
+  readonly saveConfig: (input: AiProviderSaveInput) => AiProviderConfig
 }
 
 function databaseStore(client: DatabaseClient): AiProviderConfigStore {

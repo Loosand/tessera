@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 共享 AppInfo 契约与当前产品区域定义
- * [OUTPUT]: 应用信息工厂和只读产品区域列表
+ * [OUTPUT]: 保留字面量类型的应用信息工厂、产品区域目录及其派生联合类型
  * [POS]: 与平台无关的 Tessera 核心包入口
  * [DOC]: docs/architecture.md
  *
@@ -12,14 +12,14 @@
 
 import type { AppInfo } from "@tessera/contracts"
 
-export interface ProductArea {
+type ProductAreaDefinition = {
   id: "library" | "reader" | "inbox" | "skills"
   title: string
   description: string
   status: "foundation" | "planned"
 }
 
-export const PRODUCT_AREAS: readonly ProductArea[] = [
+export const PRODUCT_AREAS = [
   {
     id: "library",
     title: "Library",
@@ -44,8 +44,12 @@ export const PRODUCT_AREAS: readonly ProductArea[] = [
     description: "Run portable SKILL.md workflows with visible permissions and history.",
     status: "foundation",
   },
-] as const
+] as const satisfies readonly ProductAreaDefinition[]
 
-export function createAppInfo(info: AppInfo): AppInfo {
+export type ProductArea = (typeof PRODUCT_AREAS)[number]
+export type ProductAreaId = ProductArea["id"]
+export type ProductAreaStatus = ProductArea["status"]
+
+export function createAppInfo<const Info extends AppInfo>(info: Info): Info {
   return { ...info }
 }

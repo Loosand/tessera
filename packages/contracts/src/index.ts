@@ -1,8 +1,8 @@
 /**
  * [INPUT]: Electron 桌面应用当前需要的跨进程数据、生命周期、工作区条目、AI 配置、任务运行与 Agent 变更审批形状
- * [OUTPUT]: IPC 频道、工作区文件操作、AI 模型/任务会话/可恢复流式运行、Agent Diff 审批、关闭握手与可推导的桌面 API 类型契约
+ * [OUTPUT]: IPC 频道、工作区文件操作、AI 模型/任务会话/可恢复流式运行、客户端问答/研究计划工具、Agent Diff 审批、关闭握手与可推导的桌面 API 类型契约
  * [POS]: 应用和共享包共同依赖的底层契约入口
- * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
+ * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -57,7 +57,19 @@ export type IpcChannelMap = typeof IPC_CHANNELS
 export type IpcChannelKey = keyof IpcChannelMap
 export type IpcChannel = IpcChannelMap[IpcChannelKey]
 
-export type AiProviderId = "openai-compatible" | "anthropic-compatible" | "deepseek" | "grok" | "openrouter"
+export const AI_PROVIDER_IDS = [
+  "openai-compatible",
+  "anthropic-compatible",
+  "deepseek",
+  "grok",
+  "openrouter",
+] as const
+
+export type AiProviderId = (typeof AI_PROVIDER_IDS)[number]
+
+export function isAiProviderId(value: unknown): value is AiProviderId {
+  return typeof value === "string" && AI_PROVIDER_IDS.some((providerId) => providerId === value)
+}
 
 export type AiProviderConnectionInput = {
   apiKey: string
@@ -147,7 +159,67 @@ export type AiChatMessage = {
 }
 
 export type TaskMode = "chat" | "agent"
-export type TaskSessionStatus = "idle" | "running" | "completed" | "failed" | "cancelled"
+export const TASK_SKILL_IDS = ["research", "writing"] as const
+export type BuiltInTaskSkillId = (typeof TASK_SKILL_IDS)[number]
+export type TaskSkillId = BuiltInTaskSkillId | null
+export type TaskSessionStatus =
+  | "idle"
+  | "running"
+  | "waiting-input"
+  | "completed"
+  | "failed"
+  | "cancelled"
+
+export const REQUEST_USER_INPUT_TOOL_NAME = "request-user-input" as const
+export const PUBLISH_RESEARCH_PLAN_TOOL_NAME = "publish-research-plan" as const
+
+export type TaskUserInputOption = {
+  description?: string
+  id: string
+  label: string
+}
+
+export type TaskUserInputQuestion = {
+  allowCustom?: boolean
+  id: string
+  kind: "single" | "multiple" | "text"
+  options?: TaskUserInputOption[]
+  prompt: string
+  required?: boolean
+}
+
+export type TaskUserInputRequest = {
+  description?: string
+  questions: TaskUserInputQuestion[]
+  title?: string
+}
+
+export type TaskUserInputAnswer = {
+  optionIds?: string[]
+  questionId: string
+  text?: string
+}
+
+export type TaskUserInputResult =
+  | { answers: TaskUserInputAnswer[]; status: "answered" }
+  | { status: "dismissed" | "skipped" }
+
+export type TaskResearchQuestion = {
+  id: string
+  title: string
+}
+
+export type TaskResearchPlanInput = {
+  deliverable?: string
+  objective: string
+  questions: TaskResearchQuestion[]
+  scope?: string
+}
+
+export type TaskResearchPlanOutput = {
+  questionIds: string[]
+  status: "published"
+}
 
 export type TaskMessageMetadata = {
   configId?: string
@@ -211,6 +283,7 @@ export type TaskSessionSummary = {
   createdAt: number
   id: string
   mode: TaskMode
+  skillId: TaskSkillId
   status: TaskSessionStatus
   title: string
   updatedAt: number
@@ -226,6 +299,7 @@ export type TaskSessionSaveInput = {
   id: string
   messages: TaskMessage[]
   mode: TaskMode
+  skillId: TaskSkillId
   status: TaskSessionStatus
   title: string
   workspaceId: string | null
@@ -236,6 +310,7 @@ export type AiChatStartInput = {
   currentDocumentPath?: string
   messages: TaskMessage[]
   mode: TaskMode
+  skillId: TaskSkillId
   modelId: string
   providerId: AiProviderId
   reasoning: AiChatReasoning
@@ -400,13 +475,10 @@ type SendMethod<Channel extends IpcChannel, Arguments extends readonly unknown[]
   void
 >
 
-type SubscribeMethod<Channel extends IpcChannel, EventArguments extends readonly unknown[]> =
-  DesktopApiMethodContract<
-    "subscribe",
-    Channel,
-    [listener: (...event: EventArguments) => void],
-    () => void
-  >
+type SubscribeMethod<
+  Channel extends IpcChannel,
+  EventArguments extends readonly unknown[],
+> = DesktopApiMethodContract<"subscribe", Channel, [listener: (...event: EventArguments) => void], () => void>
 
 /**
  * 桌面桥接的唯一类型事实源。
@@ -427,11 +499,7 @@ export type DesktopApiContract = {
     WorkspaceInfo
   >
   revealCurrentWorkspace: InvokeMethod<typeof IPC_CHANNELS.workspaceReveal, [], void>
-  revealWorkspace: InvokeMethod<
-    typeof IPC_CHANNELS.workspaceRevealRecent,
-    [workspaceId: string],
-    void
-  >
+  revealWorkspace: InvokeMethod<typeof IPC_CHANNELS.workspaceRevealRecent, [workspaceId: string], void>
   copyWorkspacePath: InvokeMethod<typeof IPC_CHANNELS.workspaceCopyPath, [workspaceId: string], void>
   removeRecentWorkspace: InvokeMethod<
     typeof IPC_CHANNELS.workspaceRemoveRecent,
@@ -474,11 +542,7 @@ export type DesktopApiContract = {
     [relativePath: string, kind: WorkspaceEntryKind],
     boolean
   >
-  revealWorkspaceEntry: InvokeMethod<
-    typeof IPC_CHANNELS.workspaceEntryReveal,
-    [relativePath: string],
-    void
-  >
+  revealWorkspaceEntry: InvokeMethod<typeof IPC_CHANNELS.workspaceEntryReveal, [relativePath: string], void>
   copyWorkspaceEntryPath: InvokeMethod<
     typeof IPC_CHANNELS.workspaceEntryCopyPath,
     [relativePath: string],
@@ -525,10 +589,7 @@ export type DesktopApiContract = {
   deleteTask: InvokeMethod<typeof IPC_CHANNELS.taskDelete, [taskId: string], boolean>
   onAiProviderConfigsChanged: SubscribeMethod<typeof IPC_CHANNELS.aiProviderConfigsChanged, []>
   onAiChatEvent: SubscribeMethod<typeof IPC_CHANNELS.aiChatEvent, [event: AiChatStreamEvent]>
-  onWorkspaceChanged: SubscribeMethod<
-    typeof IPC_CHANNELS.workspaceChanged,
-    [event: WorkspaceChangeEvent]
-  >
+  onWorkspaceChanged: SubscribeMethod<typeof IPC_CHANNELS.workspaceChanged, [event: WorkspaceChangeEvent]>
   onCloseRequested: SubscribeMethod<typeof IPC_CHANNELS.appCloseRequested, []>
 }
 
@@ -541,6 +602,13 @@ export type DesktopApiMethodByKind<Kind extends DesktopApiMethodKind> = {
 export type DesktopApiArguments<Method extends DesktopApiMethod> = DesktopApiContract[Method]["arguments"]
 export type DesktopApiReturn<Method extends DesktopApiMethod> = DesktopApiContract[Method]["return"]
 export type DesktopApiChannel<Method extends DesktopApiMethod> = DesktopApiContract[Method]["channel"]
+
+export type DesktopApiMethodByChannel<
+  Channel extends IpcChannel,
+  Kind extends DesktopApiMethodKind = DesktopApiMethodKind,
+> = {
+  [Method in DesktopApiMethodByKind<Kind>]: DesktopApiChannel<Method> extends Channel ? Method : never
+}[DesktopApiMethodByKind<Kind>]
 
 export type DesktopApi = {
   readonly [Method in DesktopApiMethod]: (

@@ -93,7 +93,10 @@ describe("Typeset preferences", () => {
       typesetSize: 8,
     })
 
-    expect(preferences).toEqual(TYPESET_REFERENCE_PRESET)
+    expect(preferences).toEqual({
+      ...TYPESET_REFERENCE_PRESET,
+      typesetHeadingFont: "montserrat",
+    })
     expect(createTypesetCssVariables(preferences)).toMatchObject({
       "--editor-measure": "70ch",
       "--editor-typeset-flow": "1em",

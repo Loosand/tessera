@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 最近任务、最近工作区与顶层导航回调
- * [OUTPUT]: 工作区之外的一级桌面侧栏，提供新任务、聚合页、最近对话与工作区列表
+ * [INPUT]: 最近任务、最近工作区与新任务/工作区/Skill 顶层导航回调
+ * [OUTPUT]: 工作区之外的一级桌面侧栏，提供新任务、聚合页、Skill、最近对话与工作区列表
  * [POS]: Tessera 两级导航中的一级侧栏
  * [DOC]: design.md、docs/architecture/task-navigation.md
  *
@@ -12,6 +12,7 @@
 
 import type { TaskSessionSummary, WorkspaceInfo } from "@tessera/contracts"
 import {
+  BookOpen01Icon,
   Folder01Icon,
   Home05Icon,
   Message01Icon,
@@ -25,7 +26,7 @@ import { TaskContextMenu } from "./task-context-menu"
 import { WorkspaceContextMenu } from "./workspace-context-menu"
 
 interface HomeSidebarProps {
-  activeItem: "new-task" | "workspaces"
+  activeItem: "new-task" | "skills" | "workspaces"
   recentTasks: TaskSessionSummary[]
   workspaces: WorkspaceInfo[]
   onCollapse: () => void
@@ -38,6 +39,7 @@ interface HomeSidebarProps {
   onRevealWorkspace: (workspaceId: string) => void
   onCopyWorkspacePath: (workspaceId: string) => void
   onRemoveWorkspace: (workspaceId: string) => void
+  onShowSkills: () => void
   onShowWorkspaces: () => void
 }
 
@@ -79,6 +81,7 @@ export function HomeSidebar({
   onRevealWorkspace,
   onCopyWorkspacePath,
   onRemoveWorkspace,
+  onShowSkills,
   onShowWorkspaces,
 }: HomeSidebarProps) {
   return (
@@ -110,6 +113,12 @@ export function HomeSidebar({
             label="工作区"
             active={activeItem === "workspaces"}
             onClick={onShowWorkspaces}
+          />
+          <NavigationRow
+            icon={BookOpen01Icon}
+            label="技能"
+            active={activeItem === "skills"}
+            onClick={onShowSkills}
           />
         </div>
 

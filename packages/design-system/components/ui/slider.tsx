@@ -19,6 +19,7 @@ function Slider({
   value,
   min = 0,
   max = 100,
+  "aria-label": ariaLabel,
   ...props
 }: SliderPrimitive.Root.Props) {
   const values = Array.isArray(value) ? value : Array.isArray(defaultValue) ? defaultValue : [min, max]
@@ -35,22 +36,27 @@ function Slider({
       value={value}
       min={min}
       max={max}
+      aria-label={ariaLabel}
       thumbAlignment="edge"
       {...props}
     >
       <SliderPrimitive.Control className="relative flex w-full touch-none items-center py-2 select-none data-[orientation=vertical]:h-full data-[orientation=vertical]:min-h-40 data-[orientation=vertical]:w-auto data-[orientation=vertical]:flex-col data-[orientation=vertical]:px-2 data-[orientation=vertical]:py-0">
         <SliderPrimitive.Track
           data-slot="slider-track"
-          className="relative grow rounded-full bg-muted select-none data-[orientation=horizontal]:h-1.5 data-[orientation=horizontal]:w-full data-[orientation=vertical]:h-full data-[orientation=vertical]:w-1.5"
+          className="relative grow rounded-full bg-border select-none data-[orientation=horizontal]:h-1.5 data-[orientation=horizontal]:w-full data-[orientation=vertical]:h-full data-[orientation=vertical]:w-1.5"
         >
           <SliderPrimitive.Indicator
             data-slot="slider-range"
             className="rounded-full bg-primary select-none data-[orientation=horizontal]:h-full data-[orientation=vertical]:w-full"
           />
-          {thumbKeys.map((thumbKey) => (
+          {thumbKeys.map((thumbKey, index) => (
             <SliderPrimitive.Thumb
               data-slot="slider-thumb"
               key={thumbKey}
+              index={index}
+              aria-label={
+                thumbKeys.length === 1 ? ariaLabel : ariaLabel ? `${ariaLabel} ${index + 1}` : undefined
+              }
               className="block size-4 shrink-0 rounded-full border border-primary bg-background shadow-sm ring-ring/40 transition-[color,box-shadow] select-none after:absolute after:-inset-2.5 hover:ring-4 has-[:focus-visible]:ring-4 has-[:focus-visible]:outline-hidden active:ring-4 disabled:pointer-events-none disabled:opacity-50"
             />
           ))}

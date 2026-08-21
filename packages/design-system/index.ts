@@ -11,9 +11,23 @@
  */
 
 export * from "./components/icons"
+export {
+  ActivityTrace,
+  type ActivityTraceProps,
+  type ActivityTraceStatus,
+} from "./components/activity-trace"
 export { LoadingState, type LoadingStateProps, type LoadingStateVariant } from "./components/loading-state"
 export { SettingRow, type SettingRowProps } from "./components/setting-row"
 export { SettingSection, type SettingSectionProps } from "./components/setting-section"
+export {
+  ToolChips,
+  type ToolChipDiff,
+  type ToolChipDiffLine,
+  type ToolChipDiffLineTone,
+  type ToolChipItem,
+  type ToolChipStatus,
+  type ToolChipsProps,
+} from "./components/tool-chips"
 export { Button, buttonVariants } from "./components/ui/button"
 export { Icon, type IconProps } from "./components/ui/icon"
 export {

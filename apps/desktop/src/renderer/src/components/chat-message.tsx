@@ -1,6 +1,6 @@
 /**
- * [INPUT]: AI SDK UIMessage、当前回复状态、变更预览/审批、文件跳转与重新生成回调
- * [OUTPUT]: 用户消息与按原始 Part 顺序、稳定唯一键组合的助手回复、工具审查及轻量消息操作
+ * [INPUT]: AI SDK UIMessage、当前回复状态、客户端问答结果、变更预览/审批、文件跳转与重新生成回调
+ * [OUTPUT]: 用户消息与按原始 Part 顺序、稳定唯一键组合的助手回复、问答/研究计划、搜索轨迹、工具审查及轻量消息操作
  * [POS]: task-page 的 Chat/Agent 消息协调层
  * [DOC]: design.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
  *
@@ -11,15 +11,18 @@
  */
 
 import type { UIMessage } from "@tessera/ai/react"
-import type { AgentChangePreview } from "@tessera/contracts"
+import type { AgentChangePreview, TaskUserInputResult } from "@tessera/contracts"
 import { Copy01Icon, Refresh01Icon } from "@tessera/design-system/components/icons"
 import { LoadingState } from "@tessera/design-system/components/loading-state"
 import { Button } from "@tessera/design-system/components/ui/button"
 import { Icon } from "@tessera/design-system/components/ui/icon"
 import { ReasoningPart } from "./chat-parts/reasoning-part"
+import { ResearchPlanPart, isResearchPlanToolPart } from "./chat-parts/research-plan-part"
 import { SourcePart } from "./chat-parts/source-part"
 import { TextPart } from "./chat-parts/text-part"
 import { ToolPart, isToolPart } from "./chat-parts/tool-part"
+import { UserInputPart, isUserInputToolPart } from "./chat-parts/user-input-part"
+import { WebSearchPart, isWebSearchToolPart } from "./chat-parts/web-search-part"
 
 interface ChatMessageProps {
   isLast: boolean
@@ -28,6 +31,9 @@ interface ChatMessageProps {
   onOpenDocument?: ((path: string, line?: number) => void) | undefined
   onRegenerate: () => void
   onToolApproval?: ((approvalId: string, approved: boolean) => void) | undefined
+  onUserInput?:
+    | ((toolCallId: string, output: TaskUserInputResult) => void | PromiseLike<void>)
+    | undefined
   running: boolean
 }
 
@@ -49,12 +55,14 @@ export function ChatMessage({
   onOpenDocument,
   onRegenerate,
   onToolApproval,
+  onUserInput,
   running,
 }: ChatMessageProps) {
   const text = messageText(message)
   const files = message.parts.filter((part) => part.type === "file")
   const hasReasoning = message.parts.some((part) => part.type === "reasoning")
   const assistantStreaming = running && isLast
+  const firstWebSearchIndex = message.parts.findIndex(isWebSearchToolPart)
   let lastTextPartIndex = -1
   let lastReasoningPartIndex = -1
   for (let index = message.parts.length - 1; index >= 0; index -= 1) {
@@ -115,6 +123,17 @@ export function ChatMessage({
             />
           )
         }
+        if (isUserInputToolPart(part)) {
+          return <UserInputPart key={partKey} part={part} onSubmit={onUserInput} />
+        }
+        if (isResearchPlanToolPart(part)) {
+          return <ResearchPlanPart key={partKey} part={part} streaming={assistantStreaming} />
+        }
+        if (isWebSearchToolPart(part)) {
+          return index === firstWebSearchIndex ? (
+            <WebSearchPart key={partKey} parts={message.parts} streaming={assistantStreaming} />
+          ) : null
+        }
         if (isToolPart(part)) {
           return (
             <ToolPart
@@ -131,7 +150,11 @@ export function ChatMessage({
       {!text && !hasReasoning && assistantStreaming ? (
         <LoadingState className="py-2" label="正在思考" />
       ) : null}
-      <SourcePart parts={message.parts} streaming={assistantStreaming} />
+      <SourcePart
+        includeUrlSources={firstWebSearchIndex === -1}
+        parts={message.parts}
+        streaming={assistantStreaming}
+      />
 
       {text && !(running && isLast) ? (
         <div className="mt-2 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">

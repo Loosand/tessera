@@ -17,15 +17,15 @@ import { createXai } from "@ai-sdk/xai"
 import type { AiProviderConnectionInput } from "@tessera/contracts"
 import type { LanguageModel, ToolSet } from "ai"
 
-export interface AiLanguageModelInput extends AiProviderConnectionInput {
+export type AiLanguageModelInput = AiProviderConnectionInput & {
   modelId: string
 }
 
-export interface AiChatRuntimeOptions {
+export type AiChatRuntimeOptions = {
   webSearch?: boolean
 }
 
-export interface AiSdkChatRuntime {
+export type AiSdkChatRuntime = {
   model: LanguageModel
   tools?: ToolSet
 }
@@ -45,7 +45,7 @@ function normalizedRuntimeInput(input: AiLanguageModelInput) {
     throw new Error("API 地址必须是完整的 http(s) URL。")
   }
   if (
-    !(["http:", "https:"] as const).includes(parsedBaseUrl.protocol as "http:" | "https:") ||
+    (parsedBaseUrl.protocol !== "http:" && parsedBaseUrl.protocol !== "https:") ||
     parsedBaseUrl.username ||
     parsedBaseUrl.password ||
     parsedBaseUrl.search ||

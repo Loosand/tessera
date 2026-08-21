@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 加载提示、像素动画变体、可选 Surfer 视频与标准 div 属性
+ * [INPUT]: 加载提示、像素动画变体、可选 Surfer 视频与标准 output 属性
  * [OUTPUT]: 带像素网格、低干扰状态文案和实时耗时的 LoadingState 复合组件
  * [POS]: 设计系统中供长耗时任务复用的状态反馈模式
  * [DOC]: design.md
@@ -11,7 +11,7 @@
  */
 
 import { cn } from "@tessera/design-system/lib/utils"
-import { type ComponentProps, type CSSProperties, useEffect, useState, useSyncExternalStore } from "react"
+import { type CSSProperties, type ComponentProps, useEffect, useState, useSyncExternalStore } from "react"
 
 const CELL_KEYS = [
   "top-start",
@@ -23,7 +23,7 @@ const CELL_KEYS = [
   "bottom-start",
   "bottom",
   "bottom-end",
-]
+] as const
 
 const chevronDelays = Array.from({ length: 9 }, (_, index) => {
   const row = Math.floor(index / 3)
@@ -31,31 +31,44 @@ const chevronDelays = Array.from({ length: 9 }, (_, index) => {
   return (column + Math.abs(row - 1)) * 90
 })
 
-const ORBIT_ORDER = [0, 1, 2, 5, 8, 7, 6, 3]
+const ORBIT_ORDER: readonly number[] = [0, 1, 2, 5, 8, 7, 6, 3]
 const orbitDelays = Array.from({ length: 9 }, (_, index) => {
   const order = ORBIT_ORDER.indexOf(index)
   return order === -1 ? null : order * 110
 })
 
-interface LoaderPattern {
-  delays: (number | null)[]
+type LoaderPattern = Readonly<{
+  delays: readonly (number | null)[]
   duration: number
   round: boolean
+}>
+
+type LoadingPixelStyle = CSSProperties & {
+  "--loading-delay": `${number}ms`
+  "--loading-duration": `${number}ms`
+}
+
+function loadingPixelStyle(delay: number | null, duration: number): LoadingPixelStyle {
+  return {
+    "--loading-delay": `${delay ?? 0}ms`,
+    "--loading-duration": `${duration}ms`,
+  }
 }
 
 const GRID_PATTERNS = {
   drive: { delays: chevronDelays, duration: 650, round: false },
   dots: { delays: chevronDelays, duration: 650, round: true },
   orbit: { delays: orbitDelays, duration: 950, round: false },
-} satisfies Record<Exclude<LoadingStateVariant, "surfer">, LoaderPattern>
+} as const satisfies Record<string, LoaderPattern>
 
-export type LoadingStateVariant = "drive" | "dots" | "orbit" | "surfer"
+export type LoadingStateVariant = keyof typeof GRID_PATTERNS | "surfer"
 
-export interface LoadingStateProps extends Omit<ComponentProps<"div">, "children"> {
-  label?: string
-  variant?: LoadingStateVariant
-  videoSrc?: string
-}
+export type LoadingStateProps = Omit<ComponentProps<"output">, "children"> &
+  Readonly<{
+    label?: string
+    variant?: LoadingStateVariant
+    videoSrc?: string
+  }>
 
 function LoaderGrid({ delays, duration, round }: LoaderPattern) {
   return (
@@ -72,12 +85,7 @@ function LoaderGrid({ delays, duration, round }: LoaderPattern) {
             round ? "rounded-full" : "rounded-[1px]",
           )}
           data-inactive={delay === null ? "" : undefined}
-          style={
-            {
-              "--loading-delay": `${delay ?? 0}ms`,
-              "--loading-duration": `${duration}ms`,
-            } as CSSProperties
-          }
+          style={loadingPixelStyle(delay, duration)}
         />
       ))}
     </span>
@@ -159,19 +167,20 @@ export function LoadingState({
 
   if (surfer) {
     return (
-      <div
+      <output
         className={cn("flex w-fit flex-col items-start", className)}
         data-slot="loading-state"
-        role="status"
         {...props}
       >
         <span className="sr-only">{ariaLabel ?? resolvedLabel}</span>
         {status}
-        <div className="tessera-loading-surface mt-2 w-56 overflow-hidden rounded-lg bg-popover shadow-lg ring-1 ring-foreground/10">
+        <div
+          aria-hidden="true"
+          className="tessera-loading-surface mt-2 w-56 overflow-hidden rounded-lg bg-popover shadow-lg ring-1 ring-foreground/10"
+        >
           <div className="relative aspect-video w-full bg-muted">
             {videoAvailable && !reducedMotion ? (
               <video
-                aria-hidden="true"
                 autoPlay
                 className="size-full object-cover"
                 key={videoSrc}
@@ -191,19 +200,14 @@ export function LoadingState({
             )}
           </div>
         </div>
-      </div>
+      </output>
     )
   }
 
   return (
-    <div
-      className={cn("flex w-fit items-center", className)}
-      data-slot="loading-state"
-      role="status"
-      {...props}
-    >
+    <output className={cn("flex w-fit items-center", className)} data-slot="loading-state" {...props}>
       <span className="sr-only">{ariaLabel ?? resolvedLabel}</span>
       {status}
-    </div>
+    </output>
   )
 }
