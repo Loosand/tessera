@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 首批 AI API 供应商元数据、LobeHub 图标、持久化配置与类型化模型发现函数
- * [OUTPUT]: 可恢复配置、加密密钥状态、全部/详情主从工作区、连接测试与可批量启停的分组模型目录
+ * [OUTPUT]: 可恢复配置、加密密钥状态、全部/详情主从工作区、连接测试与即时持久化的分组模型目录
  * [POS]: @tessera/ai/react 提供的模型供应商管理视图
  * [DOC]: design.md、docs/architecture/ai-providers.md
  *
@@ -44,6 +44,7 @@ import {
   mergeDiscoveredAiProviderModels,
   setAllAiProviderModelsEnabled,
 } from "../provider-catalog"
+import { AiModelIcon } from "./ai-model-icon"
 
 const PROVIDER_ICON_KEYS: Record<AiProviderId, string> = {
   "openai-compatible": "openai",
@@ -52,11 +53,6 @@ const PROVIDER_ICON_KEYS: Record<AiProviderId, string> = {
   grok: "xai",
   openrouter: "openrouter",
 }
-
-const ModelIcon = lazy(async () => {
-  const icons = await import("@lobehub/icons")
-  return { default: icons.ModelIcon }
-})
 
 const ProviderIcon = lazy(async () => {
   const icons = await import("@lobehub/icons")
@@ -320,6 +316,7 @@ interface ProviderDetailProps {
   onApiKeyChange: (apiKey: string) => void
   onDelete: () => Promise<void>
   onListModels: (input: AiProviderConnectionInput) => Promise<AiProviderModel[]>
+  onPersist: (update: Partial<AiProviderDraft>) => Promise<void>
   onSave: (apiKey: string) => Promise<void>
   onUpdate: (update: Partial<AiProviderDraft>) => void
   provider: AiProviderDefinition
@@ -338,13 +335,14 @@ function formatTokenLimit(value: number): string {
 }
 
 interface ProviderModelGroupProps {
+  disabled: boolean
   label: string
   models: readonly AiProviderModelDraft[]
   onDelete: (modelId: string) => void
   onToggle: (modelId: string, enabled: boolean) => void
 }
 
-function ProviderModelGroup({ label, models, onDelete, onToggle }: ProviderModelGroupProps) {
+function ProviderModelGroup({ disabled, label, models, onDelete, onToggle }: ProviderModelGroupProps) {
   if (models.length === 0) return null
 
   return (
@@ -359,11 +357,7 @@ function ProviderModelGroup({ label, models, onDelete, onToggle }: ProviderModel
             key={model.id}
             className="flex min-h-14 items-center gap-3 border-b border-border px-4 py-2.5 [contain-intrinsic-size:auto_60px] [content-visibility:auto] last:border-b-0"
           >
-            <span className="flex size-8 shrink-0 items-center justify-center" aria-hidden="true">
-              <Suspense fallback={<span className="size-8 animate-pulse rounded-full bg-muted" />}>
-                <ModelIcon model={model.id} shape="circle" size={32} type="avatar" />
-              </Suspense>
-            </span>
+            <AiModelIcon modelId={model.id} size={32} />
             <div className="min-w-0 flex-1">
               <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
                 <p className="truncate text-[13px] font-medium text-foreground">{model.name || model.id}</p>
@@ -383,6 +377,7 @@ function ProviderModelGroup({ label, models, onDelete, onToggle }: ProviderModel
             </div>
             <Switch
               checked={model.enabled}
+              disabled={disabled}
               size="sm"
               onCheckedChange={(enabled) => onToggle(model.id, enabled)}
               aria-label={`${model.enabled ? "停用" : "启用"}模型 ${model.id}`}
@@ -391,6 +386,7 @@ function ProviderModelGroup({ label, models, onDelete, onToggle }: ProviderModel
               variant="ghost"
               size="icon-sm"
               className="text-muted-foreground"
+              disabled={disabled}
               aria-label={`删除模型 ${model.id}`}
               onClick={() => onDelete(model.id)}
             >
@@ -409,6 +405,7 @@ function ProviderDetail({
   onApiKeyChange,
   onDelete,
   onListModels,
+  onPersist,
   onSave,
   onUpdate,
   provider,
@@ -419,7 +416,9 @@ function ProviderDetail({
   const [modelSearch, setModelSearch] = useState("")
   const deferredModelSearch = useDeferredValue(modelSearch)
   const [notice, setNotice] = useState<ProviderNotice | null>(null)
-  const [activeRequest, setActiveRequest] = useState<"connection" | "delete" | "models" | "save" | null>(null)
+  const [activeRequest, setActiveRequest] = useState<
+    "connection" | "delete" | "model-state" | "models" | "save" | null
+  >(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const automaticCatalogRequest = useRef(false)
   const normalizedModelSearch = deferredModelSearch.trim().toLocaleLowerCase()
@@ -441,12 +440,53 @@ function ProviderDetail({
   const allModelsEnabled = hasModels && draft.models.every((model) => model.enabled)
   const allModelsDisabled = hasModels && draft.models.every((model) => !model.enabled)
 
+  const persistModels = useCallback(
+    async (models: readonly AiProviderModelDraft[], successText: string) => {
+      setActiveRequest("model-state")
+      setNotice(null)
+      try {
+        await onPersist({ models: [...models] })
+        setNotice({ kind: "success", scope: "models", text: successText })
+      } catch (error) {
+        setNotice({
+          kind: "error",
+          scope: "models",
+          text: error instanceof Error ? error.message : "保存模型配置失败。",
+        })
+      } finally {
+        setActiveRequest(null)
+      }
+    },
+    [onPersist],
+  )
+
   const addModel = () => {
     const models = appendAiProviderModel(draft.models, modelInput, provider.id)
     if (models.length === draft.models.length) return
-    onUpdate({ models })
     setModelInput("")
     setShowModelInput(false)
+    void persistModels(models, "模型已添加并保存。")
+  }
+
+  const persistProviderEnabled = async (enabled: boolean) => {
+    setActiveRequest("save")
+    setNotice(null)
+    try {
+      await onPersist({ enabled })
+      setNotice({
+        kind: "success",
+        scope: "connection",
+        text: enabled ? "供应商已启用。" : "供应商已停用。",
+      })
+    } catch (error) {
+      setNotice({
+        kind: "error",
+        scope: "connection",
+        text: error instanceof Error ? error.message : "保存供应商状态失败。",
+      })
+    } finally {
+      setActiveRequest(null)
+    }
   }
 
   const saveConfig = async () => {
@@ -512,20 +552,16 @@ function ProviderDetail({
         })
         if (scope === "models") {
           const mergedModels = mergeDiscoveredAiProviderModels(draft.models, models, provider.id)
-          onUpdate({
-            models: mergedModels,
-            apiKeyConfigured: draft.apiKeyConfigured || apiKey.trim().length > 0,
-          })
+          await onPersist({ models: mergedModels })
           setNotice({
             kind: "success",
             scope,
             text:
               models.length > 0
-                ? `已从供应商获取 ${models.length} 个模型，当前列表共 ${mergedModels.length} 个；只有单模型目录会自动启用。`
-                : "连接成功，但供应商返回了空模型列表。",
+                ? `已同步并保存 ${models.length} 个模型，当前列表共 ${mergedModels.length} 个；只有单模型目录会自动启用。`
+                : "连接成功，供应商返回了空模型列表，现有配置已保存。",
           })
         } else {
-          onUpdate({ apiKeyConfigured: draft.apiKeyConfigured || apiKey.trim().length > 0 })
           setNotice({
             kind: "success",
             scope,
@@ -542,7 +578,7 @@ function ProviderDetail({
         setActiveRequest(null)
       }
     },
-    [apiKey, draft.apiKeyConfigured, draft.baseUrl, draft.models, onListModels, onUpdate, provider.id],
+    [apiKey, draft.baseUrl, draft.models, onListModels, onPersist, provider.id],
   )
 
   const hasBaseUrl = draft.baseUrl.trim().length > 0
@@ -589,7 +625,8 @@ function ProviderDetail({
           </div>
           <Switch
             checked={draft.enabled}
-            onCheckedChange={(enabled) => onUpdate({ enabled })}
+            disabled={activeRequest !== null}
+            onCheckedChange={(enabled) => void persistProviderEnabled(enabled)}
             aria-label={`${draft.enabled ? "停用" : "启用"}${provider.name}`}
           />
         </header>
@@ -736,16 +773,26 @@ function ProviderDetail({
               <Button
                 variant="outline"
                 size="sm"
-                disabled={!hasModels || allModelsEnabled}
-                onClick={() => onUpdate({ models: setAllAiProviderModelsEnabled(draft.models, true) })}
+                disabled={!hasModels || allModelsEnabled || activeRequest !== null}
+                onClick={() =>
+                  void persistModels(
+                    setAllAiProviderModelsEnabled(draft.models, true),
+                    "全部模型已启用并保存。",
+                  )
+                }
               >
                 全部启用
               </Button>
               <Button
                 variant="outline"
                 size="sm"
-                disabled={!hasModels || allModelsDisabled}
-                onClick={() => onUpdate({ models: setAllAiProviderModelsEnabled(draft.models, false) })}
+                disabled={!hasModels || allModelsDisabled || activeRequest !== null}
+                onClick={() =>
+                  void persistModels(
+                    setAllAiProviderModelsEnabled(draft.models, false),
+                    "全部模型已停用并保存。",
+                  )
+                }
               >
                 全部停用
               </Button>
@@ -765,6 +812,7 @@ function ProviderDetail({
               <Button
                 variant="outline"
                 size="icon-sm"
+                disabled={activeRequest !== null}
                 aria-label={showModelInput ? "收起模型输入" : "手动添加模型"}
                 aria-expanded={showModelInput}
                 onClick={() => setShowModelInput((current) => !current)}
@@ -783,10 +831,10 @@ function ProviderDetail({
                   spellCheck={false}
                   onChange={(event) => setModelInput(event.currentTarget.value)}
                   onKeyDown={(event) => {
-                    if (event.key === "Enter") addModel()
+                    if (event.key === "Enter" && activeRequest === null) addModel()
                   }}
                 />
-                <Button size="sm" onClick={addModel} disabled={!modelInput.trim()}>
+                <Button size="sm" onClick={addModel} disabled={!modelInput.trim() || activeRequest !== null}>
                   添加
                 </Button>
               </div>
@@ -804,31 +852,37 @@ function ProviderDetail({
             {visibleModels.length > 0 ? (
               <div>
                 <ProviderModelGroup
+                  disabled={activeRequest !== null}
                   label="已启用"
                   models={visibleModelGroups.enabled}
                   onToggle={(modelId, enabled) =>
-                    onUpdate({
-                      models: draft.models.map((model) =>
-                        model.id === modelId ? { ...model, enabled } : model,
-                      ),
-                    })
+                    void persistModels(
+                      draft.models.map((model) => (model.id === modelId ? { ...model, enabled } : model)),
+                      `模型已${enabled ? "启用" : "停用"}并保存。`,
+                    )
                   }
                   onDelete={(modelId) =>
-                    onUpdate({ models: draft.models.filter((model) => model.id !== modelId) })
+                    void persistModels(
+                      draft.models.filter((model) => model.id !== modelId),
+                      "模型已删除并保存。",
+                    )
                   }
                 />
                 <ProviderModelGroup
+                  disabled={activeRequest !== null}
                   label="未启用"
                   models={visibleModelGroups.disabled}
                   onToggle={(modelId, enabled) =>
-                    onUpdate({
-                      models: draft.models.map((model) =>
-                        model.id === modelId ? { ...model, enabled } : model,
-                      ),
-                    })
+                    void persistModels(
+                      draft.models.map((model) => (model.id === modelId ? { ...model, enabled } : model)),
+                      `模型已${enabled ? "启用" : "停用"}并保存。`,
+                    )
                   }
                   onDelete={(modelId) =>
-                    onUpdate({ models: draft.models.filter((model) => model.id !== modelId) })
+                    void persistModels(
+                      draft.models.filter((model) => model.id !== modelId),
+                      "模型已删除并保存。",
+                    )
                   }
                 />
               </div>
@@ -923,17 +977,26 @@ export function AiProviderSettings({
       ? undefined
       : AI_PROVIDER_DEFINITIONS.find((provider) => provider.id === selectedProviderId)
 
-  const persistOverviewUpdate = (providerId: AiProviderId, update: Partial<AiProviderDraft>) => {
+  const persistProviderUpdate = async (
+    providerId: AiProviderId,
+    update: Partial<AiProviderDraft>,
+  ): Promise<void> => {
     const previous = drafts[providerId]
     const next = { ...previous, ...update }
     updateProvider(providerId, update)
     setPersistenceError(null)
-    void saveConfig(saveInputFromDraft(providerId, next))
-      .then((config) => updateProvider(providerId, draftFromConfig(config)))
-      .catch((error) => {
-        updateProvider(providerId, previous)
-        setPersistenceError(error instanceof Error ? error.message : "保存供应商配置失败。")
-      })
+    try {
+      const config = await saveConfig(saveInputFromDraft(providerId, next))
+      updateProvider(providerId, draftFromConfig(config))
+    } catch (error) {
+      updateProvider(providerId, previous)
+      setPersistenceError(error instanceof Error ? error.message : "保存供应商配置失败。")
+      throw error
+    }
+  }
+
+  const persistOverviewUpdate = (providerId: AiProviderId, update: Partial<AiProviderDraft>) => {
+    void persistProviderUpdate(providerId, update).catch(() => undefined)
   }
 
   if (!initialized) {
@@ -969,6 +1032,7 @@ export function AiProviderSettings({
               setApiKeys((current) => ({ ...current, [selectedProviderId]: apiKey }))
             }
             onListModels={listModels}
+            onPersist={(update) => persistProviderUpdate(selectedProviderId, update)}
             onSave={async (apiKey) => {
               const config = await saveConfig(
                 saveInputFromDraft(selectedProviderId, drafts[selectedProviderId], apiKey),

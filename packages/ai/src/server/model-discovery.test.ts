@@ -88,19 +88,20 @@ describe("AI 模型目录发现", () => {
   })
 
   it("读取 OpenRouter 返回的输入模态与可选参数能力", async () => {
-    const fetcher = vi.fn<typeof fetch>(async () =>
-      new Response(
-        JSON.stringify({
-          data: [
-            {
-              id: "vendor/vision-reasoner",
-              architecture: { input_modalities: ["text", "image"] },
-              supported_parameters: ["reasoning_effort", "tools"],
-            },
-          ],
-        }),
-        { status: 200 },
-      ),
+    const fetcher = vi.fn<typeof fetch>(
+      async () =>
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                id: "vendor/vision-reasoner",
+                architecture: { input_modalities: ["text", "image"] },
+                supported_parameters: ["reasoning_effort", "tools"],
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
     )
 
     await expect(

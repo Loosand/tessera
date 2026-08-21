@@ -14,13 +14,7 @@ import { SettingRow } from "@tessera/design-system/components/setting-row"
 import { SettingSection } from "@tessera/design-system/components/setting-section"
 import { Button } from "@tessera/design-system/components/ui/button"
 import { Input } from "@tessera/design-system/components/ui/input"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@tessera/design-system/components/ui/select"
+import { NativeSelect } from "@tessera/design-system/components/ui/native-select"
 import { Switch } from "@tessera/design-system/components/ui/switch"
 import type {
   AppPreferences,
@@ -174,28 +168,18 @@ export function AppearanceSettings({ preferences, onUpdatePreference }: Appearan
           title="浅色主题"
           description="更多内置与自定义配色将在主题系统接入后开放。"
           control={
-            <Select value="tessera" disabled>
-              <SelectTrigger className="w-48" aria-label="浅色主题">
-                <SelectValue>{() => "Tessera 浅色"}</SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="tessera">Tessera 浅色</SelectItem>
-              </SelectContent>
-            </Select>
+            <NativeSelect className="w-48" value="tessera" disabled aria-label="浅色主题">
+              <option value="tessera">Tessera 浅色</option>
+            </NativeSelect>
           }
         />
         <SettingRow
           title="深色主题"
           description="当前使用 Tessera 的默认深色语义色板。"
           control={
-            <Select value="tessera-dark" disabled>
-              <SelectTrigger className="w-48" aria-label="深色主题">
-                <SelectValue>{() => "Tessera 深色"}</SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="tessera-dark">Tessera 深色</SelectItem>
-              </SelectContent>
-            </Select>
+            <NativeSelect className="w-48" value="tessera-dark" disabled aria-label="深色主题">
+              <option value="tessera-dark">Tessera 深色</option>
+            </NativeSelect>
           }
         />
         <SettingRow
@@ -250,35 +234,29 @@ export function AppearanceSettings({ preferences, onUpdatePreference }: Appearan
           title="界面字体"
           description="切换后立即应用到应用界面；正文使用无衬线字体时会一并跟随。"
           control={
-            <Select
+            <NativeSelect
+              className="w-48"
               value={preferences.interfaceFont}
-              onValueChange={(value) => {
-                if (value && INTERFACE_FONT_LABELS[value]) onUpdatePreference("interfaceFont", value)
+              aria-label="界面字体"
+              onChange={(event) => {
+                onUpdatePreference("interfaceFont", event.currentTarget.value as InterfaceFontPreference)
               }}
             >
-              <SelectTrigger className="w-48" aria-label="界面字体">
-                <SelectValue>{(value: InterfaceFontPreference) => INTERFACE_FONT_LABELS[value]}</SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="system">系统默认</SelectItem>
-                <SelectItem value="geist">Geist</SelectItem>
-                <SelectItem value="open-sans">Open Sans</SelectItem>
-              </SelectContent>
-            </Select>
+              {Object.entries(INTERFACE_FONT_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </NativeSelect>
           }
         />
         <SettingRow
           title="等宽字体"
           description="用于 Markdown 源码、行内代码、代码块与开发者界面。"
           control={
-            <Select value="system-mono" disabled>
-              <SelectTrigger className="w-48" aria-label="等宽字体">
-                <SelectValue>{() => "系统等宽"}</SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="system-mono">系统等宽</SelectItem>
-              </SelectContent>
-            </Select>
+            <NativeSelect className="w-48" value="system-mono" disabled aria-label="等宽字体">
+              <option value="system-mono">系统等宽</option>
+            </NativeSelect>
           }
         />
         <SettingRow

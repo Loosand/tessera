@@ -1,6 +1,6 @@
 /**
  * [INPUT]: Electron 窄桥、当前模型选择、联网/思考开关与 AI SDK React 状态机
- * [OUTPUT]: 通过类型化 IPC 发送并消费增量事件的 useChat 封装
+ * [OUTPUT]: 可独立验证的 ElectronChatTransport 与通过类型化 IPC 消费增量事件的 useChat 封装
  * [POS]: @tessera/ai/react 中连接桌面渲染层与主进程普通对话运行时的 Transport
  * [DOC]: docs/architecture/ai-chat-agent-todo.md
  *
@@ -21,7 +21,7 @@ import type {
 import type { ChatTransport, UIMessage, UIMessageChunk } from "ai"
 import { useMemo, useRef } from "react"
 
-type ElectronChatBridge = Pick<DesktopApi, "cancelAiChat" | "onAiChatEvent" | "startAiChat">
+export type ElectronChatBridge = Pick<DesktopApi, "cancelAiChat" | "onAiChatEvent" | "startAiChat">
 
 export interface UseElectronChatOptions {
   bridge: ElectronChatBridge | undefined
@@ -58,7 +58,7 @@ function toAiChatMessages(messages: readonly UIMessage[]): AiChatMessage[] {
   })
 }
 
-class ElectronChatTransport implements ChatTransport<UIMessage> {
+export class ElectronChatTransport implements ChatTransport<UIMessage> {
   constructor(private readonly options: () => UseElectronChatOptions) {}
 
   async sendMessages({ messages, abortSignal }: Parameters<ChatTransport<UIMessage>["sendMessages"]>[0]) {

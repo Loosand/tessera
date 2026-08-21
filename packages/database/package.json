@@ -10,6 +10,7 @@
     "./client": "./client.ts",
     "./migrations": "./migrations/index.ts",
     "./schema": "./schema.ts",
+    "./task-session-repository": "./task-session-repository.ts",
     "./workspace-repository": "./workspace-repository.ts"
   },
   "scripts": {

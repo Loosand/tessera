@@ -23,7 +23,9 @@ const model = (id: string) => ({
 
 describe("模型能力归一化", () => {
   it("识别 DeepSeek 视觉与推理模型", () => {
-    expect(resolveAiModelCapabilities("deepseek", model("deepseek-v4-flash-vision-exp")).capabilities).toEqual({
+    expect(
+      resolveAiModelCapabilities("deepseek", model("deepseek-v4-flash-vision-exp")).capabilities,
+    ).toEqual({
       imageInput: "supported",
       reasoning: "supported",
       search: "unsupported",
@@ -66,4 +68,3 @@ describe("模型能力归一化", () => {
     })
   })
 })
-

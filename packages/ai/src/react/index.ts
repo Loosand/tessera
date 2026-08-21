@@ -10,6 +10,7 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
+export { AiModelIcon, type AiModelIconProps } from "./ai-model-icon"
 export { type AiProviderSettingsProps, AiProviderSettings } from "./ai-provider-settings"
 export { AiSettings } from "./ai-settings"
 export {

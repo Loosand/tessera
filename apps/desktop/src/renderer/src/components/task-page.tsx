@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 侧栏/设置回调、已持久化 AI 模型、Electron useChat Transport 与本地输入草稿
- * [OUTPUT]: 从居中新任务输入平滑进入多轮流式对话的普通 AI 对话页面
+ * [INPUT]: 视图激活状态、侧栏/设置回调、自动同步 AI 模型、Electron useChat Transport 与本地输入草稿
+ * [OUTPUT]: 从居中新任务输入平滑进入可脱离贴底阅读的多轮流式对话页面
  * [POS]: Tessera 主导航中的普通对话与后续 Agent 共用任务表面
  * [DOC]: design.md、docs/architecture/ai-chat-agent-todo.md
  *
@@ -15,17 +15,26 @@ import type { AiChatReasoning } from "@tessera/contracts"
 import { PanelLeftOpenIcon, Settings01Icon } from "@tessera/design-system/components/icons"
 import { Button } from "@tessera/design-system/components/ui/button"
 import { Icon } from "@tessera/design-system/components/ui/icon"
-import { useEffect, useMemo, useRef, useState } from "react"
+import {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from "@tessera/design-system/components/ui/message-scroller"
+import { useEffect, useMemo, useState } from "react"
 import { useAiModels } from "../hooks/use-ai-models"
 import { ChatMessage } from "./chat-message"
-import { type ComposerImage, TaskComposer, aiModelKey } from "./task-composer"
+import { aiModelKey } from "./model-picker"
+import { type ComposerImage, TaskComposer } from "./task-composer"
 
 const ACCEPTED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"])
 const MAX_IMAGES = 4
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024
 
 interface TaskPageProps {
-  hasWorkspace: boolean
+  active: boolean
   sidebarOpen: boolean
   onToggleSidebar: () => void
   onOpenSettings: () => void
@@ -42,15 +51,14 @@ function fileDataUrl(file: File): Promise<string> {
   })
 }
 
-export function TaskPage({ hasWorkspace, sidebarOpen, onToggleSidebar, onOpenSettings }: TaskPageProps) {
-  const { error: modelError, loading, models } = useAiModels()
+export function TaskPage({ active, sidebarOpen, onToggleSidebar, onOpenSettings }: TaskPageProps) {
+  const { error: modelError, loading, models, refresh: refreshModels } = useAiModels()
   const [selectedModelKey, setSelectedModelKey] = useState("")
   const [prompt, setPrompt] = useState("")
   const [images, setImages] = useState<ComposerImage[]>([])
   const [webSearch, setWebSearch] = useState(false)
   const [reasoning, setReasoning] = useState<AiChatReasoning>("auto")
   const [notice, setNotice] = useState("")
-  const conversationEndRef = useRef<HTMLDivElement>(null)
   const selectedModel = useMemo(
     () => models.find((model) => aiModelKey(model) === selectedModelKey),
     [models, selectedModelKey],
@@ -65,6 +73,10 @@ export function TaskPage({ hasWorkspace, sidebarOpen, onToggleSidebar, onOpenSet
   const running = chat.status === "submitted" || chat.status === "streaming"
 
   useEffect(() => {
+    if (active) void refreshModels()
+  }, [active, refreshModels])
+
+  useEffect(() => {
     if (selectedModel) return
     setSelectedModelKey(models[0] ? aiModelKey(models[0]) : "")
   }, [models, selectedModel])
@@ -75,11 +87,6 @@ export function TaskPage({ hasWorkspace, sidebarOpen, onToggleSidebar, onOpenSet
     if (selectedModel.capabilities?.reasoning !== "supported") setReasoning("auto")
     if (selectedModel.capabilities?.imageInput === "unsupported") setImages([])
   }, [selectedModel])
-
-  useEffect(() => {
-    if (chat.messages.length === 0) return
-    conversationEndRef.current?.scrollIntoView({ behavior: running ? "auto" : "smooth", block: "end" })
-  }, [chat.messages, running])
 
   const addImages = async (files: FileList) => {
     const availableSlots = MAX_IMAGES - images.length
@@ -133,13 +140,7 @@ export function TaskPage({ hasWorkspace, sidebarOpen, onToggleSidebar, onOpenSet
     notice ||
     chat.error?.message ||
     modelError ||
-    (loading
-      ? "正在读取可用模型…"
-      : models.length === 0
-        ? "请先在设置中保存并启用一个供应商与模型。"
-        : hasWorkspace
-          ? "普通对话不会读取当前工作区；只有你输入或上传的内容会发给模型。"
-          : "普通对话只会发送你输入或上传的内容。")
+    (loading ? "正在读取可用模型…" : models.length === 0 ? "请先在设置中保存并启用一个供应商与模型。" : "")
 
   const composer = (compact = false) => (
     <TaskComposer
@@ -221,20 +222,29 @@ export function TaskPage({ hasWorkspace, sidebarOpen, onToggleSidebar, onOpenSet
         </div>
       ) : (
         <>
-          <div className="min-h-0 flex-1 overflow-y-auto px-5">
-            <div className="mx-auto w-full max-w-3xl space-y-8 py-8 pb-12">
-              {chat.messages.map((message, index) => (
-                <ChatMessage
-                  key={message.id}
-                  message={message}
-                  isLast={index === chat.messages.length - 1}
-                  running={running}
-                  onRegenerate={() => void chat.regenerate()}
-                />
-              ))}
-              <div ref={conversationEndRef} className="h-px" />
-            </div>
-          </div>
+          <MessageScrollerProvider autoScroll defaultScrollPosition="end">
+            <MessageScroller className="min-h-0 flex-1">
+              <MessageScrollerViewport className="px-5" aria-label="对话消息">
+                <MessageScrollerContent className="mx-auto w-full max-w-3xl gap-8 py-8 pb-12">
+                  {chat.messages.map((message, index) => (
+                    <MessageScrollerItem
+                      key={message.id}
+                      messageId={message.id}
+                      scrollAnchor={message.role === "user"}
+                    >
+                      <ChatMessage
+                        message={message}
+                        isLast={index === chat.messages.length - 1}
+                        running={running}
+                        onRegenerate={() => void chat.regenerate()}
+                      />
+                    </MessageScrollerItem>
+                  ))}
+                </MessageScrollerContent>
+              </MessageScrollerViewport>
+              <MessageScrollerButton />
+            </MessageScroller>
+          </MessageScrollerProvider>
           <div className="shrink-0 bg-gradient-to-t from-background via-background to-transparent px-5 pt-3 pb-4">
             <div className="mx-auto w-full max-w-3xl">{composer(true)}</div>
           </div>
@@ -243,4 +253,3 @@ export function TaskPage({ hasWorkspace, sidebarOpen, onToggleSidebar, onOpenSet
     </section>
   )
 }
-

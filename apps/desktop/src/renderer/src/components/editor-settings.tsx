@@ -13,13 +13,7 @@
 import { SettingRow } from "@tessera/design-system/components/setting-row"
 import { SettingSection } from "@tessera/design-system/components/setting-section"
 import { Input } from "@tessera/design-system/components/ui/input"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@tessera/design-system/components/ui/select"
+import { NativeSelect } from "@tessera/design-system/components/ui/native-select"
 import { Switch } from "@tessera/design-system/components/ui/switch"
 import type {
   AppPreferences,
@@ -62,20 +56,20 @@ export function EditorSettings({ preferences, onUpdatePreference }: EditorSettin
           title="正文字体"
           description="应用于即时预览与渲染后的正文；Markdown 源码仍使用等宽字体。"
           control={
-            <Select
+            <NativeSelect
+              className="w-48"
               value={preferences.editorFont}
-              onValueChange={(value) => {
-                if (value && EDITOR_FONT_LABELS[value]) onUpdatePreference("editorFont", value)
+              aria-label="编辑器正文字体"
+              onChange={(event) => {
+                onUpdatePreference("editorFont", event.currentTarget.value as EditorFontPreference)
               }}
             >
-              <SelectTrigger className="w-48" aria-label="编辑器正文字体">
-                <SelectValue>{(value: EditorFontPreference) => EDITOR_FONT_LABELS[value]}</SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="sans">系统无衬线</SelectItem>
-                <SelectItem value="serif">系统衬线</SelectItem>
-              </SelectContent>
-            </Select>
+              {Object.entries(EDITOR_FONT_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </NativeSelect>
           }
         />
         <SettingRow
@@ -108,20 +102,20 @@ export function EditorSettings({ preferences, onUpdatePreference }: EditorSettin
           title="默认编辑模式"
           description="打开文档时默认使用的模式；文档顶部仍可使用 ⌘/ 快速切换。"
           control={
-            <Select
+            <NativeSelect
+              className="w-48"
               value={preferences.defaultEditorMode}
-              onValueChange={(value) => {
-                if (value && EDITOR_MODE_LABELS[value]) onUpdatePreference("defaultEditorMode", value)
+              aria-label="默认编辑模式"
+              onChange={(event) => {
+                onUpdatePreference("defaultEditorMode", event.currentTarget.value as DefaultEditorMode)
               }}
             >
-              <SelectTrigger className="w-48" aria-label="默认编辑模式">
-                <SelectValue>{(value: DefaultEditorMode) => EDITOR_MODE_LABELS[value]}</SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="rich">即时预览编辑</SelectItem>
-                <SelectItem value="source">Markdown 源码</SelectItem>
-              </SelectContent>
-            </Select>
+              {Object.entries(EDITOR_MODE_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </NativeSelect>
           }
         />
         <SettingRow
@@ -172,21 +166,20 @@ export function EditorSettings({ preferences, onUpdatePreference }: EditorSettin
           title="正文宽度"
           description="紧凑适合专注写作，舒适兼顾中文阅读，宽幅适合表格与复杂材料。"
           control={
-            <Select
+            <NativeSelect
+              className="w-48"
               value={preferences.editorWidth}
-              onValueChange={(value) => {
-                if (value && EDITOR_WIDTH_LABELS[value]) onUpdatePreference("editorWidth", value)
+              aria-label="编辑器正文宽度"
+              onChange={(event) => {
+                onUpdatePreference("editorWidth", event.currentTarget.value as EditorWidthPreference)
               }}
             >
-              <SelectTrigger className="w-48" aria-label="编辑器正文宽度">
-                <SelectValue>{(value: EditorWidthPreference) => EDITOR_WIDTH_LABELS[value]}</SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="compact">紧凑</SelectItem>
-                <SelectItem value="comfortable">舒适</SelectItem>
-                <SelectItem value="wide">宽幅</SelectItem>
-              </SelectContent>
-            </Select>
+              {Object.entries(EDITOR_WIDTH_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </NativeSelect>
           }
         />
         <SettingRow

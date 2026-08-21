@@ -12,9 +12,9 @@
 
 import {
   type AiChatRuntimeInput,
+  AiProviderConfigError,
   type AiProviderConfigService,
   type AiProviderConfigStore,
-  AiProviderConfigError,
   createAiProviderConfigService,
 } from "@tessera/ai/server"
 import type {

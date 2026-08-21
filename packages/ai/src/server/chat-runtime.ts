@@ -17,7 +17,7 @@ import type {
   AiChatStreamChunk,
   AiProviderConnectionInput,
 } from "@tessera/contracts"
-import { convertToModelMessages, streamText, type UIMessage, type UIMessageChunk } from "ai"
+import { type UIMessage, type UIMessageChunk, convertToModelMessages, streamText } from "ai"
 import { createAiSdkChatRuntime } from "./ai-sdk-runtime"
 
 const MAX_MESSAGES = 200

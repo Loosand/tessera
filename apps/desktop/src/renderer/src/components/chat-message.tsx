@@ -1,7 +1,7 @@
 /**
  * [INPUT]: AI SDK UIMessage、当前回复状态与重新生成回调
- * [OUTPUT]: 用户图片/文本、模型思考、Markdown 正文、来源和轻量消息操作
- * [POS]: task-page 的普通对话消息呈现层
+ * [OUTPUT]: 用户消息与按原始 Part 顺序组合的助手回复及轻量消息操作
+ * [POS]: task-page 的普通对话消息协调层
  * [DOC]: design.md、docs/architecture/ai-chat-agent-todo.md
  *
  * [PROTOCOL]:
@@ -14,8 +14,9 @@ import type { UIMessage } from "@tessera/ai/react"
 import { BrainCircuitIcon, Copy01Icon, Refresh01Icon } from "@tessera/design-system/components/icons"
 import { Button } from "@tessera/design-system/components/ui/button"
 import { Icon } from "@tessera/design-system/components/ui/icon"
-import ReactMarkdown from "react-markdown"
-import remarkGfm from "remark-gfm"
+import { SourcePart } from "./chat-parts/source-part"
+import { TextPart } from "./chat-parts/text-part"
+import { ToolPart, isToolPart } from "./chat-parts/tool-part"
 
 interface ChatMessageProps {
   isLast: boolean
@@ -31,14 +32,6 @@ function messageText(message: UIMessage) {
     .join("")
 }
 
-function sourceLabel(url: string) {
-  try {
-    return new URL(url).hostname
-  } catch {
-    return url
-  }
-}
-
 export function ChatMessage({ isLast, message, onRegenerate, running }: ChatMessageProps) {
   const text = messageText(message)
   const files = message.parts.filter((part) => part.type === "file")
@@ -46,7 +39,14 @@ export function ChatMessage({ isLast, message, onRegenerate, running }: ChatMess
     .filter((part) => part.type === "reasoning")
     .map((part) => part.text)
     .join("")
-  const sources = message.parts.filter((part) => part.type === "source-url")
+  const assistantStreaming = running && isLast
+  let lastTextPartIndex = -1
+  for (let index = message.parts.length - 1; index >= 0; index -= 1) {
+    if (message.parts[index]?.type === "text") {
+      lastTextPartIndex = index
+      break
+    }
+  }
 
   if (message.role === "user") {
     return (
@@ -75,80 +75,34 @@ export function ChatMessage({ isLast, message, onRegenerate, running }: ChatMess
   return (
     <article className="group max-w-none" aria-label="AI 回复">
       {reasoning ? (
-        <div className="mb-3 flex items-center gap-1.5 text-xs text-muted-foreground" aria-label="模型已完成思考">
+        <div
+          className="mb-3 flex items-center gap-1.5 text-xs text-muted-foreground"
+          aria-label={assistantStreaming ? "模型正在思考" : "模型已完成思考"}
+        >
           <Icon icon={BrainCircuitIcon} size={13} />
-          已完成思考
+          {assistantStreaming ? "正在思考…" : "已完成思考"}
         </div>
       ) : null}
-      {text ? (
-        <div className="chat-markdown text-[15px] leading-7 text-foreground">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            components={{
-              a: ({ children, ...props }) => (
-                <a {...props} target="_blank" rel="noreferrer" className="text-foreground underline underline-offset-3">
-                  {children}
-                </a>
-              ),
-              blockquote: ({ children }) => (
-                <blockquote className="my-4 border-l-2 border-border pl-4 text-muted-foreground">
-                  {children}
-                </blockquote>
-              ),
-              code: ({ children, className, ...props }) => (
-                <code
-                  {...props}
-                  className={`${className ?? ""} rounded bg-muted px-1 py-0.5 font-mono text-[0.9em] break-words`}
-                >
-                  {children}
-                </code>
-              ),
-              h1: ({ children }) => <h1 className="mt-7 mb-3 text-xl font-semibold">{children}</h1>,
-              h2: ({ children }) => <h2 className="mt-6 mb-2 text-lg font-semibold">{children}</h2>,
-              h3: ({ children }) => <h3 className="mt-5 mb-2 text-base font-semibold">{children}</h3>,
-              li: ({ children }) => <li className="my-1 pl-1">{children}</li>,
-              ol: ({ children }) => <ol className="my-3 list-decimal space-y-1 pl-6">{children}</ol>,
-              p: ({ children }) => <p className="my-3 first:mt-0 last:mb-0">{children}</p>,
-              pre: ({ children }) => (
-                <pre className="my-4 overflow-x-auto rounded-xl bg-muted p-4 text-[13px] leading-6 [&_code]:bg-transparent [&_code]:p-0">
-                  {children}
-                </pre>
-              ),
-              table: ({ children }) => (
-                <div className="my-4 overflow-x-auto rounded-lg ring-1 ring-border">
-                  <table className="w-full border-collapse text-sm">{children}</table>
-                </div>
-              ),
-              td: ({ children }) => <td className="border-t border-border px-3 py-2">{children}</td>,
-              th: ({ children }) => <th className="bg-muted px-3 py-2 text-left font-medium">{children}</th>,
-              ul: ({ children }) => <ul className="my-3 list-disc space-y-1 pl-6">{children}</ul>,
-            }}
-          >
-            {text}
-          </ReactMarkdown>
-        </div>
-      ) : running && isLast ? (
-        <div className="flex items-center gap-1.5 py-2 text-xs text-muted-foreground" role="status">
+      {message.parts.map((part, index) => {
+        if (part.type === "text") {
+          return (
+            <TextPart
+              key={`${message.id}-text-${index}`}
+              part={part}
+              streaming={assistantStreaming && index === lastTextPartIndex && part.state !== "done"}
+            />
+          )
+        }
+        if (isToolPart(part)) return <ToolPart key={part.toolCallId} part={part} />
+        return null
+      })}
+      {!text && assistantStreaming ? (
+        <output className="flex items-center gap-1.5 py-2 text-xs text-muted-foreground">
           <span className="size-1.5 animate-pulse rounded-full bg-current" />
           正在思考…
-        </div>
+        </output>
       ) : null}
-
-      {sources.length > 0 ? (
-        <div className="mt-4 flex flex-wrap gap-2" aria-label="引用来源">
-          {sources.map((source, index) => (
-            <a
-              key={source.sourceId}
-              href={source.url}
-              target="_blank"
-              rel="noreferrer"
-              className="max-w-64 truncate rounded-full bg-muted px-2.5 py-1 text-[11px] text-muted-foreground hover:text-foreground"
-            >
-              {index + 1}. {source.title || sourceLabel(source.url)}
-            </a>
-          ))}
-        </div>
-      ) : null}
+      <SourcePart parts={message.parts} streaming={assistantStreaming} />
 
       {text && !(running && isLast) ? (
         <div className="mt-2 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">

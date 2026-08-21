@@ -16,16 +16,17 @@ export { SettingSection, type SettingSectionProps } from "./components/setting-s
 export { Button, buttonVariants } from "./components/ui/button"
 export { Icon, type IconProps } from "./components/ui/icon"
 export {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectScrollDownButton,
-  SelectScrollUpButton,
-  SelectSeparator,
-  SelectTrigger,
-  SelectValue,
-} from "./components/ui/select"
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+  useMessageScroller,
+  useMessageScrollerScrollable,
+  useMessageScrollerVisibility,
+} from "./components/ui/message-scroller"
+export { NativeSelect, type NativeSelectProps } from "./components/ui/native-select"
 export { Separator } from "./components/ui/separator"
 export { Switch } from "./components/ui/switch"
+export { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./components/ui/tooltip"

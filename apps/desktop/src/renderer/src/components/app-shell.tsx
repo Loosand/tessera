@@ -311,7 +311,7 @@ export function AppShell({ appInfo }: AppShellProps) {
 
           <div className={`${view === "task" ? "block" : "hidden"} min-h-0 flex-1`}>
             <TaskPage
-              hasWorkspace={Boolean(workspace)}
+              active={view === "task"}
               sidebarOpen={sidebarOpen}
               onToggleSidebar={() => setSidebarOpen((current) => !current)}
               onOpenSettings={openSettings}

@@ -23,7 +23,7 @@ export function SettingRow({ title, description, control, className, children, .
   return (
     <div
       className={cn(
-        "grid min-h-17 grid-cols-[minmax(0,1fr)_auto] items-center gap-6 border-b border-border px-4 py-3.5 last:border-b-0 [&_[data-slot=button]]:text-[13px] [&_[data-slot=input]]:text-[13px] [&_[data-slot=select-trigger]]:text-[13px]",
+        "grid min-h-17 grid-cols-[minmax(0,1fr)_auto] items-center gap-6 border-b border-border px-4 py-3.5 last:border-b-0 [&_[data-slot=button]]:text-[13px] [&_[data-slot=input]]:text-[13px] [&_[data-slot=native-select]]:text-[13px]",
         className,
       )}
       {...props}

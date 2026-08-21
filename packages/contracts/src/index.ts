@@ -40,6 +40,10 @@ export const IPC_CHANNELS = {
   aiChatCancel: "ai-chat:cancel",
   aiChatEvent: "ai-chat:event",
   aiChatStart: "ai-chat:start",
+  taskListRecent: "task:list-recent",
+  taskListWorkspace: "task:list-workspace",
+  taskRead: "task:read",
+  taskSave: "task:save",
 } as const
 
 export type AiProviderId = "openai-compatible" | "anthropic-compatible" | "deepseek" | "grok" | "openrouter"
@@ -111,6 +115,29 @@ export interface AiChatMessage {
   id: string
   parts: AiChatMessagePart[]
   role: "user" | "assistant"
+}
+
+export type TaskSessionStatus = "idle" | "running" | "completed" | "failed" | "cancelled"
+
+export interface TaskSessionSummary {
+  createdAt: number
+  id: string
+  status: TaskSessionStatus
+  title: string
+  updatedAt: number
+  workspaceId: string
+  workspaceName: string
+}
+
+export interface TaskSessionSnapshot extends TaskSessionSummary {
+  messages: AiChatMessage[]
+}
+
+export interface TaskSessionSaveInput {
+  id: string
+  messages: AiChatMessage[]
+  status: TaskSessionStatus
+  title: string
 }
 
 export interface AiChatStartInput {
@@ -214,6 +241,10 @@ export interface DesktopApi {
   saveAiProviderConfig(input: AiProviderSaveInput): Promise<AiProviderConfigResult>
   startAiChat(input: AiChatStartInput): Promise<AiChatStartResult>
   cancelAiChat(requestId: string): void
+  listRecentTasks(): Promise<TaskSessionSummary[]>
+  listWorkspaceTasks(): Promise<TaskSessionSummary[]>
+  readTask(taskId: string): Promise<TaskSessionSnapshot>
+  saveTask(input: TaskSessionSaveInput): Promise<TaskSessionSnapshot>
   onAiProviderConfigsChanged(listener: () => void): () => void
   onAiChatEvent(listener: (event: AiChatStreamEvent) => void): () => void
   onWorkspaceChanged(listener: (event: WorkspaceChangeEvent) => void): () => void

@@ -2,7 +2,8 @@
 
 > 代码源头：`packages/ai/src/server/ai-sdk-runtime.ts`、`packages/ai/src/react/ai-provider-settings.tsx`、
 > `packages/agent-runtime/src/index.ts`、`packages/contracts/src/index.ts`、`packages/database/schema.ts`、
-> `apps/desktop/src/main/index.ts`、`apps/desktop/src/renderer/src/components/task-page.tsx`
+> `apps/desktop/src/main/index.ts`、`apps/desktop/src/renderer/src/components/task-page.tsx`、
+> `apps/desktop/src/renderer/src/components/chat-parts/`、`packages/ai/src/react/use-electron-chat.test.ts`
 >
 > 状态：规划。本文记录实施顺序与验收门槛；勾选任务时必须同步对应代码、测试和架构文档。
 
@@ -22,8 +23,8 @@
 | 能力 | 状态 | 现状 |
 | --- | --- | --- |
 | 供应商适配 | 部分实现 | `@tessera/ai` 已能创建 OpenAI 兼容、Anthropic、DeepSeek、Grok 和 OpenRouter 模型，并能发现模型与测试连接。 |
-| 供应商配置 | 部分实现 | 设置界面已有草稿状态；API Key 和启用状态仍停留在渲染会话，重启后不可恢复。 |
-| 新任务界面 | 部分实现 | 已有输入框、模型入口和提交反馈；尚未连接模型、消息流和持久化会话。 |
+| 供应商配置 | 部分实现 | API Key 由系统安全存储加密，Base URL、启用状态和模型目录持久化；模型操作会即时保存并通知任务页，默认模型规则仍待确定。 |
+| 新任务界面 | 部分实现 | 已接入模型选择、进入视图时自动同步、流式消息、停止与重试；普通对话的会话持久化仍未实现。 |
 | Agent 协议 | 部分实现 | `AgentRuntime` 已定义文本增量、工具事件、权限请求、完成、失败和取消，尚无产品运行时。 |
 | 文件读写 | 部分实现 | 主进程已能校验工作区路径、检测版本冲突并原子写入 Markdown；尚未接入 Agent 审批。 |
 | 会话数据 | 部分实现 | SQLite 已有 Agent 会话、事件和权限决策表；普通对话的数据模型与消息持久化尚未确定。 |
@@ -92,14 +93,17 @@
 
 - [ ] 在 `packages/contracts` 定义开始、文本增量、完成、失败和取消事件，包含稳定的会话 ID、消息 ID、请求 ID 和递增序号。
 - [ ] 在主进程使用 AI SDK `streamText` 发起生成，并用 `AbortController` 实现停止生成和窗口关闭清理。
-- [ ] 为 React `useChat` 实现 Electron `ChatTransport`；渲染层不使用会直接请求外网的 transport。
+- [x] 为 React `useChat` 实现 Electron `ChatTransport`；渲染层不使用会直接请求外网的 transport。
 - [ ] 处理重复事件、乱序事件、订阅释放、渲染进程刷新和中途取消，避免消息重复或请求悬挂。
+- [x] 使用合成 `start → text-start → text-delta → text-end → finish` 序列验证 AI SDK React 消费者逐段收到正文，结束后 Part 进入完成状态。
 
 ### 会话与界面
 
 - [ ] 提交首条消息后，将居中的任务输入框平滑转换为消息列表和底部固定输入框。
 - [ ] 支持多行输入、选区编辑、撤销、粘贴、中文输入法、键盘发送与鼠标发送；流式生成期间仍允许整理下一条输入。
 - [ ] 渲染 Markdown、代码块和链接，并提供复制、停止、重试和重新生成。
+- [x] 将正文、来源和工具调用拆为独立 Part 呈现；正文使用 SDK Part 状态显示增量光标，工具状态不混入 Markdown。
+- [x] 消息滚动只在用户贴底时自动跟随；离开底部后保留阅读位置并显示返回最新消息按钮。
 - [ ] 明确显示当前供应商与模型；切换模型只影响下一次生成，并记录到对应消息。
 - [ ] 确定通用任务会话模型：普通对话允许没有工作区，Agent 会话可以绑定工作区；通过前向迁移落地，不重写已有迁移。
 - [ ] 持久化消息内容、消息 parts、供应商、模型、完成原因、用量和耗时；应用重启后可恢复会话。
