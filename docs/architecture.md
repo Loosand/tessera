@@ -1,7 +1,7 @@
 # Tessera 系统架构
 
 > 代码源头：`apps/desktop/src/main/index.ts`、`apps/desktop/src/preload/index.ts`、
-> `packages/agent-runtime/src/index.ts`、`packages/ai/src/index.ts`、`packages/skills/src/index.ts`、
+> `packages/agent-runtime/src/index.ts`、`packages/ai/src/index.ts`、`packages/ai/src/server/index.ts`、`packages/skills/src/index.ts`、
 > `packages/database/client.ts`
 >
 > 状态：部分实现。
@@ -36,6 +36,7 @@ Markdown 是正文事实源。SQLite 保存工作区登记、可重建索引和�
 - **已实现**：渲染层运行在沙箱中，不直接访问 Node.js、文件系统或数据库。
 - **已实现**：平台操作只通过 `packages/contracts` 定义的预加载接口调用。
 - **已实现**：TipTap 与源码表面共享同一份 Markdown 草稿和保存协议。
+- **已实现**：主导航提供「新任务」入口和本地输入草稿；提交目前只显示界面反馈，不调用 AgentRuntime。
 - **规划**：Agent 建议、引用、权限请求和 Diff 使用独立的可审查界面。
 
 ### 主进程与核心层
@@ -43,13 +44,14 @@ Markdown 是正文事实源。SQLite 保存工作区登记、可重建索引和�
 - **已实现**：主进程解析并校验工作区路径，读取、重命名和原子写入 Markdown。
 - **已实现**：窗口级会话管理文件监听、外部修改冲突、最近工作区和关闭前保存握手。
 - **已实现**：SQLite 随主进程生命周期打开和关闭，渲染层不持有连接。
+- **已实现**：AI 模型目录请求经类型化 IPC 进入主进程，具备 URL 校验、总超时、响应体上限和错误脱敏。
 - **规划**：采集、全文索引、权限、Diff 与审计通过核心服务暴露窄接口。
 - **规划**：所有出站请求记录目标、目的和数据范围。
 
 ### Agent 与 Skills
 
 - **部分实现**：`AgentRuntime` 已定义请求、异步事件、取消和权限事件，尚无产品可用的运行时适配器。
-- **部分实现**：`@tessera/ai` 独立封装供应商目录、配置模型和 React 设置界面，已提供 OpenAI 兼容、Anthropic 兼容、DeepSeek、Grok 与 OpenRouter 的远程 API 配置，预填官方 API 地址并由适配器约定模型发现路径；配置目前仅保留在渲染会话，安全存储、模型发现与 AI SDK 调用尚未接入。
+- **部分实现**：`@tessera/ai` 独立封装 OpenAI 兼容、Anthropic 兼容、DeepSeek、Grok 与 OpenRouter。已实现官方默认地址、AI SDK provider 工厂、主进程模型发现、公共目录自动同步、LobeHub 图标、连接测试，以及 SQLite 配置恢复与 Electron safeStorage 密钥加密；生成/流式调用仍按独立阶段接入产品界面。
 - **部分实现**：`packages/skills` 已定义用户级、工作区级 Skill 描述和权限声明，尚未实现发现与执行。
 - **规划**：Skill 只描述工作流和所需资源；具体权限在每次执行时由 Tessera 判断。
 - **规划**：Agent 对文件的修改以文本补丁提出，批准后由核心层写入。
@@ -103,4 +105,8 @@ Markdown 是正文事实源。SQLite 保存工作区登记、可重建索引和�
 - [产品边界](product.md)
 - [编辑器与 Markdown](architecture/editor.md)
 - [本地数据库](architecture/database.md)
+- [本地版本历史与 Git 工作区支持](architecture/local-version-history-and-git-workspaces.md)
+- [插件系统](architecture/plugin-system.md)
+- [AI 供应商与模型发现](architecture/ai-providers.md)
+- [AI 对话与工作区 Agent 实施 TODO](architecture/ai-chat-agent-todo.md)
 - [设计规范](../design.md)

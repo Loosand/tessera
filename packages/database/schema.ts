@@ -1,6 +1,6 @@
 /**
- * [INPUT]: Tessera 对工作区索引、Agent 会话和权限审计的持久化需求
- * [OUTPUT]: Drizzle SQLite 表、索引和可推导行类型
+ * [INPUT]: Tessera 对工作区索引、AI 供应商配置、Agent 会话和权限审计的持久化需求
+ * [OUTPUT]: Drizzle SQLite 表、索引和可推导行类型（AI Key 仅保存 safeStorage 密文）
  * [POS]: 数据库结构的类型事实源；不保存 Markdown 正文
  * [DOC]: docs/architecture/database.md
  *
@@ -94,9 +94,20 @@ export const permissionDecisions = sqliteTable(
   (table) => [index("permission_decisions_session_created_idx").on(table.sessionId, table.createdAt)],
 )
 
+export const aiProviderConfigs = sqliteTable("ai_provider_configs", {
+  providerId: text("provider_id").primaryKey(),
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
+  baseUrl: text("base_url").notNull(),
+  modelsJson: text("models_json").notNull().default("[]"),
+  apiKeyCiphertext: text("api_key_ciphertext"),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+})
+
 export type Workspace = typeof workspaces.$inferSelect
 export type NewWorkspace = typeof workspaces.$inferInsert
 export type IndexedDocument = typeof documentIndex.$inferSelect
 export type AgentSession = typeof agentSessions.$inferSelect
 export type AgentEventRecord = typeof agentEvents.$inferSelect
 export type PermissionDecision = typeof permissionDecisions.$inferSelect
+export type AiProviderConfigRecord = typeof aiProviderConfigs.$inferSelect
+export type NewAiProviderConfigRecord = typeof aiProviderConfigs.$inferInsert

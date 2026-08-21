@@ -1,0 +1,6 @@
+{
+  "name": "tessera-editor-benchmark-runner",
+  "private": true,
+  "type": "module",
+  "main": "editor-benchmark.mjs"
+}

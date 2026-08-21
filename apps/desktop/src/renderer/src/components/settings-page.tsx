@@ -1,8 +1,8 @@
 /**
- * [INPUT]: 应用信息、工作区摘要、界面偏好与设置导航操作
- * [OUTPUT]: 可搜索分类并返回工作区的中文设置侧栏和分区内容页
+ * [INPUT]: 应用信息、工作区摘要、界面偏好、设置导航操作与共享 Motion 参数
+ * [OUTPUT]: 带连续选中态的可搜索分类、独立 AI/供应商入口和紧凑供应商工作区
  * [POS]: 桌面应用的产品级设置视图
- * [DOC]: design.md
+ * [DOC]: design.md、docs/architecture/ai-providers.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -10,14 +10,22 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import { AiProviderSettings } from "@tessera/ai/react"
-import type { AppInfo, WorkspaceInfo } from "@tessera/contracts"
+import { AiProviderSettings, AiSettings } from "@tessera/ai/react"
+import type {
+  AiProviderConfig,
+  AiProviderConnectionInput,
+  AiProviderId,
+  AiProviderSaveInput,
+  AppInfo,
+  WorkspaceInfo,
+} from "@tessera/contracts"
 import {
   AiBrain01Icon,
   ArrowLeft01Icon,
   Edit02Icon,
   InformationCircleIcon,
   KeyboardIcon,
+  Link01Icon,
   Search01Icon,
   Settings01Icon,
   Sun01Icon,
@@ -28,13 +36,15 @@ import { Button } from "@tessera/design-system/components/ui/button"
 import { Icon } from "@tessera/design-system/components/ui/icon"
 import { Input } from "@tessera/design-system/components/ui/input"
 import { Switch } from "@tessera/design-system/components/ui/switch"
+import { m } from "motion/react"
 import { useState } from "react"
 import type { AppPreferences, UpdateAppPreference } from "../hooks/use-app-preferences"
+import { motionSprings } from "../motion"
 import { AppearanceSettings } from "./appearance-settings"
 import { EditorSettings } from "./editor-settings"
 import { ShortcutsSettings } from "./shortcuts-settings"
 
-type SettingsSectionId = "general" | "appearance" | "editor" | "shortcuts" | "ai" | "about"
+type SettingsSectionId = "general" | "appearance" | "editor" | "shortcuts" | "ai" | "providers" | "about"
 
 interface SettingsPageProps {
   appInfo: AppInfo | undefined
@@ -81,8 +91,14 @@ const SETTINGS_NAVIGATION: SettingsNavigationItem[] = [
   {
     id: "ai",
     label: "AI",
-    description: "模型供应商与 API 连接",
+    description: "全局可用性与工具权限",
     icon: AiBrain01Icon,
+  },
+  {
+    id: "providers",
+    label: "模型供应商",
+    description: "远程 API 连接与模型",
+    icon: Link01Icon,
   },
   {
     id: "about",
@@ -91,6 +107,39 @@ const SETTINGS_NAVIGATION: SettingsNavigationItem[] = [
     icon: InformationCircleIcon,
   },
 ]
+
+async function listAiProviderModels(input: AiProviderConnectionInput) {
+  const desktopApi = window.tessera
+  if (!desktopApi) throw new Error("桌面安全桥尚未就绪，请重新打开应用。")
+  const result = await desktopApi.listAiProviderModels(input)
+  if (!result.ok) throw new Error(result.error)
+  return result.models
+}
+
+async function listAiProviderConfigs(): Promise<AiProviderConfig[]> {
+  const desktopApi = window.tessera
+  if (!desktopApi) throw new Error("桌面安全桥尚未就绪，请重新打开应用。")
+  return desktopApi.listAiProviderConfigs()
+}
+
+async function saveAiProviderConfig(input: AiProviderSaveInput): Promise<AiProviderConfig> {
+  const desktopApi = window.tessera
+  if (!desktopApi) throw new Error("桌面安全桥尚未就绪，请重新打开应用。")
+  const result = await desktopApi.saveAiProviderConfig(input)
+  if (!result.ok) throw new Error(result.error)
+  return result.config
+}
+
+async function deleteAiProviderConfig(providerId: AiProviderId): Promise<void> {
+  const desktopApi = window.tessera
+  if (!desktopApi) throw new Error("桌面安全桥尚未就绪，请重新打开应用。")
+  const result = await desktopApi.deleteAiProviderConfig(providerId)
+  if (!result.ok) throw new Error(result.error)
+}
+
+function subscribeToAiProviderConfigChanges(listener: () => void) {
+  return window.tessera?.onAiProviderConfigsChanged(listener) ?? (() => {})
+}
 
 function GeneralSettings({
   workspace,
@@ -169,22 +218,25 @@ export function SettingsPage({
         <Button
           variant="ghost"
           size="sm"
-          className="mb-5 w-full justify-start gap-2 px-2 text-[13px]"
+          className="mb-5 w-full justify-start gap-2.5 px-3 text-left text-[13px]"
           onClick={onBack}
         >
-          <Icon icon={ArrowLeft01Icon} size={15} />
-          返回工作区
+          <span className="flex size-5 items-center justify-center" aria-hidden="true">
+            <Icon icon={ArrowLeft01Icon} size={15} />
+          </span>
+          <span className="truncate">返回工作区</span>
         </Button>
 
-        <div className="relative mb-5 px-1">
-          <Icon
-            icon={Search01Icon}
-            size={14}
-            className="pointer-events-none absolute top-1/2 left-3.5 -translate-y-1/2 text-muted-foreground"
-          />
+        <div className="mb-5 grid h-8 grid-cols-[20px_minmax(0,1fr)] items-center gap-2.5 rounded-lg bg-muted/70 px-3 transition-[color,box-shadow] focus-within:bg-background focus-within:ring-3 focus-within:ring-ring/50">
+          <span
+            className="pointer-events-none flex size-5 items-center justify-center text-muted-foreground"
+            aria-hidden="true"
+          >
+            <Icon icon={Search01Icon} size={14} />
+          </span>
           <Input
             type="search"
-            className="h-8 border-transparent bg-muted/70 pl-8 shadow-none focus-visible:bg-background"
+            className="h-7 min-w-0 rounded-none border-0 bg-transparent px-0 shadow-none focus-visible:ring-0 dark:bg-transparent"
             placeholder="搜索设置"
             value={navigationFilter}
             onChange={(event) => setNavigationFilter(event.currentTarget.value)}
@@ -192,7 +244,7 @@ export function SettingsPage({
           />
         </div>
 
-        <p className="px-2 pb-1.5 text-[10px] font-medium tracking-[0.08em] text-muted-foreground uppercase">
+        <p className="px-3 pb-1.5 text-[10px] font-medium tracking-[0.08em] text-muted-foreground uppercase">
           应用
         </p>
         <nav className="space-y-0.5" aria-label="设置分类">
@@ -202,13 +254,26 @@ export function SettingsPage({
               <button
                 key={item.id}
                 type="button"
-                className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[13px] transition-colors hover:bg-sidebar-accent data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium"
+                className="relative grid h-8 w-full grid-cols-[20px_minmax(0,1fr)] items-center gap-2.5 rounded-md px-3 text-left text-[13px] transition-colors hover:bg-sidebar-accent data-[active=true]:font-medium"
                 data-active={active || undefined}
                 aria-current={active ? "page" : undefined}
                 onClick={() => setActiveSection(item.id)}
               >
-                <Icon icon={item.icon} size={15} className="text-muted-foreground" />
-                {item.label}
+                {active ? (
+                  <m.span
+                    className="pointer-events-none absolute inset-0 rounded-md bg-sidebar-accent"
+                    layoutId="settings-navigation-active"
+                    transition={motionSprings.gentle}
+                    aria-hidden="true"
+                  />
+                ) : null}
+                <span
+                  className="relative z-10 flex size-5 items-center justify-center text-muted-foreground"
+                  aria-hidden="true"
+                >
+                  <Icon icon={item.icon} size={15} />
+                </span>
+                <span className="relative z-10 truncate">{item.label}</span>
               </button>
             )
           })}
@@ -217,7 +282,7 @@ export function SettingsPage({
           ) : null}
         </nav>
 
-        <footer className="mt-auto flex h-9 items-center justify-between border-t border-sidebar-border px-2 text-xs text-muted-foreground">
+        <footer className="mt-auto flex h-9 items-center justify-between px-3 text-xs text-muted-foreground">
           <span>Tessera</span>
           <span className="tabular-nums">{appInfo?.version ?? ""}</span>
         </footer>
@@ -225,9 +290,20 @@ export function SettingsPage({
 
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden border-l border-sidebar-border bg-background">
         <div className="app-drag-region h-12 shrink-0 border-b border-border/55" />
-        <div className="min-h-0 flex-1 overflow-y-auto">
+
+        <div className={activeSection === "providers" ? "min-h-0 flex-1" : "hidden"}>
+          <AiProviderSettings
+            deleteConfig={deleteAiProviderConfig}
+            listConfigs={listAiProviderConfigs}
+            listModels={listAiProviderModels}
+            saveConfig={saveAiProviderConfig}
+            subscribeToConfigChanges={subscribeToAiProviderConfigChanges}
+          />
+        </div>
+
+        <div className={activeSection === "providers" ? "hidden" : "min-h-0 flex-1 overflow-y-auto"}>
           <article
-            className={`mx-auto w-full px-[clamp(20px,5vw,64px)] pt-10 pb-24 ${activeSection === "ai" || activeSection === "shortcuts" ? "max-w-260" : activeSection === "appearance" || activeSection === "editor" ? "max-w-230" : "max-w-205"}`}
+            className={`mx-auto w-full px-[clamp(20px,5vw,64px)] pt-10 pb-24 ${activeSection === "shortcuts" ? "max-w-260" : activeSection === "appearance" || activeSection === "editor" ? "max-w-230" : "max-w-205"}`}
           >
             <p className="text-[11px] font-medium tracking-[0.08em] text-muted-foreground uppercase">设置</p>
             <h1 className="mt-2 text-2xl font-medium tracking-[-0.02em]">{activeNavigation.label}</h1>
@@ -237,10 +313,11 @@ export function SettingsPage({
 
             <div className="mt-10">
               <div className={activeSection === "ai" ? undefined : "hidden"}>
-                <AiProviderSettings />
+                <AiSettings />
               </div>
 
-              {activeSection === "ai" ? null : activeSection === "general" ? (
+              {activeSection === "ai" || activeSection === "providers" ? null : activeSection ===
+                "general" ? (
                 <GeneralSettings
                   workspace={workspace}
                   documentCount={documentCount}

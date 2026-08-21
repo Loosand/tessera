@@ -1,6 +1,6 @@
 /**
- * [INPUT]: AI 供应商目录与配置模型
- * [OUTPUT]: 与 UI 框架无关的 AI 领域公开 API
+ * [INPUT]: AI 供应商目录、配置模型与跨进程供应商标识
+ * [OUTPUT]: 与 UI 框架无关的 AI 领域公开 API 和模型合并能力
  * [POS]: @tessera/ai 根入口
  * [DOC]: docs/architecture.md
  *
@@ -20,4 +20,6 @@ export {
   appendAiProviderModel,
   createInitialAiProviderDrafts,
   matchesAiProvider,
+  mergeDiscoveredAiProviderModels,
 } from "./provider-catalog"
+export { createUnknownAiModelCapabilities, resolveAiModelCapabilities } from "./model-capabilities"

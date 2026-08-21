@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 内存 SQLite 客户端与初始迁移
- * [OUTPUT]: 迁移幂等性、表结构和级联删除的回归验证
+ * [INPUT]: 内存/临时磁盘 SQLite 客户端与前向迁移
+ * [OUTPUT]: 迁移幂等性、表结构、AI 配置重启恢复和级联删除的回归验证
  * [POS]: 数据库包不依赖磁盘状态的基础集成测试
  * [DOC]: docs/architecture/database.md
  *
@@ -10,7 +10,16 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { describe, expect, test } from "vitest"
+import {
+  deleteAiProviderConfigRecord,
+  findAiProviderConfigRecord,
+  listAiProviderConfigRecords,
+  upsertAiProviderConfigRecord,
+} from "./ai-provider-config-repository"
 import { openDatabase } from "./client"
 import { DATABASE_MIGRATIONS, applyDatabaseMigrations } from "./migrations"
 import {
@@ -31,6 +40,7 @@ describe("本地数据库基建", () => {
       "__tessera_migrations",
       "agent_events",
       "agent_sessions",
+      "ai_provider_configs",
       "document_index",
       "permission_decisions",
       "workspaces",
@@ -119,5 +129,64 @@ describe("本地数据库基建", () => {
     ])
     expect(findWorkspaceById(client, "workspace-1")?.displayName).toBe("第一个空间")
     client.close()
+  })
+
+  test("AI 供应商普通配置与 safeStorage 密文可以幂等保存并删除", () => {
+    const client = openDatabase({ path: ":memory:" })
+    upsertAiProviderConfigRecord(client, {
+      providerId: "openrouter",
+      enabled: true,
+      baseUrl: "https://openrouter.ai/api/v1",
+      modelsJson: '[{"id":"openrouter/auto","enabled":true}]',
+      apiKeyCiphertext: "encrypted-value",
+      updatedAt: new Date(100),
+    })
+    upsertAiProviderConfigRecord(client, {
+      providerId: "openrouter",
+      enabled: false,
+      baseUrl: "https://relay.example.com/v1",
+      modelsJson: "[]",
+      apiKeyCiphertext: "encrypted-value",
+      updatedAt: new Date(200),
+    })
+
+    expect(listAiProviderConfigRecords(client)).toHaveLength(1)
+    expect(findAiProviderConfigRecord(client, "openrouter")).toMatchObject({
+      enabled: false,
+      baseUrl: "https://relay.example.com/v1",
+      apiKeyCiphertext: "encrypted-value",
+      updatedAt: new Date(200),
+    })
+
+    deleteAiProviderConfigRecord(client, "openrouter")
+    expect(findAiProviderConfigRecord(client, "openrouter")).toBeNull()
+    client.close()
+  })
+
+  test("关闭并重新打开磁盘数据库后仍能恢复 AI 供应商配置", () => {
+    const directory = mkdtempSync(join(tmpdir(), "tessera-provider-config-"))
+    const databasePath = join(directory, "tessera.sqlite3")
+    try {
+      const first = openDatabase({ path: databasePath })
+      upsertAiProviderConfigRecord(first, {
+        providerId: "deepseek",
+        enabled: true,
+        baseUrl: "https://api.deepseek.com",
+        modelsJson: '[{"id":"deepseek-chat","enabled":true}]',
+        apiKeyCiphertext: "encrypted-value",
+        updatedAt: new Date(100),
+      })
+      first.close()
+
+      const restarted = openDatabase({ path: databasePath })
+      expect(findAiProviderConfigRecord(restarted, "deepseek")).toMatchObject({
+        enabled: true,
+        baseUrl: "https://api.deepseek.com",
+        apiKeyCiphertext: "encrypted-value",
+      })
+      restarted.close()
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
   })
 })

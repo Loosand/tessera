@@ -36,6 +36,14 @@ textarea {
   -webkit-app-region: no-drag;
 }
 
+.window-titlebar-leading {
+  padding-left: 0.75rem;
+}
+
+[data-platform="darwin"] .window-titlebar-leading[data-sidebar-open="false"] {
+  padding-left: 4.75rem;
+}
+
 :where(.markdown-preview, .rich-text-content) {
   color: var(--foreground);
   font-family: var(--font-content, var(--font-sans));
@@ -251,6 +259,12 @@ textarea {
   pointer-events: none;
   background: var(--selection);
   content: "";
+}
+
+.rich-text-content .ProseMirror-selectednode:not(.selectedCell) {
+  border-radius: var(--radius-sm);
+  outline: 2px solid color-mix(in srgb, var(--primary) 52%, transparent);
+  outline-offset: 3px;
 }
 
 :where(.markdown-preview, .rich-text-content) hr {

@@ -6,7 +6,7 @@ export default defineConfig({
   main: {
     build: {
       externalizeDeps: {
-        exclude: ["@tessera/database"],
+        exclude: ["@tessera/ai", "@tessera/database"],
       },
       rollupOptions: {
         external: ["better-sqlite3"],

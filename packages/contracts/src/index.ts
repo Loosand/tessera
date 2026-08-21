@@ -1,8 +1,8 @@
 /**
- * [INPUT]: Electron 桌面应用当前需要的跨进程数据与生命周期形状
- * [OUTPUT]: IPC 频道、应用信息、关闭握手与桌面 API 类型契约
+ * [INPUT]: Electron 桌面应用当前需要的跨进程数据、生命周期、AI 配置与流式对话形状
+ * [OUTPUT]: IPC 频道、应用信息、AI 模型/配置/对话、关闭握手与桌面 API 类型契约
  * [POS]: 应用和共享包共同依赖的底层契约入口
- * [DOC]: docs/architecture.md
+ * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -26,7 +26,119 @@ export const IPC_CHANNELS = {
   documentCreate: "document:create",
   documentRename: "document:rename",
   documentWrite: "document:write",
+  aiProviderConfigsChanged: "ai-provider:configs-changed",
+  aiProviderDeleteConfig: "ai-provider:delete-config",
+  aiProviderListConfigs: "ai-provider:list-configs",
+  aiProviderListModels: "ai-provider:list-models",
+  aiProviderSaveConfig: "ai-provider:save-config",
+  aiChatCancel: "ai-chat:cancel",
+  aiChatEvent: "ai-chat:event",
+  aiChatStart: "ai-chat:start",
 } as const
+
+export type AiProviderId = "openai-compatible" | "anthropic-compatible" | "deepseek" | "grok" | "openrouter"
+
+export interface AiProviderConnectionInput {
+  apiKey: string
+  baseUrl: string
+  providerId: AiProviderId
+}
+
+export interface AiProviderModel {
+  capabilities?: AiModelCapabilities
+  capabilitySource?: AiModelCapabilitySource
+  contextWindow: number | null
+  id: string
+  maxOutputTokens: number | null
+  name: string | null
+  ownedBy: string | null
+}
+
+export type AiModelCapabilityState = "supported" | "unsupported" | "unknown"
+export type AiModelCapabilitySource = "builtin" | "remote" | "custom" | "unknown"
+
+export interface AiModelCapabilities {
+  imageInput: AiModelCapabilityState
+  reasoning: AiModelCapabilityState
+  search: AiModelCapabilityState
+  toolUse: AiModelCapabilityState
+}
+
+export interface AiProviderConfiguredModel extends AiProviderModel {
+  enabled: boolean
+}
+
+export interface AiProviderConfig {
+  apiKeyConfigured: boolean
+  baseUrl: string
+  enabled: boolean
+  models: AiProviderConfiguredModel[]
+  providerId: AiProviderId
+  updatedAt: number
+}
+
+export interface AiProviderSaveInput {
+  apiKey?: string
+  baseUrl: string
+  enabled: boolean
+  models: AiProviderConfiguredModel[]
+  providerId: AiProviderId
+  removeApiKey?: boolean
+}
+
+export interface AiConfiguredModel extends AiProviderConfiguredModel {
+  providerId: AiProviderId
+}
+
+export type AiProviderModelListResult = { ok: true; models: AiProviderModel[] } | { ok: false; error: string }
+
+export type AiProviderConfigResult = { ok: true; config: AiProviderConfig } | { ok: false; error: string }
+export type AiProviderConfigDeleteResult = { ok: true } | { ok: false; error: string }
+
+export type AiChatReasoning = "auto" | "none" | "low" | "medium" | "high"
+
+export type AiChatMessagePart =
+  | { type: "text"; text: string }
+  | { type: "file"; filename?: string; mediaType: string; url: string }
+
+export interface AiChatMessage {
+  id: string
+  parts: AiChatMessagePart[]
+  role: "user" | "assistant"
+}
+
+export interface AiChatStartInput {
+  messages: AiChatMessage[]
+  modelId: string
+  providerId: AiProviderId
+  reasoning: AiChatReasoning
+  requestId: string
+  webSearch: boolean
+}
+
+export type AiChatStreamChunk =
+  | { type: "start"; messageId?: string }
+  | { type: "start-step" }
+  | { type: "finish-step" }
+  | { type: "text-start"; id: string }
+  | { type: "text-delta"; id: string; delta: string }
+  | { type: "text-end"; id: string }
+  | { type: "reasoning-start"; id: string }
+  | { type: "reasoning-delta"; id: string; delta: string }
+  | { type: "reasoning-end"; id: string }
+  | { type: "source-url"; sourceId: string; url: string; title?: string }
+  | { type: "source-document"; sourceId: string; mediaType: string; title: string; filename?: string }
+  | { type: "finish"; finishReason?: "stop" | "length" | "content-filter" | "tool-calls" | "error" | "other" }
+  | { type: "abort"; reason?: string }
+  | { type: "error"; errorText: string }
+
+export interface AiChatStreamEvent {
+  chunk: AiChatStreamChunk
+  requestId: string
+  sequence: number
+}
+
+export type AiChatStartResult = { ok: true } | { ok: false; error: string }
 
 export interface AppInfo {
   name: string
@@ -77,6 +189,14 @@ export interface DesktopApi {
     content: string,
     expectedModifiedAt: number,
   ): Promise<DocumentWriteResult>
+  deleteAiProviderConfig(providerId: AiProviderId): Promise<AiProviderConfigDeleteResult>
+  listAiProviderConfigs(): Promise<AiProviderConfig[]>
+  listAiProviderModels(input: AiProviderConnectionInput): Promise<AiProviderModelListResult>
+  saveAiProviderConfig(input: AiProviderSaveInput): Promise<AiProviderConfigResult>
+  startAiChat(input: AiChatStartInput): Promise<AiChatStartResult>
+  cancelAiChat(requestId: string): void
+  onAiProviderConfigsChanged(listener: () => void): () => void
+  onAiChatEvent(listener: (event: AiChatStreamEvent) => void): () => void
   onWorkspaceChanged(listener: (event: WorkspaceChangeEvent) => void): () => void
   onCloseRequested(listener: () => void): () => void
 }

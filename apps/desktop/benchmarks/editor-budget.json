@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "defaults": {
+    "transactionP95Ms": 16,
+    "inputToFrameP95Ms": 40,
+    "hoverToFrameP95Ms": 40,
+    "scrollFrameP95Ms": 30,
+    "slowFrameRate": 0.2
+  },
+  "scenarios": {
+    "plain-10k": {
+      "parseP95Ms": 30,
+      "openToFrameP95Ms": 150,
+      "serializeP95Ms": 20,
+      "heapDeltaMiB": 60
+    },
+    "plain-100k": {
+      "parseP95Ms": 180,
+      "openToFrameP95Ms": 650,
+      "serializeP95Ms": 100,
+      "heapDeltaMiB": 180
+    },
+    "many-blocks-100k": {
+      "parseP95Ms": 260,
+      "openToFrameP95Ms": 1200,
+      "serializeP95Ms": 180,
+      "heapDeltaMiB": 280
+    },
+    "mixed-50k": {
+      "parseP95Ms": 180,
+      "openToFrameP95Ms": 800,
+      "serializeP95Ms": 140,
+      "heapDeltaMiB": 180
+    }
+  }
+}

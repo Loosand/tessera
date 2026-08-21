@@ -12,11 +12,15 @@
 
 import type BetterSqlite3 from "better-sqlite3"
 import { foundationMigration } from "./0000-foundation"
+import { aiProviderConfigsMigration } from "./0001-ai-provider-configs"
 import type { DatabaseMigration } from "./types"
 
 export type { DatabaseMigration } from "./types"
 
-export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [foundationMigration]
+export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
+  foundationMigration,
+  aiProviderConfigsMigration,
+]
 
 export function applyDatabaseMigrations(database: BetterSqlite3.Database) {
   database.exec(`CREATE TABLE IF NOT EXISTS __tessera_migrations (

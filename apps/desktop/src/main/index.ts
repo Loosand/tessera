@@ -1,8 +1,8 @@
 /**
- * [INPUT]: Electron 生命周期、共享 IPC 契约与 Tessera 核心服务
- * [OUTPUT]: 安全配置、关闭保存握手和已注册 IPC 处理器的桌面窗口
+ * [INPUT]: Electron 生命周期、共享 IPC 契约、AI 配置/模型服务、safeStorage 与 Tessera 核心服务
+ * [OUTPUT]: 持久化 AI 配置、加密密钥解析、模型发现、关闭保存握手和桌面窗口
  * [POS]: Electron 主进程入口与平台安全边界
- * [DOC]: docs/architecture.md
+ * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/database.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -15,8 +15,19 @@ import { type FSWatcher, realpathSync, statSync, watch } from "node:fs"
 import { readFile, readdir, realpath, rename, stat, unlink, writeFile } from "node:fs/promises"
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import {
+  AiProviderConfigError,
+  AiProviderConnectionError,
+  listAiProviderModels,
+  streamAiChat,
+} from "@tessera/ai/server"
 import type { DesktopApi } from "@tessera/contracts"
 import {
+  type AiChatStartInput,
+  type AiChatStreamChunk,
+  type AiProviderConnectionInput,
+  type AiProviderId,
+  type AiProviderSaveInput,
   type DocumentSnapshot,
   type DocumentWriteResult,
   IPC_CHANNELS,
@@ -42,6 +53,7 @@ import {
   ipcMain,
   shell,
 } from "electron"
+import { type DesktopAiService, createDesktopAiService } from "./ai-service"
 
 const APP_USER_MODEL_ID = "com.tessera.desktop"
 const MAIN_DIRECTORY = dirname(fileURLToPath(import.meta.url))
@@ -60,8 +72,47 @@ const activeWorkspaces = new Map<number, WorkspaceSession>()
 const approvedWindowCloseIds = new Set<number>()
 const requestedWindowCloseIds = new Set<number>()
 let databaseClient: DatabaseClient | null = null
+let desktopAiService: DesktopAiService | null = null
 let appQuitApproved = false
 let appQuitRequested = false
+
+interface ActiveAiChat {
+  abortController: AbortController
+  webContentsId: number
+}
+
+const activeAiChats = new Map<string, ActiveAiChat>()
+
+function requireDesktopAiService(): DesktopAiService {
+  if (!desktopAiService) throw new AiProviderConfigError("AI 服务尚未就绪。")
+  return desktopAiService
+}
+
+function notifyAiProviderConfigsChanged() {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.webContents.isDestroyed()) window.webContents.send(IPC_CHANNELS.aiProviderConfigsChanged)
+  }
+}
+
+function resolveAiChatInput(input: AiChatStartInput) {
+  if (!input?.requestId || input.requestId.length > 128 || !/^[\w-]+$/u.test(input.requestId)) {
+    throw new AiProviderConfigError("对话请求 ID 无效。")
+  }
+  return requireDesktopAiService().resolveChatInput(input)
+}
+
+function abortAiChatsForWebContents(webContentsId: number) {
+  for (const [requestId, chat] of activeAiChats) {
+    if (chat.webContentsId !== webContentsId) continue
+    chat.abortController.abort("窗口已关闭")
+    activeAiChats.delete(requestId)
+  }
+}
+
+function aiChatErrorMessage(error: unknown) {
+  if (error instanceof AiProviderConfigError) return error.message
+  return "模型请求失败，请检查供应商配置、模型状态与网络连接。"
+}
 
 function isSafeExternalUrl(value: string) {
   try {
@@ -333,6 +384,82 @@ function registerIpcHandlers() {
     })
 
   ipcMain.handle(IPC_CHANNELS.appInfo, getAppInfo)
+  ipcMain.handle(IPC_CHANNELS.aiProviderListConfigs, () => requireDesktopAiService().listConfigs())
+  ipcMain.handle(IPC_CHANNELS.aiProviderSaveConfig, (_event, input: AiProviderSaveInput) => {
+    try {
+      const config = requireDesktopAiService().saveConfig(input)
+      notifyAiProviderConfigsChanged()
+      return { ok: true, config }
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof AiProviderConfigError ? error.message : "保存供应商配置失败。",
+      }
+    }
+  })
+  ipcMain.handle(IPC_CHANNELS.aiProviderDeleteConfig, (_event, providerId: AiProviderId) => {
+    try {
+      requireDesktopAiService().deleteConfig(providerId)
+      notifyAiProviderConfigsChanged()
+      return { ok: true }
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof AiProviderConfigError ? error.message : "删除供应商配置失败。",
+      }
+    }
+  })
+  ipcMain.handle(IPC_CHANNELS.aiProviderListModels, async (_event, input: AiProviderConnectionInput) => {
+    try {
+      const connection = requireDesktopAiService().resolveDiscoveryConnection(input)
+      return { ok: true, models: await listAiProviderModels(connection) }
+    } catch (error) {
+      return {
+        ok: false,
+        error:
+          error instanceof AiProviderConnectionError || error instanceof AiProviderConfigError
+            ? error.message
+            : "请求供应商模型列表失败。",
+      }
+    }
+  })
+  ipcMain.handle(IPC_CHANNELS.aiChatStart, (event, input: AiChatStartInput) => {
+    try {
+      if (activeAiChats.has(input.requestId)) {
+        throw new AiProviderConfigError("这个对话请求正在运行，请先停止后重试。")
+      }
+      const runtimeInput = resolveAiChatInput(input)
+      const abortController = new AbortController()
+      const webContentsId = event.sender.id
+      let sequence = 0
+      activeAiChats.set(input.requestId, { abortController, webContentsId })
+
+      const emit = (chunk: AiChatStreamChunk) => {
+        if (event.sender.isDestroyed()) return
+        sequence += 1
+        event.sender.send(IPC_CHANNELS.aiChatEvent, {
+          requestId: input.requestId,
+          sequence,
+          chunk,
+        })
+      }
+
+      void streamAiChat(runtimeInput, { abortSignal: abortController.signal, onChunk: emit })
+        .catch((error) => emit({ type: "error", errorText: aiChatErrorMessage(error) }))
+        .finally(() => {
+          const active = activeAiChats.get(input.requestId)
+          if (active?.abortController === abortController) activeAiChats.delete(input.requestId)
+        })
+      return { ok: true }
+    } catch (error) {
+      return { ok: false, error: aiChatErrorMessage(error) }
+    }
+  })
+  ipcMain.on(IPC_CHANNELS.aiChatCancel, (event, requestId: string) => {
+    const active = activeAiChats.get(requestId)
+    if (!active || active.webContentsId !== event.sender.id) return
+    active.abortController.abort("用户已停止生成")
+  })
   ipcMain.on(IPC_CHANNELS.appCancelClose, (event) => {
     requestedWindowCloseIds.delete(event.sender.id)
     appQuitRequested = false
@@ -472,7 +599,10 @@ function createWindow(initialWorkspace: WorkspaceInfo | null = null) {
     }
   })
   if (initialWorkspace) installWorkspaceSession(window.webContents, initialWorkspace)
-  window.webContents.on("destroyed", () => closeWorkspaceSession(webContentsId))
+  window.webContents.on("destroyed", () => {
+    closeWorkspaceSession(webContentsId)
+    abortAiChatsForWebContents(webContentsId)
+  })
 
   const rendererUrl = process.env.ELECTRON_RENDERER_URL
   if (rendererUrl) {
@@ -485,6 +615,7 @@ function createWindow(initialWorkspace: WorkspaceInfo | null = null) {
 app.whenReady().then(() => {
   app.setAppUserModelId(APP_USER_MODEL_ID)
   databaseClient = openDatabase({ path: join(app.getPath("userData"), "tessera.sqlite3") })
+  desktopAiService = createDesktopAiService(databaseClient)
   registerIpcHandlers()
   createWindow(restoreMostRecentWorkspace())
 
@@ -507,9 +638,12 @@ app.on("before-quit", (event) => {
 })
 
 app.on("will-quit", () => {
+  for (const chat of activeAiChats.values()) chat.abortController.abort("应用已退出")
+  activeAiChats.clear()
   for (const webContentsId of activeWorkspaces.keys()) closeWorkspaceSession(webContentsId)
   databaseClient?.close()
   databaseClient = null
+  desktopAiService = null
 })
 
 app.on("window-all-closed", () => {

@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 当前文档与关闭操作
- * [OUTPUT]: 文档详情页右侧的 AI 协作面板骨架
- * [POS]: 后续会话、工具调用和上下文管理的界面边界
+ * [OUTPUT]: 带可访问进退场的文档详情页右侧 AI 协作面板骨架
+ * [POS]: 后续会话、工具调用和上下文管理的动态界面边界
  * [DOC]: design.md、docs/architecture.md
  *
  * [PROTOCOL]:
@@ -14,6 +14,8 @@ import type { DocumentSnapshot } from "@tessera/contracts"
 import { AiBrain01Icon, ArrowRight01Icon } from "@tessera/design-system/components/icons"
 import { Button } from "@tessera/design-system/components/ui/button"
 import { Icon } from "@tessera/design-system/components/ui/icon"
+import { m, useReducedMotion } from "motion/react"
+import { motionSprings } from "../motion"
 
 interface AgentSidebarProps {
   document: DocumentSnapshot | null
@@ -21,8 +23,16 @@ interface AgentSidebarProps {
 }
 
 export function AgentSidebar({ document, onClose }: AgentSidebarProps) {
+  const shouldReduceMotion = useReducedMotion()
+
   return (
-    <aside className="flex h-full min-h-0 w-[320px] shrink-0 flex-col border-l border-border/65 bg-sidebar/70 max-[900px]:absolute max-[900px]:inset-y-0 max-[900px]:right-0 max-[900px]:z-10 max-[900px]:shadow-xl max-[600px]:w-[min(320px,calc(100vw-40px))]">
+    <m.aside
+      className="flex h-full min-h-0 w-[320px] shrink-0 flex-col border-l border-border/65 bg-sidebar/70 max-[900px]:absolute max-[900px]:inset-y-0 max-[900px]:right-0 max-[900px]:z-10 max-[900px]:shadow-xl max-[600px]:w-[min(320px,calc(100vw-40px))]"
+      initial={shouldReduceMotion ? false : { opacity: 0, x: 16 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, x: 16 }}
+      transition={shouldReduceMotion ? { duration: 0 } : motionSprings.gentle}
+    >
       <header className="flex h-11 shrink-0 items-center border-b border-border/55 px-3">
         <div className="flex min-w-0 flex-1 items-center gap-2 text-[13px] font-medium">
           <Icon icon={AiBrain01Icon} size={15} />
@@ -60,6 +70,6 @@ export function AgentSidebar({ document, onClose }: AgentSidebarProps) {
           </div>
         </div>
       </div>
-    </aside>
+    </m.aside>
   )
 }

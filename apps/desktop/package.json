@@ -13,6 +13,8 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "benchmark:editor": "bun run build && electron scripts",
+    "benchmark:editor:check": "bun run build && electron scripts --check",
     "preview": "electron-vite preview",
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
@@ -33,6 +35,7 @@
     "@tiptap/react": "3.30.2",
     "@tiptap/starter-kit": "3.30.2",
     "better-sqlite3": "^13.0.3",
+    "motion": "^12.42.2",
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "react-markdown": "^10.1.0",

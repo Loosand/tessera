@@ -21,7 +21,7 @@ Tessera 当前聚焦文档写作，不计划为 Slides、视频或交互网页�
 ## 当前状态
 
 - **已实现**：Electron 安全外壳、本地工作区、Markdown 即时预览与源码编辑、自动保存、外部修改冲突处理、
-  SQLite 基础数据层和设计系统。
+SQLite 基础数据层和设计系统。
 - **部分实现**：`AgentRuntime`、Skill 与权限已经有领域契约，尚未形成可用的研究和写作流程。
 - **规划**：网页与文档采集、主动研究、跨材料问答、引用核查、Agent Diff 和 Skill 安装执行。
 - **待确定**：开源许可证与商业分发边界。
@@ -76,6 +76,7 @@ packages/design-system  共享组件与视觉系统
 - [系统架构](docs/architecture.md)
 - [编辑器与 Markdown](docs/architecture/editor.md)
 - [本地数据库](docs/architecture/database.md)
+- [本地版本历史与 Git 工作区支持](docs/architecture/local-version-history-and-git-workspaces.md)
 - [协作约定](AGENTS.md)
 
 项目许可证将在开源与商业策略明确后确定。

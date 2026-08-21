@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 预加载层提供的应用信息与产品级 AppShell
- * [OUTPUT]: Tessera 桌面渲染入口
- * [POS]: 渲染层根组件，负责加载全局应用信息
+ * [INPUT]: 预加载层提供的应用信息、Motion 特性与产品级 AppShell
+ * [OUTPUT]: 尊重系统减少动态效果偏好的 Tessera 桌面渲染入口
+ * [POS]: 渲染层根组件，负责加载全局应用信息与动效运行时
  * [DOC]: design.md、docs/architecture.md
  *
  * [PROTOCOL]:
@@ -11,6 +11,7 @@
  */
 
 import type { AppInfo } from "@tessera/contracts"
+import { LazyMotion, MotionConfig, domAnimation } from "motion/react"
 import { useEffect, useState } from "react"
 import { AppShell } from "./components/app-shell"
 
@@ -30,5 +31,11 @@ export function App() {
     }
   }, [])
 
-  return <AppShell appInfo={appInfo} />
+  return (
+    <LazyMotion features={domAnimation}>
+      <MotionConfig reducedMotion="user">
+        <AppShell appInfo={appInfo} />
+      </MotionConfig>
+    </LazyMotion>
+  )
 }

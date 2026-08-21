@@ -124,7 +124,10 @@ export function DocumentHeader({
   const modeLabel = mode === "rich" ? "切换到 Markdown 源码" : "切换到即时预览编辑"
 
   return (
-    <header className="app-drag-region relative flex h-12 shrink-0 items-center border-b border-border/55 bg-background px-3">
+    <header
+      className="app-drag-region window-titlebar-leading relative flex h-12 shrink-0 items-center bg-background pr-3"
+      data-sidebar-open={sidebarOpen}
+    >
       <nav className="app-no-drag flex items-center gap-0.5" aria-label="文档历史">
         {!sidebarOpen ? (
           <Button

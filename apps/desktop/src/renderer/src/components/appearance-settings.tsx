@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 已校验的应用外观偏好与类型安全的偏好更新操作
- * [OUTPUT]: 中文主题、形状、排版与自定义主题设置界面
+ * [OUTPUT]: 中文主题、形状、全局字体与自定义主题设置界面
  * [POS]: 设置页的外观分区内容组件
  * [DOC]: design.md
  *
@@ -25,6 +25,7 @@ import { Switch } from "@tessera/design-system/components/ui/switch"
 import type {
   AppPreferences,
   CornerRadiusPreference,
+  InterfaceFontPreference,
   ThemePreference,
   UpdateAppPreference,
 } from "../hooks/use-app-preferences"
@@ -39,6 +40,12 @@ const THEME_OPTIONS = [
   { id: "light", label: "浅色" },
   { id: "dark", label: "深色" },
 ] as const satisfies readonly { id: ThemePreference; label: string }[]
+
+const INTERFACE_FONT_LABELS: Record<InterfaceFontPreference, string> = {
+  system: "系统默认",
+  geist: "Geist",
+  "open-sans": "Open Sans",
+}
 
 const CORNER_OPTIONS = [
   { id: "sharp", label: "硬朗", radiusClassName: "rounded-none" },
@@ -238,17 +245,24 @@ export function AppearanceSettings({ preferences, onUpdatePreference }: Appearan
         />
       </SettingSection>
 
-      <SettingSection title="界面排版" description="控制导航、菜单、设置与代码表面的基础字体。">
+      <SettingSection title="界面排版" description="控制导航、菜单、设置与无衬线正文的基础字体。">
         <SettingRow
           title="界面字体"
-          description="当前遵循系统无衬线字体，以保证中文与平台控件一致。"
+          description="切换后立即应用到应用界面；正文使用无衬线字体时会一并跟随。"
           control={
-            <Select value="system" disabled>
+            <Select
+              value={preferences.interfaceFont}
+              onValueChange={(value) => {
+                if (value && INTERFACE_FONT_LABELS[value]) onUpdatePreference("interfaceFont", value)
+              }}
+            >
               <SelectTrigger className="w-48" aria-label="界面字体">
-                <SelectValue>{() => "系统默认"}</SelectValue>
+                <SelectValue>{(value: InterfaceFontPreference) => INTERFACE_FONT_LABELS[value]}</SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="system">系统默认</SelectItem>
+                <SelectItem value="geist">Geist</SelectItem>
+                <SelectItem value="open-sans">Open Sans</SelectItem>
               </SelectContent>
             </Select>
           }

@@ -11,6 +11,7 @@
  */
 
 export * from "./client"
+export * from "./ai-provider-config-repository"
 export * from "./migrations"
 export * from "./schema"
 export * from "./workspace-repository"

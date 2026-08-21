@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useState } from "react"
 
 export type ThemePreference = "system" | "light" | "dark"
+export type InterfaceFontPreference = "system" | "geist" | "open-sans"
 export type DefaultEditorMode = "rich" | "source"
 export type CornerRadiusPreference = "sharp" | "default" | "soft"
 export type EditorFontPreference = "sans" | "serif"
@@ -24,6 +25,7 @@ export interface AppPreferences {
   editorFont: EditorFontPreference
   editorFontSize: number
   editorWidth: EditorWidthPreference
+  interfaceFont: InterfaceFontPreference
   spellCheck: boolean
   theme: ThemePreference
 }
@@ -35,6 +37,7 @@ export type UpdateAppPreference = <Key extends keyof AppPreferences>(
 
 const PREFERENCES_STORAGE_KEY = "tessera.preferences.v1"
 const THEME_VALUES = new Set<ThemePreference>(["system", "light", "dark"])
+const INTERFACE_FONT_VALUES = new Set<InterfaceFontPreference>(["system", "geist", "open-sans"])
 const EDITOR_MODE_VALUES = new Set<DefaultEditorMode>(["rich", "source"])
 const CORNER_RADIUS_VALUES = new Set<CornerRadiusPreference>(["sharp", "default", "soft"])
 const EDITOR_FONT_VALUES = new Set<EditorFontPreference>(["sans", "serif"])
@@ -46,8 +49,17 @@ const CORNER_RADIUS_CSS: Record<CornerRadiusPreference, string> = {
   soft: "0.75rem",
 }
 
+const INTERFACE_FONT_CSS: Record<InterfaceFontPreference, string> = {
+  system:
+    "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', ui-sans-serif, system-ui, sans-serif",
+  geist:
+    "'Geist Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', ui-sans-serif, system-ui, sans-serif",
+  "open-sans":
+    "'Open Sans Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', ui-sans-serif, system-ui, sans-serif",
+}
+
 const EDITOR_FONT_CSS: Record<EditorFontPreference, string> = {
-  sans: "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif",
+  sans: "var(--font-sans)",
   serif: "ui-serif, 'Songti SC', 'STSong', 'Noto Serif CJK SC', Georgia, serif",
 }
 
@@ -63,6 +75,7 @@ const DEFAULT_PREFERENCES: AppPreferences = {
   editorFont: "sans",
   editorFontSize: 16,
   editorWidth: "comfortable",
+  interfaceFont: "system",
   spellCheck: true,
   theme: "system",
 }
@@ -94,6 +107,10 @@ function readPreferences(): AppPreferences {
         value.editorWidth && EDITOR_WIDTH_VALUES.has(value.editorWidth)
           ? value.editorWidth
           : DEFAULT_PREFERENCES.editorWidth,
+      interfaceFont:
+        value.interfaceFont && INTERFACE_FONT_VALUES.has(value.interfaceFont)
+          ? value.interfaceFont
+          : DEFAULT_PREFERENCES.interfaceFont,
       spellCheck: typeof value.spellCheck === "boolean" ? value.spellCheck : DEFAULT_PREFERENCES.spellCheck,
       theme: value.theme && THEME_VALUES.has(value.theme) ? value.theme : DEFAULT_PREFERENCES.theme,
     }
@@ -125,10 +142,17 @@ export function useAppPreferences() {
   useEffect(() => {
     const rootStyle = document.documentElement.style
     rootStyle.setProperty("--radius", CORNER_RADIUS_CSS[preferences.cornerRadius])
+    rootStyle.setProperty("--font-interface", INTERFACE_FONT_CSS[preferences.interfaceFont])
     rootStyle.setProperty("--font-content", EDITOR_FONT_CSS[preferences.editorFont])
     rootStyle.setProperty("--editor-font-size", `${preferences.editorFontSize}px`)
     rootStyle.setProperty("--editor-max-width", EDITOR_WIDTH_CSS[preferences.editorWidth])
-  }, [preferences.cornerRadius, preferences.editorFont, preferences.editorFontSize, preferences.editorWidth])
+  }, [
+    preferences.cornerRadius,
+    preferences.editorFont,
+    preferences.editorFontSize,
+    preferences.editorWidth,
+    preferences.interfaceFont,
+  ])
 
   const updatePreference = useCallback<UpdateAppPreference>((key, value) => {
     setPreferences((current) => ({ ...current, [key]: value }))

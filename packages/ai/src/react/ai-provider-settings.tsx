@@ -1,8 +1,8 @@
 /**
- * [INPUT]: 首批 AI API 供应商元数据与用户在当前会话中的配置草稿
- * [OUTPUT]: AI 可用性、供应商总览、搜索和供应商详情配置界面
- * [POS]: @tessera/ai/react 提供的供应商管理功能视图
- * [DOC]: design.md、docs/architecture.md
+ * [INPUT]: 首批 AI API 供应商元数据、LobeHub 图标、持久化配置与类型化模型发现函数
+ * [OUTPUT]: 可恢复配置、加密密钥状态、全部/详情主从工作区、连接测试与分组模型目录
+ * [POS]: @tessera/ai/react 提供的模型供应商管理视图
+ * [DOC]: design.md、docs/architecture/ai-providers.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -10,60 +10,73 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import anthropicIconUrl from "@lobehub/icons-static-svg/icons/anthropic.svg"
-import deepSeekIconUrl from "@lobehub/icons-static-svg/icons/deepseek-color.svg"
-import grokIconUrl from "@lobehub/icons-static-svg/icons/grok.svg"
-import openAiIconUrl from "@lobehub/icons-static-svg/icons/openai.svg"
-import openRouterIconUrl from "@lobehub/icons-static-svg/icons/openrouter-color.svg"
+import type {
+  AiProviderConfig,
+  AiProviderConnectionInput,
+  AiProviderModel,
+  AiProviderSaveInput,
+} from "@tessera/contracts"
 import {
   Add01Icon,
-  ArrowLeft01Icon,
   CheckmarkCircle02Icon,
   Delete02Icon,
   EyeIcon,
   EyeOffIcon,
+  ListViewIcon,
   Refresh01Icon,
   Search01Icon,
 } from "@tessera/design-system/components/icons"
-import { SettingRow } from "@tessera/design-system/components/setting-row"
-import { SettingSection } from "@tessera/design-system/components/setting-section"
 import { Button } from "@tessera/design-system/components/ui/button"
 import { Icon } from "@tessera/design-system/components/ui/icon"
 import { Input } from "@tessera/design-system/components/ui/input"
 import { Switch } from "@tessera/design-system/components/ui/switch"
-import { useMemo, useState } from "react"
+import { Suspense, lazy, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react"
 import {
   AI_PROVIDER_DEFINITIONS,
   type AiProviderDefinition,
   type AiProviderDraft,
   type AiProviderDrafts,
   type AiProviderId,
+  type AiProviderModelDraft,
   appendAiProviderModel,
   createInitialAiProviderDrafts,
   matchesAiProvider,
+  mergeDiscoveredAiProviderModels,
 } from "../provider-catalog"
 
-const PROVIDER_ICON_URLS: Record<AiProviderId, string> = {
-  "openai-compatible": openAiIconUrl,
-  "anthropic-compatible": anthropicIconUrl,
-  deepseek: deepSeekIconUrl,
-  grok: grokIconUrl,
-  openrouter: openRouterIconUrl,
+const PROVIDER_ICON_KEYS: Record<AiProviderId, string> = {
+  "openai-compatible": "openai",
+  "anthropic-compatible": "anthropic",
+  deepseek: "deepseek",
+  grok: "xai",
+  openrouter: "openrouter",
 }
 
-function ProviderMark({ provider }: { provider: AiProviderDefinition }) {
-  const monochrome = provider.id !== "deepseek" && provider.id !== "openrouter"
+const ModelIcon = lazy(async () => {
+  const icons = await import("@lobehub/icons")
+  return { default: icons.ModelIcon }
+})
+
+const ProviderIcon = lazy(async () => {
+  const icons = await import("@lobehub/icons")
+  return { default: icons.ProviderIcon }
+})
+
+type ProviderSelection = "all" | AiProviderId
+
+function ProviderMark({ provider, size = "lg" }: { provider: AiProviderDefinition; size?: "sm" | "lg" }) {
+  const compact = size === "sm"
 
   return (
     <span
-      className="flex size-11 shrink-0 items-center justify-center rounded-lg border border-border bg-muted"
+      className={`flex shrink-0 items-center justify-center border border-border bg-muted ${compact ? "size-8 rounded-md" : "size-11 rounded-lg"}`}
       aria-hidden="true"
     >
-      <img
-        src={PROVIDER_ICON_URLS[provider.id]}
-        alt=""
-        className={`size-6 ${monochrome ? "dark:invert" : ""}`}
-      />
+      <Suspense
+        fallback={<span className={`${compact ? "size-4.5" : "size-6"} animate-pulse rounded bg-muted`} />}
+      >
+        <ProviderIcon provider={PROVIDER_ICON_KEYS[provider.id]} size={compact ? 18 : 24} type="color" />
+      </Suspense>
     </span>
   )
 }
@@ -81,115 +94,222 @@ function ProviderStatus({ configured }: { configured: boolean }) {
   )
 }
 
-interface ProviderCardProps {
-  draft: AiProviderDraft
-  onOpen: () => void
-  onToggle: (checked: boolean) => void
-  provider: AiProviderDefinition
-}
-
-function ProviderCard({ draft, onOpen, onToggle, provider }: ProviderCardProps) {
-  return (
-    <article className="flex min-h-48 flex-col overflow-hidden rounded-xl border border-border bg-card text-card-foreground transition-colors hover:border-input">
-      <button type="button" className="flex flex-1 flex-col p-5 text-left" onClick={onOpen}>
-        <div className="flex items-start gap-3.5">
-          <ProviderMark provider={provider} />
-          <div className="min-w-0 pt-0.5">
-            <h3 className="text-sm font-medium tracking-[-0.01em]">{provider.name}</h3>
-            <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">{provider.protocol}</p>
-          </div>
-        </div>
-        <p className="mt-5 text-[13px] leading-5 text-muted-foreground">{provider.description}</p>
-      </button>
-      <footer className="flex items-center justify-between gap-4 border-t border-border px-5 py-3">
-        <ProviderStatus configured={draft.apiKeyConfigured} />
-        <Switch
-          checked={draft.enabled}
-          onCheckedChange={onToggle}
-          aria-label={`${draft.enabled ? "停用" : "启用"}${provider.name}`}
-        />
-      </footer>
-    </article>
-  )
-}
-
 interface ProviderDirectoryProps {
   drafts: AiProviderDrafts
-  onOpenProvider: (providerId: AiProviderId) => void
-  onUpdateProvider: (providerId: AiProviderId, update: Partial<AiProviderDraft>) => void
+  onSelectProvider: (providerId: ProviderSelection) => void
+  selectedProviderId: ProviderSelection
 }
 
-function ProviderDirectory({ drafts, onOpenProvider, onUpdateProvider }: ProviderDirectoryProps) {
+function ProviderDirectory({ drafts, onSelectProvider, selectedProviderId }: ProviderDirectoryProps) {
   const [query, setQuery] = useState("")
+  const deferredQuery = useDeferredValue(query)
   const visibleProviders = useMemo(
-    () => AI_PROVIDER_DEFINITIONS.filter((provider) => matchesAiProvider(provider, query)),
-    [query],
+    () => AI_PROVIDER_DEFINITIONS.filter((provider) => matchesAiProvider(provider, deferredQuery)),
+    [deferredQuery],
   )
   const enabledProviders = visibleProviders.filter((provider) => drafts[provider.id].enabled)
   const availableProviders = visibleProviders.filter((provider) => !drafts[provider.id].enabled)
 
-  const renderCards = (providers: readonly AiProviderDefinition[]) => (
-    <div className="grid grid-cols-1 gap-4 min-[980px]:grid-cols-2">
+  const renderProviders = (providers: readonly AiProviderDefinition[]) => (
+    <div className="space-y-0.5">
       {providers.map((provider) => (
-        <ProviderCard
+        <button
           key={provider.id}
-          provider={provider}
-          draft={drafts[provider.id]}
-          onOpen={() => onOpenProvider(provider.id)}
-          onToggle={(enabled) => onUpdateProvider(provider.id, { enabled })}
-        />
+          type="button"
+          className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-accent data-[active=true]:bg-accent data-[active=true]:text-accent-foreground"
+          data-active={provider.id === selectedProviderId || undefined}
+          aria-current={provider.id === selectedProviderId ? "page" : undefined}
+          onClick={() => onSelectProvider(provider.id)}
+        >
+          <ProviderMark provider={provider} size="sm" />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[13px] font-medium">{provider.name}</span>
+            <span className="block truncate font-mono text-[10px] text-muted-foreground">
+              {provider.protocol}
+            </span>
+          </span>
+          <span
+            className={`size-1.5 shrink-0 rounded-full ${drafts[provider.id].apiKeyConfigured ? "bg-foreground" : "bg-input"}`}
+            title={drafts[provider.id].apiKeyConfigured ? "已配置" : "待配置"}
+            aria-hidden="true"
+          />
+          <span className="sr-only">{drafts[provider.id].apiKeyConfigured ? "已配置" : "待配置"}</span>
+        </button>
       ))}
     </div>
   )
 
   return (
-    <div className="space-y-8">
-      <div className="relative max-w-md">
-        <Icon
-          icon={Search01Icon}
-          size={15}
-          className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-muted-foreground"
-        />
-        <Input
-          value={query}
-          className="h-9 pl-9 text-[13px]"
-          placeholder="搜索供应商、协议或适配器"
-          aria-label="搜索 AI 供应商"
-          onChange={(event) => setQuery(event.currentTarget.value)}
-        />
-      </div>
-
-      {enabledProviders.length > 0 ? (
-        <section className="space-y-3" aria-labelledby="enabled-ai-providers">
-          <div className="flex items-baseline gap-2">
-            <h2 id="enabled-ai-providers" className="text-[15px] font-medium tracking-[-0.01em]">
-              已启用供应商
-            </h2>
-            <span className="text-xs tabular-nums text-muted-foreground">{enabledProviders.length}</span>
+    <aside className="flex min-h-0 flex-col border-b border-border bg-sidebar min-[900px]:border-r min-[900px]:border-b-0">
+      <header className="shrink-0 border-b border-border px-3 pt-4 pb-3">
+        <div className="flex items-baseline justify-between gap-3 px-1">
+          <div>
+            <p className="text-[11px] font-medium tracking-[0.08em] text-muted-foreground uppercase">设置</p>
+            <h1 className="mt-1 text-[15px] font-medium">模型供应商</h1>
           </div>
-          {renderCards(enabledProviders)}
-        </section>
-      ) : null}
-
-      {availableProviders.length > 0 ? (
-        <section className="space-y-3" aria-labelledby="available-ai-providers">
-          <div className="flex items-baseline gap-2">
-            <h2 id="available-ai-providers" className="text-[15px] font-medium tracking-[-0.01em]">
-              {enabledProviders.length > 0 ? "其他供应商" : "模型供应商"}
-            </h2>
-            <span className="text-xs tabular-nums text-muted-foreground">{availableProviders.length}</span>
-          </div>
-          {renderCards(availableProviders)}
-        </section>
-      ) : null}
-
-      {visibleProviders.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-border px-6 py-16 text-center">
-          <p className="text-[13px] font-medium">没有匹配的供应商</p>
-          <p className="mt-1 text-[13px] text-muted-foreground">换一个名称、协议或适配器关键词试试。</p>
+          <span className="text-xs tabular-nums text-muted-foreground">{AI_PROVIDER_DEFINITIONS.length}</span>
         </div>
-      ) : null}
-    </div>
+        <div className="relative mt-3">
+          <Icon
+            icon={Search01Icon}
+            size={14}
+            className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground"
+          />
+          <Input
+            value={query}
+            className="h-8 border-transparent bg-background/80 pl-8 text-[12px] shadow-none"
+            placeholder="搜索供应商"
+            aria-label="搜索 AI 供应商"
+            onChange={(event) => setQuery(event.currentTarget.value)}
+          />
+        </div>
+      </header>
+
+      <nav className="min-h-0 flex-1 overflow-y-auto p-2" aria-label="模型供应商">
+        <button
+          type="button"
+          className="mb-2 flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-accent data-[active=true]:bg-accent data-[active=true]:text-accent-foreground"
+          data-active={selectedProviderId === "all" || undefined}
+          aria-current={selectedProviderId === "all" ? "page" : undefined}
+          onClick={() => onSelectProvider("all")}
+        >
+          <span
+            className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground"
+            aria-hidden="true"
+          >
+            <Icon icon={ListViewIcon} size={16} />
+          </span>
+          <span className="min-w-0 flex-1 truncate text-[13px] font-medium">全部供应商</span>
+          <span className="text-[10px] tabular-nums text-muted-foreground">
+            {AI_PROVIDER_DEFINITIONS.length}
+          </span>
+        </button>
+
+        {enabledProviders.length > 0 ? (
+          <section aria-labelledby="enabled-ai-providers">
+            <h2
+              id="enabled-ai-providers"
+              className="px-2 pt-1 pb-1.5 text-[10px] font-medium tracking-[0.06em] text-muted-foreground uppercase"
+            >
+              已启用
+            </h2>
+            {renderProviders(enabledProviders)}
+          </section>
+        ) : null}
+
+        {availableProviders.length > 0 ? (
+          <section
+            className={enabledProviders.length > 0 ? "mt-3" : undefined}
+            aria-labelledby="other-ai-providers"
+          >
+            <h2
+              id="other-ai-providers"
+              className="px-2 pt-1 pb-1.5 text-[10px] font-medium tracking-[0.06em] text-muted-foreground uppercase"
+            >
+              {enabledProviders.length > 0 ? "其他" : "全部"}
+            </h2>
+            {renderProviders(availableProviders)}
+          </section>
+        ) : null}
+
+        {visibleProviders.length === 0 ? (
+          <div className="px-4 py-10 text-center">
+            <p className="text-[12px] font-medium">没有匹配的供应商</p>
+            <p className="mt-1 text-[11px] leading-4 text-muted-foreground">换一个名称或协议关键词试试。</p>
+          </div>
+        ) : null}
+      </nav>
+    </aside>
+  )
+}
+
+interface ProviderOverviewProps {
+  drafts: AiProviderDrafts
+  error: string | null
+  onOpenProvider: (providerId: AiProviderId) => void
+  onUpdateProvider: (providerId: AiProviderId, update: Partial<AiProviderDraft>) => void
+}
+
+function ProviderOverview({ drafts, error, onOpenProvider, onUpdateProvider }: ProviderOverviewProps) {
+  const enabledProviders = AI_PROVIDER_DEFINITIONS.filter((provider) => drafts[provider.id].enabled)
+  const availableProviders = AI_PROVIDER_DEFINITIONS.filter((provider) => !drafts[provider.id].enabled)
+
+  const renderGroup = (title: string, providers: readonly AiProviderDefinition[]) => {
+    if (providers.length === 0) return null
+
+    return (
+      <section className="space-y-3" aria-label={title}>
+        <div className="flex items-baseline gap-2">
+          <h2 className="text-[15px] font-medium">{title}</h2>
+          <span className="text-xs tabular-nums text-muted-foreground">{providers.length}</span>
+        </div>
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3">
+          {providers.map((provider) => {
+            const draft = drafts[provider.id]
+            return (
+              <article
+                key={provider.id}
+                className="flex min-h-40 min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-card transition-colors hover:border-foreground/20"
+              >
+                <button
+                  type="button"
+                  className="min-w-0 flex-1 p-4 text-left"
+                  onClick={() => onOpenProvider(provider.id)}
+                >
+                  <div className="flex min-w-0 items-start gap-3">
+                    <ProviderMark provider={provider} size="sm" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[14px] font-medium">{provider.name}</p>
+                      <p className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">
+                        {provider.protocol}
+                      </p>
+                    </div>
+                  </div>
+                  <p className="mt-3 min-h-10 text-[12px] leading-5 text-muted-foreground">
+                    {provider.description}
+                  </p>
+                </button>
+                <footer className="flex items-center justify-between border-t border-border px-4 py-2.5">
+                  <ProviderStatus configured={draft.apiKeyConfigured} />
+                  <Switch
+                    checked={draft.enabled}
+                    size="sm"
+                    onCheckedChange={(enabled) => onUpdateProvider(provider.id, { enabled })}
+                    aria-label={`${draft.enabled ? "停用" : "启用"}${provider.name}`}
+                  />
+                </footer>
+              </article>
+            )
+          })}
+        </div>
+      </section>
+    )
+  }
+
+  return (
+    <section className="min-h-full bg-background">
+      <div className="mx-auto w-full max-w-5xl space-y-8 px-[clamp(20px,4vw,48px)] py-8 pb-24">
+        <header className="border-b border-border pb-5">
+          <p className="text-[11px] font-medium tracking-[0.08em] text-muted-foreground uppercase">
+            模型供应商
+          </p>
+          <h1 className="mt-1 text-xl font-medium tracking-[-0.02em]">全部供应商</h1>
+          <p className="mt-1 text-[13px] leading-5 text-muted-foreground">
+            启用常用连接，或进入供应商详情配置 API 与可用模型。
+          </p>
+        </header>
+        {error ? (
+          <p
+            className="rounded-lg border border-destructive/25 bg-destructive/5 px-4 py-3 text-xs text-destructive"
+            role="alert"
+          >
+            {error}
+          </p>
+        ) : null}
+        {renderGroup("已启用", enabledProviders)}
+        {renderGroup(enabledProviders.length > 0 ? "未启用" : "可用供应商", availableProviders)}
+      </div>
+    </section>
   )
 }
 
@@ -197,51 +317,270 @@ interface ProviderDetailProps {
   apiKey: string
   draft: AiProviderDraft
   onApiKeyChange: (apiKey: string) => void
-  onBack: () => void
+  onDelete: () => Promise<void>
+  onListModels: (input: AiProviderConnectionInput) => Promise<AiProviderModel[]>
+  onSave: (apiKey: string) => Promise<void>
   onUpdate: (update: Partial<AiProviderDraft>) => void
   provider: AiProviderDefinition
 }
 
-function ProviderDetail({ apiKey, draft, onApiKeyChange, onBack, onUpdate, provider }: ProviderDetailProps) {
+type ProviderNotice = {
+  kind: "error" | "success"
+  scope: "connection" | "models"
+  text: string
+}
+
+function formatTokenLimit(value: number): string {
+  if (value >= 1_000_000) return `${Number((value / 1_000_000).toFixed(1))}M`
+  if (value >= 1_000) return `${Number((value / 1_000).toFixed(1))}K`
+  return String(value)
+}
+
+interface ProviderModelGroupProps {
+  label: string
+  models: readonly AiProviderModelDraft[]
+  onDelete: (modelId: string) => void
+  onToggle: (modelId: string, enabled: boolean) => void
+}
+
+function ProviderModelGroup({ label, models, onDelete, onToggle }: ProviderModelGroupProps) {
+  if (models.length === 0) return null
+
+  return (
+    <section aria-label={`${label}模型`}>
+      <header className="flex items-center justify-between border-b border-border bg-muted/25 px-4 py-2">
+        <h4 className="text-[11px] font-medium text-muted-foreground">{label}</h4>
+        <span className="text-[10px] tabular-nums text-muted-foreground">{models.length}</span>
+      </header>
+      <div>
+        {models.map((model) => (
+          <div
+            key={model.id}
+            className="flex min-h-14 items-center gap-3 border-b border-border px-4 py-2.5 [contain-intrinsic-size:auto_60px] [content-visibility:auto] last:border-b-0"
+          >
+            <span className="flex size-8 shrink-0 items-center justify-center" aria-hidden="true">
+              <Suspense fallback={<span className="size-8 animate-pulse rounded-full bg-muted" />}>
+                <ModelIcon model={model.id} shape="circle" size={32} type="avatar" />
+              </Suspense>
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                <p className="truncate text-[13px] font-medium text-foreground">{model.name || model.id}</p>
+                {model.name && model.name !== model.id ? (
+                  <code className="truncate font-mono text-[10px] text-muted-foreground">{model.id}</code>
+                ) : null}
+              </div>
+              {model.ownedBy || model.contextWindow || model.maxOutputTokens ? (
+                <p className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground">
+                  {model.ownedBy ? <span>{model.ownedBy}</span> : null}
+                  {model.contextWindow ? <span>上下文 {formatTokenLimit(model.contextWindow)}</span> : null}
+                  {model.maxOutputTokens ? (
+                    <span>最大输出 {formatTokenLimit(model.maxOutputTokens)}</span>
+                  ) : null}
+                </p>
+              ) : null}
+            </div>
+            <Switch
+              checked={model.enabled}
+              size="sm"
+              onCheckedChange={(enabled) => onToggle(model.id, enabled)}
+              aria-label={`${model.enabled ? "停用" : "启用"}模型 ${model.id}`}
+            />
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="text-muted-foreground"
+              aria-label={`删除模型 ${model.id}`}
+              onClick={() => onDelete(model.id)}
+            >
+              <Icon icon={Delete02Icon} size={14} />
+            </Button>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function ProviderDetail({
+  apiKey,
+  draft,
+  onApiKeyChange,
+  onDelete,
+  onListModels,
+  onSave,
+  onUpdate,
+  provider,
+}: ProviderDetailProps) {
   const [showApiKey, setShowApiKey] = useState(false)
+  const [showModelInput, setShowModelInput] = useState(false)
   const [modelInput, setModelInput] = useState("")
   const [modelSearch, setModelSearch] = useState("")
-  const [notice, setNotice] = useState<string | null>(null)
-  const visibleModels = draft.models.filter((model) =>
-    model.id.toLocaleLowerCase().includes(modelSearch.trim().toLocaleLowerCase()),
+  const deferredModelSearch = useDeferredValue(modelSearch)
+  const [notice, setNotice] = useState<ProviderNotice | null>(null)
+  const [activeRequest, setActiveRequest] = useState<"connection" | "delete" | "models" | "save" | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const automaticCatalogRequest = useRef(false)
+  const normalizedModelSearch = deferredModelSearch.trim().toLocaleLowerCase()
+  const visibleModels = useMemo(
+    () =>
+      draft.models.filter((model) =>
+        `${model.name ?? ""} ${model.id}`.toLocaleLowerCase().includes(normalizedModelSearch),
+      ),
+    [draft.models, normalizedModelSearch],
+  )
+  const visibleModelGroups = useMemo(
+    () => ({
+      disabled: visibleModels.filter((model) => !model.enabled),
+      enabled: visibleModels.filter((model) => model.enabled),
+    }),
+    [visibleModels],
   )
 
   const addModel = () => {
-    const models = appendAiProviderModel(draft.models, modelInput)
+    const models = appendAiProviderModel(draft.models, modelInput, provider.id)
     if (models.length === draft.models.length) return
     onUpdate({ models })
     setModelInput("")
+    setShowModelInput(false)
   }
 
-  const saveSessionDraft = () => {
-    onUpdate({ apiKeyConfigured: apiKey.trim().length > 0 })
-    setNotice("配置已保留在当前应用会话；安全存储和真实连接将在 API 运行时接入时启用。")
+  const saveConfig = async () => {
+    setActiveRequest("save")
+    setNotice(null)
+    try {
+      await onSave(apiKey.trim())
+      onApiKeyChange("")
+      setConfirmDelete(false)
+      setNotice({
+        kind: "success",
+        scope: "connection",
+        text: "配置已保存；API Key 由主进程通过系统安全存储加密。",
+      })
+    } catch (error) {
+      setNotice({
+        kind: "error",
+        scope: "connection",
+        text: error instanceof Error ? error.message : "保存供应商配置失败。",
+      })
+    } finally {
+      setActiveRequest(null)
+    }
   }
+
+  const deleteConfig = async () => {
+    if (!confirmDelete) {
+      setConfirmDelete(true)
+      setNotice({
+        kind: "error",
+        scope: "connection",
+        text: "再次点击“确认删除”将移除 Base URL、模型开关和已加密的 API Key。",
+      })
+      return
+    }
+    setActiveRequest("delete")
+    setNotice(null)
+    try {
+      await onDelete()
+      onApiKeyChange("")
+      setConfirmDelete(false)
+      setNotice({ kind: "success", scope: "connection", text: "供应商配置已删除并恢复默认值。" })
+    } catch (error) {
+      setNotice({
+        kind: "error",
+        scope: "connection",
+        text: error instanceof Error ? error.message : "删除供应商配置失败。",
+      })
+    } finally {
+      setActiveRequest(null)
+    }
+  }
+
+  const requestModels = useCallback(
+    async (scope: "connection" | "models") => {
+      setActiveRequest(scope)
+      setNotice(null)
+      try {
+        const models = await onListModels({
+          providerId: provider.id,
+          apiKey: apiKey.trim(),
+          baseUrl: draft.baseUrl.trim(),
+        })
+        if (scope === "models") {
+          const mergedModels = mergeDiscoveredAiProviderModels(draft.models, models, provider.id)
+          onUpdate({
+            models: mergedModels,
+            apiKeyConfigured: draft.apiKeyConfigured || apiKey.trim().length > 0,
+          })
+          setNotice({
+            kind: "success",
+            scope,
+            text:
+              models.length > 0
+                ? `已从供应商获取 ${models.length} 个模型，当前列表共 ${mergedModels.length} 个。`
+                : "连接成功，但供应商返回了空模型列表。",
+          })
+        } else {
+          onUpdate({ apiKeyConfigured: draft.apiKeyConfigured || apiKey.trim().length > 0 })
+          setNotice({
+            kind: "success",
+            scope,
+            text: `连接成功，模型目录可访问（${models.length} 个模型）。`,
+          })
+        }
+      } catch (error) {
+        setNotice({
+          kind: "error",
+          scope,
+          text: error instanceof Error ? error.message : "模型目录请求失败。",
+        })
+      } finally {
+        setActiveRequest(null)
+      }
+    },
+    [apiKey, draft.apiKeyConfigured, draft.baseUrl, draft.models, onListModels, onUpdate, provider.id],
+  )
+
+  const hasBaseUrl = draft.baseUrl.trim().length > 0
+  const canTestConnection =
+    hasBaseUrl && (apiKey.trim().length > 0 || draft.apiKeyConfigured || provider.publicModelCatalog)
+
+  useEffect(() => {
+    if (
+      automaticCatalogRequest.current ||
+      !provider.publicModelCatalog ||
+      draft.models.length > 0 ||
+      draft.baseUrl.trim() !== provider.defaultBaseUrl
+    ) {
+      return
+    }
+    automaticCatalogRequest.current = true
+    void requestModels("models")
+  }, [
+    draft.baseUrl,
+    draft.models.length,
+    provider.defaultBaseUrl,
+    provider.publicModelCatalog,
+    requestModels,
+  ])
 
   return (
-    <div className="space-y-8">
-      <header>
-        <Button variant="ghost" size="sm" className="-ml-2" onClick={onBack}>
-          <Icon icon={ArrowLeft01Icon} size={14} />
-          返回供应商
-        </Button>
-        <div className="mt-5 flex items-start justify-between gap-6 border-b border-border pb-6">
-          <div className="flex min-w-0 items-start gap-4">
+    <section className="min-h-full bg-background">
+      <div className="mx-auto w-full max-w-5xl space-y-7 px-[clamp(20px,4vw,48px)] py-8 pb-24">
+        <header className="flex items-start justify-between gap-6 border-b border-border pb-5">
+          <div className="flex min-w-0 items-start gap-3.5">
             <ProviderMark provider={provider} />
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <h2 className="text-xl font-medium tracking-[-0.02em]">{provider.name}</h2>
                 <ProviderStatus configured={draft.apiKeyConfigured} />
               </div>
-              <p className="mt-1.5 max-w-2xl text-[13px] leading-5 text-muted-foreground">
+              <p className="mt-1 max-w-2xl text-[13px] leading-5 text-muted-foreground">
                 {provider.description}
               </p>
-              <p className="mt-2 font-mono text-[11px] text-muted-foreground">{provider.adapter}</p>
+              <p className="mt-1.5 font-mono text-[10px] text-muted-foreground">
+                {provider.protocol} · {provider.adapter}
+              </p>
             </div>
           </div>
           <Switch
@@ -249,170 +588,303 @@ function ProviderDetail({ apiKey, draft, onApiKeyChange, onBack, onUpdate, provi
             onCheckedChange={(enabled) => onUpdate({ enabled })}
             aria-label={`${draft.enabled ? "停用" : "启用"}${provider.name}`}
           />
-        </div>
-      </header>
+        </header>
 
-      <div className="rounded-lg border border-border bg-muted/45 px-4 py-3 text-[13px] leading-5 text-muted-foreground">
-        当前只配置 API 连接。外部 Agent 与本地模型不在本阶段的连接范围内；API Key 不会写入渲染层持久化存储。
-      </div>
+        <section className="space-y-3" aria-labelledby="provider-connection-heading">
+          <div>
+            <h3 id="provider-connection-heading" className="text-[15px] font-medium">
+              连接配置
+            </h3>
+            <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
+              API Key 只保留在当前应用会话；请求通过主进程安全边界发送。
+            </p>
+          </div>
 
-      <SettingSection title="连接配置" description={`请求将通过 ${provider.adapter} 适配。`}>
-        <SettingRow
-          title="API Key"
-          description={draft.apiKeyConfigured ? "当前会话已输入密钥。" : "密钥只保留在当前应用会话中。"}
-          className="grid-cols-1 gap-4 min-[880px]:grid-cols-[minmax(0,1fr)_minmax(280px,420px)]"
-          control={
-            <div className="relative w-full min-[880px]:w-[min(38vw,420px)]">
-              <Input
-                type={showApiKey ? "text" : "password"}
-                value={apiKey}
-                className="h-9 pr-10"
-                placeholder={provider.apiKeyPlaceholder}
-                aria-label={`${provider.name} API Key`}
-                autoComplete="off"
-                onChange={(event) => {
-                  onApiKeyChange(event.currentTarget.value)
-                  setNotice(null)
-                }}
-              />
+          <div className="overflow-hidden rounded-lg border border-border bg-card">
+            <div className="grid gap-4 p-4 2xl:grid-cols-2">
+              <label className="block min-w-0" htmlFor="provider-api-key">
+                <span className="text-[12px] font-medium">API Key</span>
+                <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                  {draft.apiKeyConfigured
+                    ? "已由系统安全存储加密保存；留空不会修改，输入新 Key 可替换。"
+                    : "输入供应商或兼容服务提供的密钥。"}
+                </span>
+                <span className="relative mt-2 block">
+                  <Input
+                    id="provider-api-key"
+                    type={showApiKey ? "text" : "password"}
+                    value={apiKey}
+                    className="h-9 pr-10"
+                    placeholder={
+                      draft.apiKeyConfigured ? "已安全保存；输入新 Key 可替换" : provider.apiKeyPlaceholder
+                    }
+                    aria-label={`${provider.name} API Key`}
+                    autoComplete="off"
+                    onChange={(event) => {
+                      onApiKeyChange(event.currentTarget.value)
+                      setNotice(null)
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="absolute top-1 right-1 text-muted-foreground"
+                    aria-label={showApiKey ? "隐藏 API Key" : "显示 API Key"}
+                    onClick={() => setShowApiKey((current) => !current)}
+                  >
+                    <Icon icon={showApiKey ? EyeOffIcon : EyeIcon} size={15} />
+                  </Button>
+                </span>
+              </label>
+
+              <label className="block min-w-0" htmlFor="provider-api-base-url">
+                <span className="text-[12px] font-medium">API 地址</span>
+                <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                  默认使用官方地址，代理、中转或兼容服务可在此覆盖。
+                </span>
+                <Input
+                  id="provider-api-base-url"
+                  value={draft.baseUrl}
+                  className="mt-2 h-9"
+                  placeholder={provider.defaultBaseUrl}
+                  aria-label={`${provider.name} Base URL`}
+                  spellCheck={false}
+                  onChange={(event) => {
+                    onUpdate({ baseUrl: event.currentTarget.value })
+                    setNotice(null)
+                  }}
+                />
+              </label>
+            </div>
+
+            <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-border px-4 py-3">
+              {notice?.scope === "connection" ? (
+                <p
+                  className={`mr-auto text-xs leading-5 ${notice.kind === "error" ? "text-destructive" : "text-muted-foreground"}`}
+                  role={notice.kind === "error" ? "alert" : "status"}
+                >
+                  {notice.text}
+                </p>
+              ) : null}
               <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                className="absolute top-1 right-1 text-muted-foreground"
-                aria-label={showApiKey ? "隐藏 API Key" : "显示 API Key"}
-                onClick={() => setShowApiKey((current) => !current)}
+                variant="destructive"
+                size="sm"
+                className="mr-auto"
+                disabled={activeRequest !== null}
+                onClick={() => void deleteConfig()}
               >
-                <Icon icon={showApiKey ? EyeOffIcon : EyeIcon} size={15} />
+                {activeRequest === "delete" ? "删除中" : confirmDelete ? "确认删除" : "删除配置"}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!canTestConnection || activeRequest !== null}
+                onClick={() => void requestModels("connection")}
+              >
+                {activeRequest === "connection" ? (
+                  <Icon icon={Refresh01Icon} size={13} className="animate-spin" />
+                ) : null}
+                {activeRequest === "connection" ? "测试中" : "测试连接"}
+              </Button>
+              <Button
+                size="sm"
+                disabled={!hasBaseUrl || activeRequest !== null}
+                onClick={() => void saveConfig()}
+              >
+                {activeRequest === "save" ? "保存中" : "保存配置"}
+              </Button>
+            </footer>
+          </div>
+        </section>
+
+        <section className="space-y-3" aria-labelledby="provider-models-heading">
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <div className="flex items-baseline gap-2">
+                <h3 id="provider-models-heading" className="text-[15px] font-medium">
+                  模型列表
+                </h3>
+                <span className="text-xs tabular-nums text-muted-foreground">{draft.models.length}</span>
+              </div>
+              <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
+                从模型目录同步，或手动补充完整模型 ID。
+              </p>
+            </div>
+          </div>
+
+          <div className="overflow-hidden rounded-lg border border-border bg-card">
+            <div className="sticky top-0 z-10 flex flex-wrap gap-2 border-b border-border bg-card p-3">
+              <div className="relative min-w-48 flex-1">
+                <Icon
+                  icon={Search01Icon}
+                  size={14}
+                  className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-muted-foreground"
+                />
+                <Input
+                  value={modelSearch}
+                  className="h-8 pl-9 text-[12px]"
+                  placeholder="搜索模型名称或 ID"
+                  aria-label="搜索模型"
+                  onChange={(event) => setModelSearch(event.currentTarget.value)}
+                />
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!hasBaseUrl || activeRequest !== null}
+                onClick={() => void requestModels("models")}
+              >
+                <Icon
+                  icon={Refresh01Icon}
+                  size={13}
+                  className={activeRequest === "models" ? "animate-spin" : undefined}
+                />
+                {activeRequest === "models" ? "同步中" : "同步模型"}
+              </Button>
+              <Button
+                variant="outline"
+                size="icon-sm"
+                aria-label={showModelInput ? "收起模型输入" : "手动添加模型"}
+                aria-expanded={showModelInput}
+                onClick={() => setShowModelInput((current) => !current)}
+              >
+                <Icon icon={Add01Icon} size={14} />
               </Button>
             </div>
-          }
-        />
-        <SettingRow
-          title="API 地址"
-          description="已预填官方默认地址；使用代理、中转或兼容服务时再修改。"
-          className="grid-cols-1 gap-4 min-[880px]:grid-cols-[minmax(0,1fr)_minmax(280px,420px)]"
-          control={
-            <Input
-              value={draft.baseUrl}
-              className="h-9 w-full min-[880px]:w-[min(38vw,420px)]"
-              placeholder={provider.defaultBaseUrl}
-              aria-label={`${provider.name} Base URL`}
-              spellCheck={false}
-              onChange={(event) => onUpdate({ baseUrl: event.currentTarget.value })}
-            />
-          }
-        />
-        <div className="flex flex-wrap items-center justify-end gap-3 px-5 py-4">
-          {notice ? <p className="mr-auto text-xs leading-5 text-muted-foreground">{notice}</p> : null}
-          <Button variant="outline" size="sm" disabled title="API 运行时接入后开放">
-            测试连接
-          </Button>
-          <Button size="sm" onClick={saveSessionDraft}>
-            保存本次会话
-          </Button>
-        </div>
-      </SettingSection>
 
-      <SettingSection
-        title="模型列表"
-        description="模型接口由适配器根据 API 地址推导；也可以手动添加模型 ID。"
-        action={
-          <Button variant="outline" size="sm" disabled title="API 运行时接入后开放">
-            <Icon icon={Refresh01Icon} size={13} />
-            获取模型
-          </Button>
-        }
-      >
-        <div className="flex flex-col gap-2 border-b border-border p-3 min-[760px]:flex-row">
-          <div className="relative min-w-0 flex-1">
-            <Icon
-              icon={Search01Icon}
-              size={14}
-              className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-muted-foreground"
-            />
-            <Input
-              value={modelSearch}
-              className="h-9 pl-9"
-              placeholder="搜索已添加模型"
-              aria-label="搜索模型"
-              onChange={(event) => setModelSearch(event.currentTarget.value)}
-            />
-          </div>
-          <div className="flex min-w-0 gap-2 min-[760px]:w-[45%]">
-            <Input
-              value={modelInput}
-              className="h-9 min-w-0"
-              placeholder="输入模型 ID"
-              aria-label="模型 ID"
-              spellCheck={false}
-              onChange={(event) => setModelInput(event.currentTarget.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") addModel()
-              }}
-            />
-            <Button variant="outline" size="lg" onClick={addModel} disabled={!modelInput.trim()}>
-              <Icon icon={Add01Icon} size={14} />
-              添加
-            </Button>
-          </div>
-        </div>
+            {showModelInput ? (
+              <div className="flex gap-2 border-b border-border bg-muted/25 p-3">
+                <Input
+                  value={modelInput}
+                  className="h-8 min-w-0 flex-1 text-[12px]"
+                  placeholder="输入完整模型 ID"
+                  aria-label="模型 ID"
+                  spellCheck={false}
+                  onChange={(event) => setModelInput(event.currentTarget.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") addModel()
+                  }}
+                />
+                <Button size="sm" onClick={addModel} disabled={!modelInput.trim()}>
+                  添加
+                </Button>
+              </div>
+            ) : null}
 
-        {visibleModels.length > 0 ? (
-          <div>
-            {visibleModels.map((model) => (
+            {notice?.scope === "models" ? (
               <div
-                key={model.id}
-                className="flex min-h-15 items-center gap-4 border-b border-border px-5 py-3 last:border-b-0"
+                className={`border-b border-border px-4 py-3 text-xs leading-5 ${notice.kind === "error" ? "bg-destructive/5 text-destructive" : "bg-muted/35 text-muted-foreground"}`}
+                role={notice.kind === "error" ? "alert" : "status"}
               >
-                <code className="min-w-0 flex-1 truncate font-mono text-[13px] text-foreground">
-                  {model.id}
-                </code>
-                <Switch
-                  checked={model.enabled}
-                  size="sm"
-                  onCheckedChange={(enabled) =>
+                {notice.text}
+              </div>
+            ) : null}
+
+            {visibleModels.length > 0 ? (
+              <div>
+                <ProviderModelGroup
+                  label="已启用"
+                  models={visibleModelGroups.enabled}
+                  onToggle={(modelId, enabled) =>
                     onUpdate({
-                      models: draft.models.map((item) =>
-                        item.id === model.id ? { ...item, enabled } : item,
+                      models: draft.models.map((model) =>
+                        model.id === modelId ? { ...model, enabled } : model,
                       ),
                     })
                   }
-                  aria-label={`${model.enabled ? "停用" : "启用"}模型 ${model.id}`}
+                  onDelete={(modelId) =>
+                    onUpdate({ models: draft.models.filter((model) => model.id !== modelId) })
+                  }
                 />
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="text-muted-foreground"
-                  aria-label={`删除模型 ${model.id}`}
-                  onClick={() => onUpdate({ models: draft.models.filter((item) => item.id !== model.id) })}
-                >
-                  <Icon icon={Delete02Icon} size={14} />
-                </Button>
+                <ProviderModelGroup
+                  label="未启用"
+                  models={visibleModelGroups.disabled}
+                  onToggle={(modelId, enabled) =>
+                    onUpdate({
+                      models: draft.models.map((model) =>
+                        model.id === modelId ? { ...model, enabled } : model,
+                      ),
+                    })
+                  }
+                  onDelete={(modelId) =>
+                    onUpdate({ models: draft.models.filter((model) => model.id !== modelId) })
+                  }
+                />
               </div>
-            ))}
+            ) : (
+              <div className="px-6 py-12 text-center">
+                <p className="text-[13px] font-medium">
+                  {draft.models.length > 0 ? "没有匹配的模型" : "还没有模型"}
+                </p>
+                <p className="mt-1 text-[12px] text-muted-foreground">
+                  {draft.models.length > 0 ? "换一个模型名称或 ID 试试。" : "同步目录或手动添加模型。"}
+                </p>
+              </div>
+            )}
           </div>
-        ) : (
-          <div className="px-6 py-14 text-center">
-            <p className="text-[13px] font-medium">
-              {draft.models.length > 0 ? "没有匹配的模型" : "还没有模型"}
-            </p>
-            <p className="mt-1 text-[13px] text-muted-foreground">
-              {draft.models.length > 0 ? "换一个模型 ID 关键词试试。" : "输入完整模型 ID 手动添加。"}
-            </p>
-          </div>
-        )}
-      </SettingSection>
-    </div>
+        </section>
+      </div>
+    </section>
   )
 }
 
-export function AiProviderSettings() {
-  const [aiEnabled, setAiEnabled] = useState(true)
-  const [toolAccessEnabled, setToolAccessEnabled] = useState(false)
-  const [selectedProviderId, setSelectedProviderId] = useState<AiProviderId | null>(null)
+export interface AiProviderSettingsProps {
+  deleteConfig: (providerId: AiProviderId) => Promise<void>
+  listConfigs: () => Promise<AiProviderConfig[]>
+  listModels: (input: AiProviderConnectionInput) => Promise<AiProviderModel[]>
+  saveConfig: (input: AiProviderSaveInput) => Promise<AiProviderConfig>
+  subscribeToConfigChanges?: (listener: () => void) => () => void
+}
+
+function draftFromConfig(config: AiProviderConfig): AiProviderDraft {
+  return createInitialAiProviderDrafts([config])[config.providerId]
+}
+
+function saveInputFromDraft(
+  providerId: AiProviderId,
+  draft: AiProviderDraft,
+  apiKey = "",
+): AiProviderSaveInput {
+  return {
+    providerId,
+    enabled: draft.enabled,
+    baseUrl: draft.baseUrl,
+    models: draft.models.map((model) => ({ ...model })),
+    ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+  }
+}
+
+export function AiProviderSettings({
+  deleteConfig,
+  listConfigs,
+  listModels,
+  saveConfig,
+  subscribeToConfigChanges,
+}: AiProviderSettingsProps) {
+  const [selectedProviderId, setSelectedProviderId] = useState<ProviderSelection>("all")
   const [drafts, setDrafts] = useState(createInitialAiProviderDrafts)
   const [apiKeys, setApiKeys] = useState<Partial<Record<AiProviderId, string>>>({})
+  const [initialized, setInitialized] = useState(false)
+  const [persistenceError, setPersistenceError] = useState<string | null>(null)
+  const detailScrollRef = useRef<HTMLDivElement>(null)
+
+  const reloadConfigs = useCallback(async () => {
+    try {
+      const configs = await listConfigs()
+      setDrafts(createInitialAiProviderDrafts(configs))
+      setPersistenceError(null)
+    } catch (error) {
+      setPersistenceError(error instanceof Error ? error.message : "读取供应商配置失败。")
+    } finally {
+      setInitialized(true)
+    }
+  }, [listConfigs])
+
+  useEffect(() => {
+    void reloadConfigs()
+    return subscribeToConfigChanges?.(() => void reloadConfigs())
+  }, [reloadConfigs, subscribeToConfigChanges])
 
   const updateProvider = (providerId: AiProviderId, update: Partial<AiProviderDraft>) => {
     setDrafts((current) => ({
@@ -421,59 +893,79 @@ export function AiProviderSettings() {
     }))
   }
 
-  const selectedProvider = selectedProviderId
-    ? AI_PROVIDER_DEFINITIONS.find((provider) => provider.id === selectedProviderId)
-    : undefined
+  const selectProvider = (providerId: ProviderSelection) => {
+    if (detailScrollRef.current) detailScrollRef.current.scrollTop = 0
+    setSelectedProviderId(providerId)
+  }
 
-  if (selectedProvider && selectedProviderId) {
+  const selectedProvider =
+    selectedProviderId === "all"
+      ? undefined
+      : AI_PROVIDER_DEFINITIONS.find((provider) => provider.id === selectedProviderId)
+
+  const persistOverviewUpdate = (providerId: AiProviderId, update: Partial<AiProviderDraft>) => {
+    const previous = drafts[providerId]
+    const next = { ...previous, ...update }
+    updateProvider(providerId, update)
+    setPersistenceError(null)
+    void saveConfig(saveInputFromDraft(providerId, next))
+      .then((config) => updateProvider(providerId, draftFromConfig(config)))
+      .catch((error) => {
+        updateProvider(providerId, previous)
+        setPersistenceError(error instanceof Error ? error.message : "保存供应商配置失败。")
+      })
+  }
+
+  if (!initialized) {
     return (
-      <ProviderDetail
-        provider={selectedProvider}
-        draft={drafts[selectedProviderId]}
-        apiKey={apiKeys[selectedProviderId] ?? ""}
-        onApiKeyChange={(apiKey) => setApiKeys((current) => ({ ...current, [selectedProviderId]: apiKey }))}
-        onBack={() => setSelectedProviderId(null)}
-        onUpdate={(update) => updateProvider(selectedProviderId, update)}
-      />
+      <div className="flex h-full min-h-0 items-center justify-center bg-background text-sm text-muted-foreground">
+        正在读取供应商配置…
+      </div>
     )
   }
 
   return (
-    <div className="space-y-10">
-      <SettingSection title="可用性" description="控制 Tessera 中的 AI 入口与后续工具能力。">
-        <SettingRow
-          title="AI 功能"
-          description="关闭后隐藏 AI 面板和相关入口，不影响阅读、编辑和保存。"
-          control={<Switch checked={aiEnabled} onCheckedChange={setAiEnabled} aria-label="AI 功能" />}
-        />
-        <SettingRow
-          title="允许 AI 提出工具操作"
-          description="工具只能提出带明确范围的操作；文件修改仍需经过权限与 Diff。"
-          control={
-            <Switch
-              checked={toolAccessEnabled}
-              disabled={!aiEnabled}
-              onCheckedChange={setToolAccessEnabled}
-              aria-label="允许 AI 提出工具操作"
-            />
-          }
-        />
-      </SettingSection>
-
-      <section className="space-y-2" aria-labelledby="api-connection-scope">
-        <h2 id="api-connection-scope" className="text-[15px] font-medium tracking-[-0.01em]">
-          API 连接
-        </h2>
-        <p className="max-w-3xl text-[13px] leading-5 text-muted-foreground">
-          当前阶段只接入远程 API。外部 Agent 与本地模型会作为独立能力建设，因此这里不显示 Connection type。
-        </p>
-      </section>
-
+    <div className="grid h-full min-h-0 grid-rows-[minmax(180px,36vh)_minmax(0,1fr)] min-[900px]:grid-cols-[240px_minmax(0,1fr)] min-[900px]:grid-rows-1">
       <ProviderDirectory
         drafts={drafts}
-        onOpenProvider={setSelectedProviderId}
-        onUpdateProvider={updateProvider}
+        selectedProviderId={selectedProviderId}
+        onSelectProvider={selectProvider}
       />
+      <div ref={detailScrollRef} className="min-h-0 overflow-y-auto">
+        {selectedProviderId === "all" ? (
+          <ProviderOverview
+            drafts={drafts}
+            error={persistenceError}
+            onOpenProvider={selectProvider}
+            onUpdateProvider={persistOverviewUpdate}
+          />
+        ) : selectedProvider ? (
+          <ProviderDetail
+            key={selectedProviderId}
+            provider={selectedProvider}
+            draft={drafts[selectedProviderId]}
+            apiKey={apiKeys[selectedProviderId] ?? ""}
+            onApiKeyChange={(apiKey) =>
+              setApiKeys((current) => ({ ...current, [selectedProviderId]: apiKey }))
+            }
+            onListModels={listModels}
+            onSave={async (apiKey) => {
+              const config = await saveConfig(
+                saveInputFromDraft(selectedProviderId, drafts[selectedProviderId], apiKey),
+              )
+              updateProvider(selectedProviderId, draftFromConfig(config))
+              setApiKeys((current) => ({ ...current, [selectedProviderId]: "" }))
+            }}
+            onDelete={async () => {
+              await deleteConfig(selectedProviderId)
+              const defaults = createInitialAiProviderDrafts()
+              updateProvider(selectedProviderId, defaults[selectedProviderId])
+              setApiKeys((current) => ({ ...current, [selectedProviderId]: "" }))
+            }}
+            onUpdate={(update) => updateProvider(selectedProviderId, update)}
+          />
+        ) : null}
+      </div>
     </div>
   )
 }

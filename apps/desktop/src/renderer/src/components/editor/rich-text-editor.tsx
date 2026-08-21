@@ -1,7 +1,7 @@
 /**
  * [INPUT]: Markdown 草稿、文档身份、激活状态与草稿同步注册回调
- * [OUTPUT]: TipTap 富文本表面、延迟 Markdown 草稿和同步 flush 能力
- * [POS]: 编辑器本地交易与 React 草稿状态之间的性能边界
+ * [OUTPUT]: TipTap 富文本表面、顶层区块交互、延迟 Markdown 草稿和同步 flush 能力
+ * [POS]: 编辑器本地交易、区块 chrome 与 React 草稿状态之间的性能边界
  * [DOC]: docs/architecture/editor.md
  *
  * [PROTOCOL]:
@@ -12,11 +12,12 @@
 
 import { EditorContent, useEditor } from "@tiptap/react"
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
-import { createEditorContentSyncController, type EditorContentSyncController } from "./editor-content-sync"
+import { type EditorContentSyncController, createEditorContentSyncController } from "./editor-content-sync"
 import { EDITOR_EXTENSIONS } from "./editor-extensions"
 import { EditorToolbar } from "./editor-toolbar"
 import { joinMarkdownDocument, splitMarkdownDocument } from "./markdown-document"
 import { SlashCommandMenu } from "./slash-command-menu"
+import { TopLevelBlockHandle } from "./top-level-block-handle"
 
 interface RichTextEditorProps {
   active: boolean
@@ -123,6 +124,7 @@ export function RichTextEditor({
         <>
           <SlashCommandMenu editor={editor} />
           <EditorToolbar editor={editor} />
+          <TopLevelBlockHandle active={active} editor={editor} />
         </>
       ) : null}
     </div>

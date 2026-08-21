@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 工作区、最近工作区、文档草稿与工作区操作
- * [OUTPUT]: 可收起的文件树、文档列表、大纲和工作区菜单
+ * [INPUT]: 主视图、工作区、最近工作区、文档草稿与工作区操作
+ * [OUTPUT]: 新任务入口、可收起的文件树、文档列表、大纲和工作区菜单
  * [POS]: 主应用左侧的响应式工作区导航组件
  * [DOC]: design.md、docs/architecture.md、docs/architecture/editor.md
  *
@@ -13,9 +13,9 @@
 import type { WorkspaceDocumentEntry, WorkspaceInfo } from "@tessera/contracts"
 import {
   Add01Icon,
-  ArrowDown01Icon,
-  ArrowRight01Icon,
   BookOpen01Icon,
+  CancelCircleIcon,
+  Clock01Icon,
   File02Icon,
   Folder01Icon,
   FolderOpenIcon,
@@ -25,12 +25,18 @@ import {
   Menu01Icon,
   PanelLeftCloseIcon,
   PinIcon,
-  Refresh01Icon,
+  SortingAZ01Icon,
   StarIcon,
+  TaskAdd01Icon,
 } from "@tessera/design-system/components/icons"
 import { Button } from "@tessera/design-system/components/ui/button"
 import { Icon } from "@tessera/design-system/components/ui/icon"
-import { Popover, PopoverContent, PopoverTrigger } from "@tessera/design-system/components/ui/popover"
+import {
+  Popover,
+  PopoverClose,
+  PopoverContent,
+  PopoverTrigger,
+} from "@tessera/design-system/components/ui/popover"
 import { useEffect, useMemo, useState } from "react"
 import {
   type DocumentTreeNode,
@@ -46,13 +52,14 @@ type FileLayout = "tree" | "list"
 const MODIFIED_AT_FORMATTER = new Intl.DateTimeFormat("zh-CN", { month: "short", day: "numeric" })
 
 interface WorkspaceSidebarProps {
+  activeView: "task" | "workspace"
   workspace: WorkspaceInfo | null
   recentWorkspaces: WorkspaceInfo[]
   documents: WorkspaceDocumentEntry[]
   activePath: string | undefined
   activeContent: string
-  version: string | undefined
   onCollapse: () => void
+  onNewTask: () => void
   onSelectWorkspace: () => void
   onOpenRecentWorkspace: (workspaceId: string) => void
   onRevealWorkspace: () => void
@@ -78,14 +85,16 @@ function NavigationRow({
   return (
     <button
       type="button"
-      className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-[13px] text-sidebar-foreground transition-colors hover:bg-sidebar-accent disabled:cursor-default disabled:opacity-45"
+      className="flex h-7 w-full items-center gap-2 rounded-md pr-3 pl-2 text-left text-[13px] text-sidebar-foreground transition-colors hover:bg-sidebar-accent disabled:cursor-default disabled:opacity-45"
       data-active={active || undefined}
       disabled={disabled}
     >
       <Icon icon={icon} size={15} />
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {count !== undefined ? (
-        <span className="text-[11px] tabular-nums text-muted-foreground">{count}</span>
+        <span className="min-w-6 shrink-0 pr-0.5 text-right text-[11px] tabular-nums text-muted-foreground">
+          {count}
+        </span>
       ) : null}
     </button>
   )
@@ -105,13 +114,14 @@ function formatModifiedAt(modifiedAt: number) {
 }
 
 export function WorkspaceSidebar({
+  activeView,
   workspace,
   recentWorkspaces,
   documents,
   activePath,
   activeContent,
-  version,
   onCollapse,
+  onNewTask,
   onSelectWorkspace,
   onOpenRecentWorkspace,
   onRevealWorkspace,
@@ -154,12 +164,13 @@ export function WorkspaceSidebar({
         <button
           key={node.path}
           type="button"
-          className="flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-left text-[13px] transition-colors hover:bg-sidebar-accent data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium"
-          style={{ paddingLeft: 8 + depth * 14 }}
+          className="flex h-7 w-full items-center gap-1.5 rounded-md pr-3 text-left text-[13px] transition-colors hover:bg-sidebar-accent data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium"
+          style={{ paddingLeft: 6 + depth * 16 }}
           data-active={active || undefined}
           onClick={() => onOpenDocument(node.path)}
         >
-          <Icon icon={File02Icon} size={14} className="shrink-0 text-muted-foreground" />
+          <span className="size-3 shrink-0" aria-hidden="true" />
+          <Icon icon={File02Icon} size={15} className="shrink-0 text-muted-foreground" />
           <span className="min-w-0 truncate">{documentLabel(node.name)}</span>
         </button>
       )
@@ -170,17 +181,22 @@ export function WorkspaceSidebar({
       <div key={node.path}>
         <button
           type="button"
-          className="flex h-7 w-full items-center gap-1 rounded-md pr-2 text-left text-[13px] transition-colors hover:bg-sidebar-accent"
-          style={{ paddingLeft: 4 + depth * 14 }}
+          className="flex h-7 w-full items-center gap-1.5 rounded-md pr-3 text-left text-[13px] transition-colors hover:bg-sidebar-accent"
+          style={{ paddingLeft: 6 + depth * 16 }}
           aria-expanded={expanded}
           onClick={() => toggleFolder(node.path)}
         >
+          <span
+            className={`flex size-3 shrink-0 items-center justify-center text-muted-foreground transition-transform ${expanded ? "rotate-90" : ""}`}
+            aria-hidden="true"
+          >
+            <span className="block size-0 border-y-[3.5px] border-y-transparent border-l-[5px] border-l-current" />
+          </span>
           <Icon
-            icon={expanded ? ArrowDown01Icon : ArrowRight01Icon}
-            size={12}
-            className="text-muted-foreground"
+            icon={expanded ? FolderOpenIcon : Folder01Icon}
+            size={15}
+            className="shrink-0 text-muted-foreground"
           />
-          <Icon icon={expanded ? FolderOpenIcon : Folder01Icon} size={14} className="text-muted-foreground" />
           <span className="min-w-0 truncate">{node.name}</span>
         </button>
         {expanded ? node.children.map((child) => renderTreeNode(child, depth + 1)) : null}
@@ -189,107 +205,149 @@ export function WorkspaceSidebar({
   }
 
   const workspaceMenu = workspace ? (
-    <PopoverContent side="top" align="center" className="w-64 p-1.5">
-      <div className="px-2 py-1.5">
-        <p className="truncate text-xs font-medium">{workspace.name}</p>
-        <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{workspace.rootPath}</p>
+    <PopoverContent
+      side="top"
+      align="center"
+      sideOffset={6}
+      className="w-[250px] overflow-hidden p-0 max-[760px]:w-[240px]"
+    >
+      <div className="flex h-8 items-center justify-between px-2.5">
+        <p className="text-[13px] font-medium">操作</p>
+        <PopoverClose
+          render={
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="text-muted-foreground hover:text-foreground"
+              aria-label="关闭工作区菜单"
+              title="关闭"
+            />
+          }
+        >
+          <Icon icon={CancelCircleIcon} size={14} />
+        </PopoverClose>
       </div>
-      <div className="my-1 h-px bg-border" />
-      <div className="grid gap-0.5">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 justify-start px-2 text-xs"
-          onClick={onCreateDocument}
+
+      <div className="grid px-1 pb-1">
+        <PopoverClose
+          render={
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 justify-start px-2 text-xs font-normal"
+              onClick={onCreateDocument}
+            />
+          }
         >
           新建文档
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 justify-start px-2 text-xs"
-          onClick={onRevealWorkspace}
+        </PopoverClose>
+        <PopoverClose
+          render={
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 justify-start px-2 text-xs font-normal"
+              onClick={onRevealWorkspace}
+            />
+          }
         >
           在 Finder 中显示
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 justify-start px-2 text-xs"
-          onClick={onSelectWorkspace}
+        </PopoverClose>
+        <PopoverClose
+          render={
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 justify-start px-2 text-xs font-normal"
+              onClick={onSelectWorkspace}
+            />
+          }
         >
           打开其他工作区…
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 justify-start gap-2 px-2 text-xs"
-          onClick={onRefreshDocuments}
+        </PopoverClose>
+        <PopoverClose
+          render={
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 justify-start px-2 text-xs font-normal"
+              onClick={onRefreshDocuments}
+            />
+          }
         >
-          <Icon icon={Refresh01Icon} size={13} />
           刷新文件
-        </Button>
+        </PopoverClose>
       </div>
-      <div className="my-1 h-px bg-border" />
-      <p className="px-2 pt-1 pb-0.5 text-[10px] font-medium tracking-wide text-muted-foreground">排序</p>
-      <div className="grid grid-cols-2 gap-1 px-1 pb-1">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 text-[11px] data-[active=true]:bg-muted"
-          data-active={sort === "name-asc" || undefined}
-          onClick={() => setSort("name-asc")}
-        >
-          名称
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 text-[11px] data-[active=true]:bg-muted"
-          data-active={sort === "modified-desc" || undefined}
-          onClick={() => setSort("modified-desc")}
-        >
-          最近修改
-        </Button>
+
+      <div className="flex h-8 items-center gap-2 border-y border-border px-2.5">
+        <p className="min-w-0 flex-1 text-xs font-medium">排序</p>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="size-7 text-muted-foreground data-[active=true]:bg-muted data-[active=true]:text-foreground"
+            data-active={sort === "name-asc" || undefined}
+            aria-pressed={sort === "name-asc"}
+            aria-label="按名称排序"
+            title="按名称排序"
+            onClick={() => setSort("name-asc")}
+          >
+            <Icon icon={SortingAZ01Icon} size={15} />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="size-7 text-muted-foreground data-[active=true]:bg-muted data-[active=true]:text-foreground"
+            data-active={sort === "modified-desc" || undefined}
+            aria-pressed={sort === "modified-desc"}
+            aria-label="按最近修改排序"
+            title="按最近修改排序"
+            onClick={() => setSort("modified-desc")}
+          >
+            <Icon icon={Clock01Icon} size={15} />
+          </Button>
+        </div>
       </div>
+
       {recentWorkspaces.some((recent) => recent.id !== workspace.id) ? (
-        <>
-          <div className="my-1 h-px bg-border" />
-          <p className="px-2 pt-1 pb-0.5 text-[10px] font-medium tracking-wide text-muted-foreground">
-            最近工作区
-          </p>
-          <div className="grid gap-0.5">
+        <div className="py-1">
+          <p className="px-2.5 pt-1 pb-0.5 text-[11px] font-medium text-muted-foreground">最近使用的目录</p>
+          <div className="grid px-1">
             {recentWorkspaces
               .filter((recent) => recent.id !== workspace.id)
               .slice(0, 6)
               .map((recent) => (
-                <Button
+                <PopoverClose
                   key={recent.id}
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 min-w-0 justify-start px-2 text-xs"
-                  title={recent.rootPath}
-                  onClick={() => onOpenRecentWorkspace(recent.id)}
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 min-w-0 justify-start gap-1.5 px-2 text-xs font-normal"
+                      title={recent.rootPath}
+                      onClick={() => onOpenRecentWorkspace(recent.id)}
+                    />
+                  }
                 >
                   <Icon icon={Folder01Icon} size={13} className="shrink-0" />
                   <span className="truncate">{recent.name}</span>
-                </Button>
+                </PopoverClose>
               ))}
           </div>
-        </>
+        </div>
       ) : null}
-      {version ? <p className="px-2 pt-1.5 text-[10px] text-muted-foreground">Tessera {version}</p> : null}
     </PopoverContent>
   ) : null
 
   return (
-    <aside className="group/sidebar flex h-full min-h-0 w-[250px] shrink-0 flex-col bg-sidebar text-sidebar-foreground max-[760px]:w-[240px] max-[760px]:shadow-xl">
+    <aside className="group/sidebar flex h-full min-h-0 w-62.5 shrink-0 flex-col bg-sidebar text-sidebar-foreground max-[760px]:w-[240px] max-[760px]:shadow-xl">
       <div className="app-drag-region relative h-12 shrink-0">
         <Button
           type="button"
           variant="ghost"
           size="icon-xs"
-          className="app-no-drag absolute top-3 right-2 opacity-0 transition-opacity group-hover/sidebar:opacity-100 focus-visible:opacity-100 max-[760px]:opacity-100"
+          className="app-no-drag absolute top-3 right-2"
           aria-label="收起侧边栏"
           title="收起侧边栏"
           onClick={onCollapse}
@@ -298,33 +356,50 @@ export function WorkspaceSidebar({
         </Button>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col px-2 pb-1">
+      <div className="flex min-h-0 flex-1 flex-col px-2">
+        <div className="mb-3 shrink-0">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 w-full justify-start gap-2 px-2 text-[13px] data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium"
+            data-active={activeView === "task" || undefined}
+            aria-current={activeView === "task" ? "page" : undefined}
+            onClick={onNewTask}
+          >
+            <Icon icon={TaskAdd01Icon} size={16} />
+            <span>新任务</span>
+          </Button>
+        </div>
+
         {workspace ? (
           <>
-            <header className="group/view relative flex h-8 shrink-0 items-center justify-center">
+            <header className="group/view flex h-7 shrink-0 items-center px-2">
+              <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-muted-foreground">
+                {pane === "outline" ? "大纲" : "文件"}
+              </span>
               <Button
                 type="button"
                 variant="ghost"
                 size="icon-xs"
-                className="absolute left-0 opacity-0 transition-opacity group-hover/view:opacity-100 focus-visible:opacity-100"
+                className="opacity-0 transition-opacity group-hover/view:opacity-100 focus-visible:opacity-100"
                 aria-label={pane === "files" ? "切换到文档大纲" : "切换到文件视图"}
                 title={pane === "files" ? "切换到文档大纲" : "切换到文件视图"}
                 onClick={() => setPane((current) => (current === "files" ? "outline" : "files"))}
               >
                 <Icon icon={pane === "files" ? Menu01Icon : FolderTreeIcon} size={15} />
               </Button>
-              <span className="text-[13px] font-medium">{pane === "outline" ? "大纲" : "文件"}</span>
             </header>
 
             {pane === "files" ? (
               <>
-                <div className="space-y-0.5 pb-2">
+                <div className="space-y-0.5 pb-3">
                   <NavigationRow icon={PinIcon} label="已固定" count={0} disabled />
                   <NavigationRow icon={BookOpen01Icon} label="全部文档" count={documents.length} active />
                   <NavigationRow icon={StarIcon} label="收藏夹" disabled />
                   <NavigationRow icon={Link01Icon} label="关联" disabled />
                 </div>
-                <section className="min-h-0 flex-1 overflow-y-auto border-t border-sidebar-border py-2">
+                <section className="min-h-0 flex-1 overflow-y-auto pt-1 pb-2">
                   {documents.length > 0 ? (
                     layout === "tree" ? (
                       tree.map((node) => renderTreeNode(node, 0))
@@ -359,7 +434,7 @@ export function WorkspaceSidebar({
                 </section>
               </>
             ) : (
-              <section className="min-h-0 flex-1 overflow-y-auto border-t border-sidebar-border py-2">
+              <section className="min-h-0 flex-1 overflow-y-auto pt-1 pb-2">
                 {outline.length > 0 ? (
                   <div className="grid gap-0.5">
                     {outline.map((heading, index) => (
@@ -398,7 +473,7 @@ export function WorkspaceSidebar({
           </div>
         )}
 
-        <footer className="mt-auto flex h-10 shrink-0 items-center gap-1 border-t border-sidebar-border px-0.5 text-xs text-muted-foreground">
+        <footer className="-mx-2 mt-auto flex h-11 shrink-0 items-center gap-1 px-2 text-xs text-muted-foreground">
           <Button
             type="button"
             variant="ghost"
@@ -418,7 +493,7 @@ export function WorkspaceSidebar({
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className="h-7 min-w-0 flex-1 px-2 text-xs font-normal"
+                    className="h-7 min-w-0 flex-1 px-2 text-xs font-normal data-[popup-open]:bg-sidebar-accent data-[popup-open]:text-sidebar-accent-foreground"
                     title={workspace.rootPath}
                   />
                 }

@@ -4,6 +4,7 @@ node_modules/
 dist/
 out/
 coverage/
+artifacts/
 *.log
 
 # 仅限本地的文件。

@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 当前 TipTap Editor 实例和设计系统交互原语
- * [OUTPUT]: 选择态可感知的格式工具栏与链接编辑浮层
- * [POS]: 富文本编辑器的命令呈现层
+ * [INPUT]: 当前 TipTap Editor 实例、设计系统交互原语与共享 Motion 参数
+ * [OUTPUT]: 带可访问进场的格式工具栏、选择态与链接编辑浮层
+ * [POS]: 富文本编辑器的动态命令呈现层
  * [DOC]: design.md
  *
  * [PROTOCOL]:
@@ -32,7 +32,9 @@ import { Input } from "@tessera/design-system/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@tessera/design-system/components/ui/popover"
 import type { Editor } from "@tiptap/core"
 import { useEditorState } from "@tiptap/react"
+import { m, useReducedMotion } from "motion/react"
 import { type FormEvent, useState } from "react"
+import { motionSprings } from "../../motion"
 
 interface EditorToolbarProps {
   editor: Editor
@@ -213,6 +215,7 @@ function TableControl({ editor, active }: EditorToolbarProps & { active: boolean
 }
 
 export function EditorToolbar({ editor }: EditorToolbarProps) {
+  const shouldReduceMotion = useReducedMotion()
   const active = useEditorState({
     editor,
     selector: ({ editor: currentEditor }) => ({
@@ -236,8 +239,11 @@ export function EditorToolbar({ editor }: EditorToolbarProps) {
 
   return (
     <div className="pointer-events-none sticky bottom-5 z-20 mt-auto flex justify-center px-4 pt-8">
-      <div
+      <m.div
         className="pointer-events-auto flex max-w-full items-center overflow-x-auto rounded-[11px] bg-background/96 p-1 shadow-[0_10px_35px_rgb(0_0_0/0.12),0_1px_4px_rgb(0_0_0/0.08)] ring-1 ring-foreground/10 backdrop-blur-xl"
+        initial={shouldReduceMotion ? false : { opacity: 0, scale: 0.97, y: 6 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={shouldReduceMotion ? { duration: 0 } : motionSprings.gentle}
         role="toolbar"
         aria-label="文本格式"
       >
@@ -320,7 +326,7 @@ export function EditorToolbar({ editor }: EditorToolbarProps) {
         </ToolbarButton>
         <ToolbarDivider />
         <TableControl editor={editor} active={active.table} />
-      </div>
+      </m.div>
     </div>
   )
 }
