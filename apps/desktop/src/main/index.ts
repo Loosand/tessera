@@ -1,6 +1,6 @@
 /**
  * [INPUT]: Electron 生命周期、共享 IPC 契约、AI 配置/模型服务、safeStorage 与 Tessera 核心服务
- * [OUTPUT]: 持久化 AI 配置、加密密钥解析、模型发现、关闭保存握手和桌面窗口
+ * [OUTPUT]: 受限工作区条目操作、持久化 AI 配置、关闭保存握手和桌面窗口
  * [POS]: Electron 主进程入口与平台安全边界
  * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/database.md
  *
@@ -12,7 +12,7 @@
 
 import { createHash, randomUUID } from "node:crypto"
 import { type FSWatcher, realpathSync, statSync, watch } from "node:fs"
-import { readFile, readdir, realpath, rename, stat, unlink, writeFile } from "node:fs/promises"
+import { mkdir, readFile, readdir, realpath, rename, stat, unlink, writeFile } from "node:fs/promises"
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import {
@@ -31,7 +31,9 @@ import {
   type DocumentSnapshot,
   type DocumentWriteResult,
   IPC_CHANNELS,
+  type WorkspaceDirectoryEntry,
   type WorkspaceDocumentEntry,
+  type WorkspaceEntryKind,
   type WorkspaceInfo,
 } from "@tessera/contracts"
 import { createAppInfo } from "@tessera/core"
@@ -49,6 +51,7 @@ import {
   type OpenDialogOptions,
   type WebContents,
   app,
+  clipboard,
   dialog,
   ipcMain,
   shell,
@@ -272,6 +275,29 @@ async function listMarkdownDocuments(rootPath: string) {
   return documents.sort((left, right) => left.relativePath.localeCompare(right.relativePath, "zh-CN"))
 }
 
+async function listWorkspaceDirectories(rootPath: string) {
+  const directories: WorkspaceDirectoryEntry[] = []
+
+  async function visit(directoryPath: string) {
+    const entries = await readdir(directoryPath, { withFileTypes: true })
+    await Promise.all(
+      entries.map(async (entry) => {
+        if (entry.name.startsWith(".") || IGNORED_DIRECTORIES.has(entry.name) || !entry.isDirectory()) return
+
+        const absolutePath = join(directoryPath, entry.name)
+        directories.push({
+          name: entry.name,
+          relativePath: relative(rootPath, absolutePath).split("\\").join("/"),
+        })
+        await visit(absolutePath)
+      }),
+    )
+  }
+
+  await visit(rootPath)
+  return directories.sort((left, right) => left.relativePath.localeCompare(right.relativePath, "zh-CN"))
+}
+
 async function readDocument(rootPath: string, relativePath: string): Promise<DocumentSnapshot> {
   const absolutePath = await resolveWorkspacePath(rootPath, relativePath)
   if (!isMarkdownPath(absolutePath)) throw new Error("当前仅支持 Markdown 文档。")
@@ -288,27 +314,37 @@ async function readDocument(rootPath: string, relativePath: string): Promise<Doc
   }
 }
 
-async function createDocument(rootPath: string): Promise<DocumentSnapshot> {
+async function resolveWorkspaceDirectory(rootPath: string, relativePath = "") {
+  const absolutePath = relativePath
+    ? await resolveWorkspacePath(rootPath, relativePath)
+    : await realpath(rootPath)
+  const metadata = await stat(absolutePath)
+  if (!metadata.isDirectory()) throw new Error("目标不是工作区文件夹。")
+  return absolutePath
+}
+
+async function createDocument(rootPath: string, parentRelativePath = ""): Promise<DocumentSnapshot> {
+  const directoryPath = await resolveWorkspaceDirectory(rootPath, parentRelativePath)
   let sequence = 0
   let fileName = "未命名文档.md"
-  let absolutePath = join(rootPath, fileName)
+  let absolutePath = join(directoryPath, fileName)
 
   while (true) {
     try {
       await stat(absolutePath)
       sequence += 1
       fileName = `未命名文档 ${sequence + 1}.md`
-      absolutePath = join(rootPath, fileName)
+      absolutePath = join(directoryPath, fileName)
     } catch {
       break
     }
   }
 
   await writeFile(absolutePath, "# 未命名文档\n\n从这里开始记录。\n", { encoding: "utf8", flag: "wx" })
-  return readDocument(rootPath, fileName)
+  return readDocument(rootPath, relative(rootPath, absolutePath).split("\\").join("/"))
 }
 
-function validateDocumentName(value: string) {
+function validateWorkspaceEntryName(value: string) {
   const fileName = value.trim()
   if (!fileName || fileName === "." || fileName === ".." || basename(fileName) !== fileName) {
     throw new Error("请输入有效的文件名。")
@@ -317,8 +353,34 @@ function validateDocumentName(value: string) {
   if (fileName.startsWith(".") || /[<>:"/\\|?*]/u.test(fileName) || hasControlCharacter) {
     throw new Error("文件名包含不支持的字符。")
   }
+  return fileName
+}
+
+function validateDocumentName(value: string) {
+  const fileName = validateWorkspaceEntryName(value)
   if (!isMarkdownPath(fileName)) throw new Error("文件名需要以 .md 或 .markdown 结尾。")
   return fileName
+}
+
+async function createDirectory(rootPath: string, parentRelativePath = ""): Promise<WorkspaceDirectoryEntry> {
+  const parentPath = await resolveWorkspaceDirectory(rootPath, parentRelativePath)
+  let sequence = 0
+  let name = "新建文件夹"
+  let absolutePath = join(parentPath, name)
+
+  while (true) {
+    try {
+      await stat(absolutePath)
+      sequence += 1
+      name = `新建文件夹 ${sequence + 1}`
+      absolutePath = join(parentPath, name)
+    } catch {
+      break
+    }
+  }
+
+  await mkdir(absolutePath)
+  return { name, relativePath: relative(rootPath, absolutePath).split("\\").join("/") }
 }
 
 async function renameDocument(
@@ -348,6 +410,65 @@ async function renameDocument(
   await rename(sourcePath, destinationPath)
   const nextRelativePath = relative(rootPath, destinationPath).split("\\").join("/")
   return readDocument(rootPath, nextRelativePath)
+}
+
+async function renameDirectory(
+  rootPath: string,
+  relativePath: string,
+  selectedPath: string,
+): Promise<WorkspaceDirectoryEntry> {
+  const sourcePath = await resolveWorkspacePath(rootPath, relativePath)
+  const metadata = await stat(sourcePath)
+  if (!metadata.isDirectory()) throw new Error("目标不是可重命名的文件夹。")
+
+  const name = validateWorkspaceEntryName(basename(selectedPath))
+  const destinationPath = join(dirname(sourcePath), name)
+  if (sourcePath === destinationPath) return { name, relativePath }
+
+  try {
+    await stat(destinationPath)
+    throw new Error("同一位置已存在同名文件夹。")
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+  }
+
+  await rename(sourcePath, destinationPath)
+  return {
+    name,
+    relativePath: relative(rootPath, destinationPath).split("\\").join("/"),
+  }
+}
+
+async function deleteWorkspaceEntry(
+  window: BrowserWindow | null,
+  rootPath: string,
+  relativePath: string,
+  kind: WorkspaceEntryKind,
+) {
+  const absolutePath = await resolveWorkspacePath(rootPath, relativePath)
+  const metadata = await stat(absolutePath)
+  if (kind === "document" && (!metadata.isFile() || !isMarkdownPath(absolutePath))) {
+    throw new Error("目标不是可删除的 Markdown 文档。")
+  }
+  if (kind === "directory" && !metadata.isDirectory()) throw new Error("目标不是可删除的文件夹。")
+
+  const options = {
+    type: "warning",
+    title: kind === "directory" ? "删除文件夹" : "删除文档",
+    message: `要将“${basename(absolutePath)}”移到废纸篓吗？`,
+    detail: kind === "directory" ? "文件夹内的内容也会一并移到废纸篓。" : "可以稍后从废纸篓恢复。",
+    buttons: ["移到废纸篓", "取消"],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+  } satisfies Electron.MessageBoxOptions
+  const selection = window
+    ? await dialog.showMessageBox(window, options)
+    : await dialog.showMessageBox(options)
+  if (selection.response !== 0) return false
+
+  await shell.trashItem(absolutePath)
+  return true
 }
 
 async function writeDocument(
@@ -520,13 +641,21 @@ function registerIpcHandlers() {
     const workspace = workspaceForEvent(event)
     return listMarkdownDocuments(workspace.rootPath)
   })
+  ipcMain.handle(IPC_CHANNELS.workspaceListDirectories, async (event) => {
+    const workspace = workspaceForEvent(event)
+    return listWorkspaceDirectories(workspace.rootPath)
+  })
   ipcMain.handle(IPC_CHANNELS.documentRead, async (event, relativePath: string) => {
     const workspace = workspaceForEvent(event)
     return readDocument(workspace.rootPath, relativePath)
   })
-  ipcMain.handle(IPC_CHANNELS.documentCreate, async (event) => {
+  ipcMain.handle(IPC_CHANNELS.documentCreate, async (event, parentRelativePath?: string) => {
     const workspace = workspaceForEvent(event)
-    return createDocument(workspace.rootPath)
+    return createDocument(workspace.rootPath, parentRelativePath)
+  })
+  ipcMain.handle(IPC_CHANNELS.workspaceEntryCreateDirectory, async (event, parentRelativePath?: string) => {
+    const workspace = workspaceForEvent(event)
+    return createDirectory(workspace.rootPath, parentRelativePath)
   })
   ipcMain.handle(IPC_CHANNELS.documentRename, async (event, relativePath: string) => {
     const workspace = workspaceForEvent(event)
@@ -546,6 +675,45 @@ function registerIpcHandlers() {
       : await dialog.showSaveDialog(options)
     if (selection.canceled || !selection.filePath) return null
     return renameDocument(workspace.rootPath, relativePath, selection.filePath)
+  })
+  ipcMain.handle(IPC_CHANNELS.workspaceEntryRenameDirectory, async (event, relativePath: string) => {
+    const workspace = workspaceForEvent(event)
+    const sourcePath = await resolveWorkspacePath(workspace.rootPath, relativePath)
+    const window = BrowserWindow.fromWebContents(event.sender)
+    const options = {
+      title: "重命名文件夹",
+      buttonLabel: "重命名",
+      defaultPath: sourcePath,
+      nameFieldLabel: "文件夹名称",
+      showsTagField: false,
+      properties: ["showOverwriteConfirmation", "dontAddToRecent"],
+    } satisfies Electron.SaveDialogOptions
+    const selection = window
+      ? await dialog.showSaveDialog(window, options)
+      : await dialog.showSaveDialog(options)
+    if (selection.canceled || !selection.filePath) return null
+    return renameDirectory(workspace.rootPath, relativePath, selection.filePath)
+  })
+  ipcMain.handle(
+    IPC_CHANNELS.workspaceEntryDelete,
+    async (event, relativePath: string, kind: WorkspaceEntryKind) => {
+      if (kind !== "document" && kind !== "directory") throw new Error("工作区条目类型无效。")
+      const workspace = workspaceForEvent(event)
+      return deleteWorkspaceEntry(
+        BrowserWindow.fromWebContents(event.sender),
+        workspace.rootPath,
+        relativePath,
+        kind,
+      )
+    },
+  )
+  ipcMain.handle(IPC_CHANNELS.workspaceEntryReveal, async (event, relativePath: string) => {
+    const workspace = workspaceForEvent(event)
+    shell.showItemInFolder(await resolveWorkspacePath(workspace.rootPath, relativePath))
+  })
+  ipcMain.handle(IPC_CHANNELS.workspaceEntryCopyPath, async (event, relativePath: string) => {
+    const workspace = workspaceForEvent(event)
+    clipboard.writeText(await resolveWorkspacePath(workspace.rootPath, relativePath))
   })
   ipcMain.handle(
     IPC_CHANNELS.documentWrite,

@@ -10,7 +10,12 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import type { WorkspaceDocumentEntry, WorkspaceInfo } from "@tessera/contracts"
+import type {
+  WorkspaceDirectoryEntry,
+  WorkspaceDocumentEntry,
+  WorkspaceEntryKind,
+  WorkspaceInfo,
+} from "@tessera/contracts"
 import {
   Add01Icon,
   BookOpen01Icon,
@@ -38,6 +43,7 @@ import {
   PopoverTrigger,
 } from "@tessera/design-system/components/ui/popover"
 import { useEffect, useMemo, useState } from "react"
+import { WorkspaceEntryContextMenu } from "./workspace-entry-context-menu"
 import {
   type DocumentTreeNode,
   type SidebarSort,
@@ -56,6 +62,7 @@ interface WorkspaceSidebarProps {
   workspace: WorkspaceInfo | null
   recentWorkspaces: WorkspaceInfo[]
   documents: WorkspaceDocumentEntry[]
+  directories: WorkspaceDirectoryEntry[]
   activePath: string | undefined
   activeContent: string
   onCollapse: () => void
@@ -64,8 +71,14 @@ interface WorkspaceSidebarProps {
   onOpenRecentWorkspace: (workspaceId: string) => void
   onRevealWorkspace: () => void
   onRefreshDocuments: () => void
-  onCreateDocument: () => void
+  onCreateDocument: (parentRelativePath?: string) => void
+  onCreateDirectory: (parentRelativePath?: string) => void
   onOpenDocument: (relativePath: string) => void
+  onRenameDocument: (relativePath: string) => void
+  onRenameDirectory: (relativePath: string) => void
+  onDeleteWorkspaceEntry: (relativePath: string, kind: WorkspaceEntryKind) => void
+  onRevealWorkspaceEntry: (relativePath: string) => void
+  onCopyWorkspaceEntryPath: (relativePath: string) => void
   onSelectOutline: (index: number, line: number) => void
 }
 
@@ -118,6 +131,7 @@ export function WorkspaceSidebar({
   workspace,
   recentWorkspaces,
   documents,
+  directories,
   activePath,
   activeContent,
   onCollapse,
@@ -127,13 +141,19 @@ export function WorkspaceSidebar({
   onRevealWorkspace,
   onRefreshDocuments,
   onCreateDocument,
+  onCreateDirectory,
   onOpenDocument,
+  onRenameDocument,
+  onRenameDirectory,
+  onDeleteWorkspaceEntry,
+  onRevealWorkspaceEntry,
+  onCopyWorkspaceEntryPath,
   onSelectOutline,
 }: WorkspaceSidebarProps) {
   const [pane, setPane] = useState<SidebarPane>("files")
   const [layout, setLayout] = useState<FileLayout>("tree")
   const [sort, setSort] = useState<SidebarSort>("name-asc")
-  const tree = useMemo(() => buildDocumentTree(documents, sort), [documents, sort])
+  const tree = useMemo(() => buildDocumentTree(documents, sort, directories), [directories, documents, sort])
   const list = useMemo(() => sortDocuments(documents, sort), [documents, sort])
   const outline = useMemo(() => extractDocumentOutline(activeContent), [activeContent])
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
@@ -157,48 +177,88 @@ export function WorkspaceSidebar({
     })
   }
 
+  const revealCreationParent = (path: string) => {
+    if (!path) return
+    setExpandedFolders((current) => new Set(current).add(path))
+  }
+
+  const createDocumentAt = (parentRelativePath: string) => {
+    revealCreationParent(parentRelativePath)
+    onCreateDocument(parentRelativePath)
+  }
+
+  const createDirectoryAt = (parentRelativePath: string) => {
+    revealCreationParent(parentRelativePath)
+    onCreateDirectory(parentRelativePath)
+  }
+
   const renderTreeNode = (node: DocumentTreeNode, depth: number) => {
     if (node.document) {
       const active = node.path === activePath
       return (
-        <button
+        <WorkspaceEntryContextMenu
           key={node.path}
-          type="button"
-          className="flex h-7 w-full items-center gap-1.5 rounded-md pr-3 text-left text-[13px] transition-colors hover:bg-sidebar-accent data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium"
-          style={{ paddingLeft: 6 + depth * 16 }}
-          data-active={active || undefined}
-          onClick={() => onOpenDocument(node.path)}
-        >
-          <span className="size-3 shrink-0" aria-hidden="true" />
-          <Icon icon={File02Icon} size={15} className="shrink-0 text-muted-foreground" />
-          <span className="min-w-0 truncate">{documentLabel(node.name)}</span>
-        </button>
+          kind="document"
+          relativePath={node.path}
+          trigger={
+            <button
+              type="button"
+              className="flex h-7 w-full items-center gap-1.5 rounded-md pr-3 text-left text-[13px] transition-colors hover:bg-sidebar-accent data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium"
+              style={{ paddingLeft: 6 + depth * 16 }}
+              data-active={active || undefined}
+              onClick={() => onOpenDocument(node.path)}
+            >
+              <span className="size-3 shrink-0" aria-hidden="true" />
+              <Icon icon={File02Icon} size={15} className="shrink-0 text-muted-foreground" />
+              <span className="min-w-0 truncate">{documentLabel(node.name)}</span>
+            </button>
+          }
+          onOpen={() => onOpenDocument(node.path)}
+          onCreateDocument={createDocumentAt}
+          onCreateDirectory={createDirectoryAt}
+          onRename={() => onRenameDocument(node.path)}
+          onDelete={() => onDeleteWorkspaceEntry(node.path, "document")}
+          onReveal={() => onRevealWorkspaceEntry(node.path)}
+          onCopyPath={() => onCopyWorkspaceEntryPath(node.path)}
+        />
       )
     }
 
     const expanded = expandedFolders.has(node.path)
     return (
       <div key={node.path}>
-        <button
-          type="button"
-          className="flex h-7 w-full items-center gap-1.5 rounded-md pr-3 text-left text-[13px] transition-colors hover:bg-sidebar-accent"
-          style={{ paddingLeft: 6 + depth * 16 }}
-          aria-expanded={expanded}
-          onClick={() => toggleFolder(node.path)}
-        >
-          <span
-            className={`flex size-3 shrink-0 items-center justify-center text-muted-foreground transition-transform ${expanded ? "rotate-90" : ""}`}
-            aria-hidden="true"
-          >
-            <span className="block size-0 border-y-[3.5px] border-y-transparent border-l-[5px] border-l-current" />
-          </span>
-          <Icon
-            icon={expanded ? FolderOpenIcon : Folder01Icon}
-            size={15}
-            className="shrink-0 text-muted-foreground"
-          />
-          <span className="min-w-0 truncate">{node.name}</span>
-        </button>
+        <WorkspaceEntryContextMenu
+          kind="directory"
+          relativePath={node.path}
+          trigger={
+            <button
+              type="button"
+              className="flex h-7 w-full items-center gap-1.5 rounded-md pr-3 text-left text-[13px] transition-colors hover:bg-sidebar-accent"
+              style={{ paddingLeft: 6 + depth * 16 }}
+              aria-expanded={expanded}
+              onClick={() => toggleFolder(node.path)}
+            >
+              <span
+                className={`flex size-3 shrink-0 items-center justify-center text-muted-foreground transition-transform ${expanded ? "rotate-90" : ""}`}
+                aria-hidden="true"
+              >
+                <span className="block size-0 border-y-[3.5px] border-y-transparent border-l-[5px] border-l-current" />
+              </span>
+              <Icon
+                icon={expanded ? FolderOpenIcon : Folder01Icon}
+                size={15}
+                className="shrink-0 text-muted-foreground"
+              />
+              <span className="min-w-0 truncate">{node.name}</span>
+            </button>
+          }
+          onCreateDocument={createDocumentAt}
+          onCreateDirectory={createDirectoryAt}
+          onRename={() => onRenameDirectory(node.path)}
+          onDelete={() => onDeleteWorkspaceEntry(node.path, "directory")}
+          onReveal={() => onRevealWorkspaceEntry(node.path)}
+          onCopyPath={() => onCopyWorkspaceEntryPath(node.path)}
+        />
         {expanded ? node.children.map((child) => renderTreeNode(child, depth + 1)) : null}
       </div>
     )
@@ -236,7 +296,7 @@ export function WorkspaceSidebar({
               variant="ghost"
               size="sm"
               className="h-7 justify-start px-2 text-xs font-normal"
-              onClick={onCreateDocument}
+              onClick={() => onCreateDocument()}
             />
           }
         >
@@ -400,29 +460,44 @@ export function WorkspaceSidebar({
                   <NavigationRow icon={Link01Icon} label="关联" disabled />
                 </div>
                 <section className="min-h-0 flex-1 overflow-y-auto pt-1 pb-2">
-                  {documents.length > 0 ? (
+                  {(layout === "tree" ? tree.length > 0 : documents.length > 0) ? (
                     layout === "tree" ? (
                       tree.map((node) => renderTreeNode(node, 0))
                     ) : (
                       <div className="grid gap-0.5">
                         {list.map((document) => (
-                          <button
+                          <WorkspaceEntryContextMenu
                             key={document.relativePath}
-                            type="button"
-                            className="rounded-md px-2 py-1.5 text-left transition-colors hover:bg-sidebar-accent data-[active=true]:bg-sidebar-accent"
-                            data-active={document.relativePath === activePath || undefined}
-                            onClick={() => onOpenDocument(document.relativePath)}
-                          >
-                            <div className="flex items-center gap-2 text-xs font-medium">
-                              <span className="min-w-0 flex-1 truncate">{documentLabel(document.name)}</span>
-                              <span className="shrink-0 text-[10px] font-normal text-muted-foreground">
-                                {formatModifiedAt(document.modifiedAt)}
-                              </span>
-                            </div>
-                            <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
-                              {documentLocation(document.relativePath)}
-                            </p>
-                          </button>
+                            kind="document"
+                            relativePath={document.relativePath}
+                            trigger={
+                              <button
+                                type="button"
+                                className="rounded-md px-2 py-1.5 text-left transition-colors hover:bg-sidebar-accent data-[active=true]:bg-sidebar-accent"
+                                data-active={document.relativePath === activePath || undefined}
+                                onClick={() => onOpenDocument(document.relativePath)}
+                              >
+                                <div className="flex items-center gap-2 text-xs font-medium">
+                                  <span className="min-w-0 flex-1 truncate">
+                                    {documentLabel(document.name)}
+                                  </span>
+                                  <span className="shrink-0 text-[10px] font-normal text-muted-foreground">
+                                    {formatModifiedAt(document.modifiedAt)}
+                                  </span>
+                                </div>
+                                <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
+                                  {documentLocation(document.relativePath)}
+                                </p>
+                              </button>
+                            }
+                            onOpen={() => onOpenDocument(document.relativePath)}
+                            onCreateDocument={createDocumentAt}
+                            onCreateDirectory={createDirectoryAt}
+                            onRename={() => onRenameDocument(document.relativePath)}
+                            onDelete={() => onDeleteWorkspaceEntry(document.relativePath, "document")}
+                            onReveal={() => onRevealWorkspaceEntry(document.relativePath)}
+                            onCopyPath={() => onCopyWorkspaceEntryPath(document.relativePath)}
+                          />
                         ))}
                       </div>
                     )
@@ -481,7 +556,7 @@ export function WorkspaceSidebar({
             aria-label="新建文档"
             title="新建文档"
             disabled={!workspace}
-            onClick={onCreateDocument}
+            onClick={() => onCreateDocument()}
           >
             <Icon icon={Add01Icon} size={15} />
           </Button>

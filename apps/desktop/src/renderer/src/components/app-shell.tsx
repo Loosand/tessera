@@ -45,6 +45,7 @@ export function AppShell({ appInfo }: AppShellProps) {
     workspace,
     recentWorkspaces,
     documents,
+    directories,
     activeDocument,
     draftContent,
     status,
@@ -61,7 +62,13 @@ export function AppShell({ appInfo }: AppShellProps) {
     goBack,
     goForward,
     createDocument,
+    createDirectory,
+    renameDocument,
     renameActiveDocument,
+    renameDirectory,
+    deleteWorkspaceEntry,
+    revealWorkspaceEntry,
+    copyWorkspaceEntryPath,
     updateDraft,
     flushPendingEdits,
     registerPendingEditsFlusher,
@@ -152,11 +159,21 @@ export function AppShell({ appInfo }: AppShellProps) {
     [openDocument],
   )
 
-  const createWorkspaceDocument = useCallback(() => {
-    if (compactRef.current) setSidebarOpen(false)
-    setView("workspace")
-    void createDocument()
-  }, [createDocument])
+  const createWorkspaceDocument = useCallback(
+    (parentRelativePath = "") => {
+      if (compactRef.current) setSidebarOpen(false)
+      setView("workspace")
+      void createDocument(parentRelativePath)
+    },
+    [createDocument],
+  )
+
+  const createWorkspaceDirectory = useCallback(
+    (parentRelativePath = "") => {
+      void createDirectory(parentRelativePath)
+    },
+    [createDirectory],
+  )
 
   const openSettings = useCallback(() => {
     setSettingsReturnView(view === "task" ? "task" : "workspace")
@@ -208,6 +225,7 @@ export function AppShell({ appInfo }: AppShellProps) {
                 workspace={workspace}
                 recentWorkspaces={recentWorkspaces}
                 documents={documents}
+                directories={directories}
                 activePath={activeDocument?.relativePath}
                 activeContent={draftContent}
                 onCollapse={() => setSidebarOpen(false)}
@@ -217,7 +235,13 @@ export function AppShell({ appInfo }: AppShellProps) {
                 onRevealWorkspace={() => void revealCurrentWorkspace()}
                 onRefreshDocuments={() => void refreshDocuments()}
                 onCreateDocument={createWorkspaceDocument}
+                onCreateDirectory={createWorkspaceDirectory}
                 onOpenDocument={showDocument}
+                onRenameDocument={(relativePath) => void renameDocument(relativePath)}
+                onRenameDirectory={(relativePath) => void renameDirectory(relativePath)}
+                onDeleteWorkspaceEntry={(relativePath, kind) => void deleteWorkspaceEntry(relativePath, kind)}
+                onRevealWorkspaceEntry={(relativePath) => void revealWorkspaceEntry(relativePath)}
+                onCopyWorkspaceEntryPath={(relativePath) => void copyWorkspaceEntryPath(relativePath)}
                 onSelectOutline={selectOutline}
               />
             </m.div>

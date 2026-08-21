@@ -43,8 +43,7 @@ function builtinCapabilities(providerId: AiProviderId, modelId: string): AiModel
     return {
       imageInput: "supported",
       reasoning: supportedWhen(isModernClaude),
-      search:
-        providerId === "anthropic-compatible" && isModernClaude ? "supported" : "unsupported",
+      search: providerId === "anthropic-compatible" && isModernClaude ? "supported" : "unsupported",
       toolUse: "supported",
     }
   }
@@ -60,7 +59,7 @@ function builtinCapabilities(providerId: AiProviderId, modelId: string): AiModel
 
   if (providerId === "deepseek" || /(^|\/)deepseek/u.test(id)) {
     return {
-      imageInput: "unsupported",
+      imageInput: /(?:vision|vl|ocr)/u.test(id) ? "supported" : "unsupported",
       reasoning: supportedWhen(isDeepSeekReasoning),
       search: "unsupported",
       toolUse: supportedWhen(/chat|reasoner|v3|v4/u.test(id)),
@@ -94,7 +93,7 @@ export function resolveAiModelCapabilities(
   model: AiProviderModel,
 ): AiProviderModel {
   const builtin = builtinCapabilities(providerId, model.id)
-  const explicit = model.capabilities
+  const explicit = model.capabilitySource === "builtin" ? undefined : model.capabilities
   const capabilities: AiModelCapabilities = {
     imageInput: mergeCapability(explicit?.imageInput, builtin.imageInput),
     reasoning: mergeCapability(explicit?.reasoning, builtin.reasoning),

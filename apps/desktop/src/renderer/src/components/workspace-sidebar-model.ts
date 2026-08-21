@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 工作区文档条目、Markdown 草稿与侧栏排序偏好
+ * [INPUT]: 工作区文档/目录条目、Markdown 草稿与侧栏排序偏好
  * [OUTPUT]: 文件树、扁平列表顺序与文档大纲模型
  * [POS]: 工作区侧栏不依赖 React 的派生数据层
  * [DOC]: docs/architecture/editor.md
@@ -10,7 +10,7 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import type { WorkspaceDocumentEntry } from "@tessera/contracts"
+import type { WorkspaceDirectoryEntry, WorkspaceDocumentEntry } from "@tessera/contracts"
 
 export type SidebarSort = "name-asc" | "modified-desc"
 
@@ -36,11 +36,15 @@ export function sortDocuments(documents: WorkspaceDocumentEntry[], sort: Sidebar
   })
 }
 
-export function buildDocumentTree(documents: WorkspaceDocumentEntry[], sort: SidebarSort) {
+export function buildDocumentTree(
+  documents: WorkspaceDocumentEntry[],
+  sort: SidebarSort,
+  directories: WorkspaceDirectoryEntry[] = [],
+) {
   const root: DocumentTreeNode = { name: "", path: "", children: [] }
 
-  for (const document of sortDocuments(documents, sort)) {
-    const segments = document.relativePath.split("/")
+  const ensurePath = (relativePath: string) => {
+    const segments = relativePath.split("/").filter(Boolean)
     let parent = root
 
     segments.forEach((segment, index) => {
@@ -50,9 +54,16 @@ export function buildDocumentTree(documents: WorkspaceDocumentEntry[], sort: Sid
         node = { name: segment, path, children: [] }
         parent.children.push(node)
       }
-      if (index === segments.length - 1) node.document = document
       parent = node
     })
+
+    return parent
+  }
+
+  for (const directory of directories) ensurePath(directory.relativePath)
+
+  for (const document of sortDocuments(documents, sort)) {
+    ensurePath(document.relativePath).document = document
   }
 
   const sortNodes = (nodes: DocumentTreeNode[]) => {

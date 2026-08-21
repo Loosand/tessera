@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 共享桌面 API 契约与 Electron IPC 渲染器
- * [OUTPUT]: 暴露在 window.tessera 上的冻结窄接口、AI 配置/模型发现和关闭保存握手
+ * [OUTPUT]: 暴露在 window.tessera 上的冻结窄接口、受限工作区条目操作和关闭保存握手
  * [POS]: 主进程与沙箱渲染层之间的安全桥
  * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md
  *
@@ -18,6 +18,7 @@ import type {
   AiProviderSaveInput,
   DesktopApi,
   WorkspaceChangeEvent,
+  WorkspaceEntryKind,
 } from "@tessera/contracts"
 import { IPC_CHANNELS } from "@tessera/contracts"
 import { contextBridge, ipcRenderer } from "electron"
@@ -42,9 +43,21 @@ const api: DesktopApi = Object.freeze({
     ipcRenderer.invoke(IPC_CHANNELS.workspaceOpenRecent, workspaceId),
   revealCurrentWorkspace: () => ipcRenderer.invoke(IPC_CHANNELS.workspaceReveal),
   listWorkspaceDocuments: () => ipcRenderer.invoke(IPC_CHANNELS.workspaceListDocuments),
+  listWorkspaceDirectories: () => ipcRenderer.invoke(IPC_CHANNELS.workspaceListDirectories),
   readDocument: (relativePath: string) => ipcRenderer.invoke(IPC_CHANNELS.documentRead, relativePath),
-  createDocument: () => ipcRenderer.invoke(IPC_CHANNELS.documentCreate),
+  createDocument: (parentRelativePath?: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.documentCreate, parentRelativePath),
+  createDirectory: (parentRelativePath?: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.workspaceEntryCreateDirectory, parentRelativePath),
   renameDocument: (relativePath: string) => ipcRenderer.invoke(IPC_CHANNELS.documentRename, relativePath),
+  renameDirectory: (relativePath: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.workspaceEntryRenameDirectory, relativePath),
+  deleteWorkspaceEntry: (relativePath: string, kind: WorkspaceEntryKind) =>
+    ipcRenderer.invoke(IPC_CHANNELS.workspaceEntryDelete, relativePath, kind),
+  revealWorkspaceEntry: (relativePath: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.workspaceEntryReveal, relativePath),
+  copyWorkspaceEntryPath: (relativePath: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.workspaceEntryCopyPath, relativePath),
   writeDocument: (relativePath: string, content: string, expectedModifiedAt: number) =>
     ipcRenderer.invoke(IPC_CHANNELS.documentWrite, relativePath, content, expectedModifiedAt),
   onAiProviderConfigsChanged: (listener: () => void) => {

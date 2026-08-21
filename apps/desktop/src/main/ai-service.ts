@@ -52,7 +52,8 @@ function databaseStore(client: DatabaseClient): AiProviderConfigStore {
         ...record,
         updatedAt: record.updatedAt.getTime(),
       })),
-    save: (record) => upsertAiProviderConfigRecord(client, { ...record, updatedAt: new Date(record.updatedAt) }),
+    save: (record) =>
+      upsertAiProviderConfigRecord(client, { ...record, updatedAt: new Date(record.updatedAt) }),
     delete: (providerId) => deleteAiProviderConfigRecord(client, providerId),
   }
 }
@@ -108,4 +109,3 @@ export function createDesktopAiService(client: DatabaseClient): DesktopAiService
     },
   }
 }
-

@@ -87,6 +87,45 @@ describe("AI 模型目录发现", () => {
     expect(new Headers(request?.headers).has("authorization")).toBe(false)
   })
 
+  it("读取 OpenRouter 返回的输入模态与可选参数能力", async () => {
+    const fetcher = vi.fn<typeof fetch>(async () =>
+      new Response(
+        JSON.stringify({
+          data: [
+            {
+              id: "vendor/vision-reasoner",
+              architecture: { input_modalities: ["text", "image"] },
+              supported_parameters: ["reasoning_effort", "tools"],
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    )
+
+    await expect(
+      listAiProviderModels(
+        { providerId: "openrouter", apiKey: "", baseUrl: "https://openrouter.ai/api/v1" },
+        { fetch: fetcher },
+      ),
+    ).resolves.toEqual([
+      {
+        id: "vendor/vision-reasoner",
+        name: null,
+        ownedBy: null,
+        contextWindow: null,
+        maxOutputTokens: null,
+        capabilitySource: "remote",
+        capabilities: {
+          imageInput: "supported",
+          reasoning: "supported",
+          search: "unknown",
+          toolUse: "supported",
+        },
+      },
+    ])
+  })
+
   it("为 Anthropic 使用原生请求头并识别 display_name", async () => {
     const fetcher = vi.fn<typeof fetch>(
       async () =>

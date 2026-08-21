@@ -145,6 +145,14 @@ export function mergeDiscoveredAiProviderModels(
   const existingById = new Map(models.map((model) => [model.id, model]))
   const mergedModels: AiProviderModelDraft[] = []
   const knownModelIds = new Set<string>()
+  const mergedModelIds = new Set(models.map((model) => model.id))
+
+  for (const discoveredModel of discoveredModels) {
+    const normalizedId = discoveredModel.id.trim()
+    if (normalizedId) mergedModelIds.add(normalizedId)
+  }
+
+  const enableNewModelsByDefault = mergedModelIds.size === 1
 
   for (const discoveredModel of discoveredModels) {
     const normalizedId = discoveredModel.id.trim()
@@ -160,7 +168,7 @@ export function mergeDiscoveredAiProviderModels(
         contextWindow: discoveredModel.contextWindow ?? existingModel?.contextWindow ?? null,
         maxOutputTokens: discoveredModel.maxOutputTokens ?? existingModel?.maxOutputTokens ?? null,
       }),
-      enabled: existingModel?.enabled ?? true,
+      enabled: existingModel?.enabled ?? enableNewModelsByDefault,
     })
   }
 
@@ -171,4 +179,11 @@ export function mergeDiscoveredAiProviderModels(
   }
 
   return mergedModels
+}
+
+export function setAllAiProviderModelsEnabled(
+  models: readonly AiProviderModelDraft[],
+  enabled: boolean,
+): AiProviderModelDraft[] {
+  return models.map((model) => ({ ...model, enabled }))
 }

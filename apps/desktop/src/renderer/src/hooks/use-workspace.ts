@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 预加载层提供的工作区、文件监听、窗口关闭与文档读写 API
- * [OUTPUT]: 当前工作区、文档草稿、编辑器 flush 注册、冲突状态和串行保存操作
+ * [OUTPUT]: 当前工作区、文件/目录索引、文档草稿、条目操作、冲突状态和串行保存操作
  * [POS]: 渲染层工作区会话的单一状态入口
  * [DOC]: docs/architecture.md
  *
@@ -10,7 +10,14 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import type { DocumentSnapshot, WorkspaceDocumentEntry, WorkspaceInfo } from "@tessera/contracts"
+import type {
+  DesktopApi,
+  DocumentSnapshot,
+  WorkspaceDirectoryEntry,
+  WorkspaceDocumentEntry,
+  WorkspaceEntryKind,
+  WorkspaceInfo,
+} from "@tessera/contracts"
 import { useCallback, useEffect, useRef, useState } from "react"
 
 type WorkspaceStatus = "idle" | "loading" | "ready" | "error"
@@ -25,10 +32,30 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "工作区操作失败，请稍后重试。"
 }
 
+async function listWorkspaceIndex(desktopApi: DesktopApi) {
+  const [documents, directories] = await Promise.all([
+    desktopApi.listWorkspaceDocuments(),
+    desktopApi.listWorkspaceDirectories(),
+  ])
+  return { directories, documents }
+}
+
+function isEntryOrChild(candidatePath: string, entryPath: string) {
+  return candidatePath === entryPath || candidatePath.startsWith(`${entryPath}/`)
+}
+
+function remapEntryPath(candidatePath: string, previousPath: string, nextPath: string) {
+  if (candidatePath === previousPath) return nextPath
+  return candidatePath.startsWith(`${previousPath}/`)
+    ? `${nextPath}${candidatePath.slice(previousPath.length)}`
+    : candidatePath
+}
+
 export function useWorkspace() {
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null)
   const [recentWorkspaces, setRecentWorkspaces] = useState<WorkspaceInfo[]>([])
   const [documents, setDocuments] = useState<WorkspaceDocumentEntry[]>([])
+  const [directories, setDirectories] = useState<WorkspaceDirectoryEntry[]>([])
   const [activeDocument, setActiveDocument] = useState<DocumentSnapshot | null>(null)
   const [draftContent, setDraftContent] = useState("")
   const [isDirty, setIsDirty] = useState(false)
@@ -112,13 +139,14 @@ export function useWorkspace() {
       setStatus("loading")
       setError(null)
       try {
-        const nextDocuments = await desktopApi.listWorkspaceDocuments()
+        const nextIndex = await listWorkspaceIndex(desktopApi)
         if (requestId !== requestIdRef.current) return
 
-        setDocuments(nextDocuments)
+        setDocuments(nextIndex.documents)
+        setDirectories(nextIndex.directories)
         setStatus("ready")
 
-        const pathToOpen = preferredPath ?? nextDocuments[0]?.relativePath
+        const pathToOpen = preferredPath ?? nextIndex.documents[0]?.relativePath
         if (!pathToOpen) {
           applyDocument(null)
           resetNavigation()
@@ -248,18 +276,19 @@ export function useWorkspace() {
       const currentPath = activeDocumentRef.current?.relativePath
       if (currentPath && change.paths.includes(currentPath)) flushPendingEdits()
 
-      void desktopApi
-        .listWorkspaceDocuments()
-        .then(async (nextDocuments) => {
-          setDocuments(nextDocuments)
+      void listWorkspaceIndex(desktopApi)
+        .then(async (nextIndex) => {
+          setDocuments(nextIndex.documents)
+          setDirectories(nextIndex.directories)
           const currentDocument = activeDocumentRef.current
           if (!currentDocument) return
 
-          const stillExists = nextDocuments.some(
+          const stillExists = nextIndex.documents.some(
             (entry) => entry.relativePath === currentDocument.relativePath,
           )
           if (!stillExists) {
             applyDocument(null)
+            resetNavigation()
             return
           }
 
@@ -275,7 +304,7 @@ export function useWorkspace() {
         })
         .catch((cause) => setError(errorMessage(cause)))
     })
-  }, [applyDocument, flushPendingEdits])
+  }, [applyDocument, flushPendingEdits, resetNavigation])
 
   const selectWorkspace = useCallback(async () => {
     const desktopApi = window.tessera
@@ -327,7 +356,9 @@ export function useWorkspace() {
     const desktopApi = window.tessera
     if (!desktopApi || !workspaceRef.current) return
     try {
-      setDocuments(await desktopApi.listWorkspaceDocuments())
+      const nextIndex = await listWorkspaceIndex(desktopApi)
+      setDocuments(nextIndex.documents)
+      setDirectories(nextIndex.directories)
       setError(null)
     } catch (cause) {
       setError(errorMessage(cause))
@@ -377,43 +408,184 @@ export function useWorkspace() {
     [applyDocument, commitNavigation, saveDocument],
   )
 
-  const createDocument = useCallback(async () => {
-    const desktopApi = window.tessera
-    const currentWorkspace = workspaceRef.current
-    if (!desktopApi || !currentWorkspace || !(await saveDocument())) return
+  const createDocument = useCallback(
+    async (parentRelativePath = "") => {
+      const desktopApi = window.tessera
+      const currentWorkspace = workspaceRef.current
+      if (!desktopApi || !currentWorkspace || !(await saveDocument())) return
 
+      try {
+        const document = await desktopApi.createDocument(parentRelativePath)
+        await loadDocuments(currentWorkspace, document.relativePath, "push")
+      } catch (cause) {
+        setError(errorMessage(cause))
+      }
+    },
+    [loadDocuments, saveDocument],
+  )
+
+  const createDirectory = useCallback(
+    async (parentRelativePath = "") => {
+      const desktopApi = window.tessera
+      if (!desktopApi || !workspaceRef.current || !(await saveDocument())) return null
+
+      setError(null)
+      try {
+        const directory = await desktopApi.createDirectory(parentRelativePath)
+        const nextIndex = await listWorkspaceIndex(desktopApi)
+        setDocuments(nextIndex.documents)
+        setDirectories(nextIndex.directories)
+        return directory
+      } catch (cause) {
+        setError(errorMessage(cause))
+        return null
+      }
+    },
+    [saveDocument],
+  )
+
+  const renameDocument = useCallback(
+    async (relativePath: string) => {
+      const desktopApi = window.tessera
+      if (!desktopApi || !(await saveDocument())) return false
+
+      setError(null)
+      try {
+        const renamedDocument = await desktopApi.renameDocument(relativePath)
+        if (!renamedDocument) return false
+        if (activeDocumentRef.current?.relativePath === relativePath) applyDocument(renamedDocument)
+        const nextIndex = await listWorkspaceIndex(desktopApi)
+        setDocuments(nextIndex.documents)
+        setDirectories(nextIndex.directories)
+
+        const current = navigationRef.current
+        commitNavigation({
+          entries: current.entries.map((path) =>
+            path === relativePath ? renamedDocument.relativePath : path,
+          ),
+          index: current.index,
+        })
+        return true
+      } catch (cause) {
+        setError(errorMessage(cause))
+        return false
+      }
+    },
+    [applyDocument, commitNavigation, saveDocument],
+  )
+
+  const renameActiveDocument = useCallback(async () => {
+    const document = activeDocumentRef.current
+    return document ? renameDocument(document.relativePath) : false
+  }, [renameDocument])
+
+  const renameDirectory = useCallback(
+    async (relativePath: string) => {
+      const desktopApi = window.tessera
+      if (!desktopApi || !(await saveDocument())) return false
+
+      setError(null)
+      try {
+        const renamedDirectory = await desktopApi.renameDirectory(relativePath)
+        if (!renamedDirectory) return false
+
+        const currentDocument = activeDocumentRef.current
+        if (currentDocument && isEntryOrChild(currentDocument.relativePath, relativePath)) {
+          const nextDocumentPath = remapEntryPath(
+            currentDocument.relativePath,
+            relativePath,
+            renamedDirectory.relativePath,
+          )
+          applyDocument(await desktopApi.readDocument(nextDocumentPath))
+        }
+
+        const nextIndex = await listWorkspaceIndex(desktopApi)
+        setDocuments(nextIndex.documents)
+        setDirectories(nextIndex.directories)
+        const current = navigationRef.current
+        commitNavigation({
+          entries: current.entries.map((path) =>
+            remapEntryPath(path, relativePath, renamedDirectory.relativePath),
+          ),
+          index: current.index,
+        })
+        return true
+      } catch (cause) {
+        setError(errorMessage(cause))
+        return false
+      }
+    },
+    [applyDocument, commitNavigation, saveDocument],
+  )
+
+  const deleteWorkspaceEntry = useCallback(
+    async (relativePath: string, kind: WorkspaceEntryKind) => {
+      const desktopApi = window.tessera
+      if (!desktopApi || !(await saveDocument())) return false
+
+      setError(null)
+      try {
+        const documentBeforeDelete = activeDocumentRef.current
+        const deleted = await desktopApi.deleteWorkspaceEntry(relativePath, kind)
+        if (!deleted) return false
+
+        const nextIndex = await listWorkspaceIndex(desktopApi)
+        setDocuments(nextIndex.documents)
+        setDirectories(nextIndex.directories)
+
+        const activeWasDeleted = Boolean(
+          documentBeforeDelete && isEntryOrChild(documentBeforeDelete.relativePath, relativePath),
+        )
+        if (activeWasDeleted) {
+          const fallbackPath = nextIndex.documents[0]?.relativePath
+          if (fallbackPath) {
+            applyDocument(await desktopApi.readDocument(fallbackPath))
+            resetNavigation(fallbackPath)
+          } else {
+            applyDocument(null)
+            resetNavigation()
+          }
+        } else {
+          const current = navigationRef.current
+          const entries = current.entries.filter((path) => !isEntryOrChild(path, relativePath))
+          const activePath = documentBeforeDelete?.relativePath
+          commitNavigation({
+            entries,
+            index: activePath ? entries.indexOf(activePath) : -1,
+          })
+        }
+        return true
+      } catch (cause) {
+        setError(errorMessage(cause))
+        return false
+      }
+    },
+    [applyDocument, commitNavigation, resetNavigation, saveDocument],
+  )
+
+  const revealWorkspaceEntry = useCallback(async (relativePath: string) => {
+    const desktopApi = window.tessera
+    if (!desktopApi) return
     try {
-      const document = await desktopApi.createDocument()
-      await loadDocuments(currentWorkspace, document.relativePath, "push")
+      await desktopApi.revealWorkspaceEntry(relativePath)
+      setError(null)
     } catch (cause) {
       setError(errorMessage(cause))
     }
-  }, [loadDocuments, saveDocument])
+  }, [])
 
-  const renameActiveDocument = useCallback(async () => {
+  const copyWorkspaceEntryPath = useCallback(async (relativePath: string) => {
     const desktopApi = window.tessera
-    const document = activeDocumentRef.current
-    if (!desktopApi || !document || !(await saveDocument())) return false
-
-    setError(null)
+    if (!desktopApi) return false
     try {
-      const renamedDocument = await desktopApi.renameDocument(document.relativePath)
-      if (!renamedDocument) return false
-      const previousPath = document.relativePath
-      applyDocument(renamedDocument)
-      setDocuments(await desktopApi.listWorkspaceDocuments())
-
-      const current = navigationRef.current
-      commitNavigation({
-        entries: current.entries.map((path) => (path === previousPath ? renamedDocument.relativePath : path)),
-        index: current.index,
-      })
+      await desktopApi.copyWorkspaceEntryPath(relativePath)
+      setError(null)
       return true
     } catch (cause) {
       setError(errorMessage(cause))
       return false
     }
-  }, [applyDocument, commitNavigation, saveDocument])
+  }, [])
 
   const updateDraft = useCallback((documentPath: string, content: string) => {
     if (documentPath !== activeDocumentRef.current?.relativePath) return
@@ -441,6 +613,7 @@ export function useWorkspace() {
     workspace,
     recentWorkspaces,
     documents,
+    directories,
     activeDocument,
     draftContent,
     isDirty,
@@ -458,7 +631,13 @@ export function useWorkspace() {
     goBack: () => navigateHistory(-1),
     goForward: () => navigateHistory(1),
     createDocument,
+    createDirectory,
+    renameDocument,
     renameActiveDocument,
+    renameDirectory,
+    deleteWorkspaceEntry,
+    revealWorkspaceEntry,
+    copyWorkspaceEntryPath,
     updateDraft,
     flushPendingEdits,
     registerPendingEditsFlusher,

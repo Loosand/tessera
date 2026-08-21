@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 首批 AI API 供应商元数据、LobeHub 图标、持久化配置与类型化模型发现函数
- * [OUTPUT]: 可恢复配置、加密密钥状态、全部/详情主从工作区、连接测试与分组模型目录
+ * [OUTPUT]: 可恢复配置、加密密钥状态、全部/详情主从工作区、连接测试与可批量启停的分组模型目录
  * [POS]: @tessera/ai/react 提供的模型供应商管理视图
  * [DOC]: design.md、docs/architecture/ai-providers.md
  *
@@ -42,6 +42,7 @@ import {
   createInitialAiProviderDrafts,
   matchesAiProvider,
   mergeDiscoveredAiProviderModels,
+  setAllAiProviderModelsEnabled,
 } from "../provider-catalog"
 
 const PROVIDER_ICON_KEYS: Record<AiProviderId, string> = {
@@ -436,6 +437,9 @@ function ProviderDetail({
     }),
     [visibleModels],
   )
+  const hasModels = draft.models.length > 0
+  const allModelsEnabled = hasModels && draft.models.every((model) => model.enabled)
+  const allModelsDisabled = hasModels && draft.models.every((model) => !model.enabled)
 
   const addModel = () => {
     const models = appendAiProviderModel(draft.models, modelInput, provider.id)
@@ -517,7 +521,7 @@ function ProviderDetail({
             scope,
             text:
               models.length > 0
-                ? `已从供应商获取 ${models.length} 个模型，当前列表共 ${mergedModels.length} 个。`
+                ? `已从供应商获取 ${models.length} 个模型，当前列表共 ${mergedModels.length} 个；只有单模型目录会自动启用。`
                 : "连接成功，但供应商返回了空模型列表。",
           })
         } else {
@@ -729,6 +733,22 @@ function ProviderDetail({
                   onChange={(event) => setModelSearch(event.currentTarget.value)}
                 />
               </div>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!hasModels || allModelsEnabled}
+                onClick={() => onUpdate({ models: setAllAiProviderModelsEnabled(draft.models, true) })}
+              >
+                全部启用
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!hasModels || allModelsDisabled}
+                onClick={() => onUpdate({ models: setAllAiProviderModelsEnabled(draft.models, false) })}
+              >
+                全部停用
+              </Button>
               <Button
                 variant="outline"
                 size="sm"

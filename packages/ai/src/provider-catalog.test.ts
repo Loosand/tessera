@@ -1,8 +1,8 @@
 /**
  * [INPUT]: AI 供应商元数据与模型草稿转换函数
- * [OUTPUT]: 首批供应商范围、搜索与模型去重行为的回归测试
+ * [OUTPUT]: 首批供应商范围、搜索、模型同步默认状态与批量启停行为的回归测试
  * [POS]: @tessera/ai 供应商目录与配置模型的回归测试
- * [DOC]: design.md、docs/architecture.md
+ * [DOC]: design.md、docs/architecture/ai-providers.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -17,6 +17,7 @@ import {
   createInitialAiProviderDrafts,
   matchesAiProvider,
   mergeDiscoveredAiProviderModels,
+  setAllAiProviderModelsEnabled,
 } from "./provider-catalog"
 
 describe("AI 供应商设置模型", () => {
@@ -119,7 +120,7 @@ describe("AI 供应商设置模型", () => {
     expect(appendAiProviderModel(first, "model-a", "openai-compatible")).toEqual(first)
   })
 
-  it("合并发现模型时保留已有开关并自动启用新模型", () => {
+  it("同步多个模型时保留已有开关并默认停用新模型", () => {
     expect(
       mergeDiscoveredAiProviderModels(
         [
@@ -168,7 +169,7 @@ describe("AI 供应商设置模型", () => {
       },
       {
         id: "model-b",
-        enabled: true,
+        enabled: false,
         name: null,
         ownedBy: null,
         contextWindow: null,
@@ -182,5 +183,65 @@ describe("AI 供应商设置模型", () => {
         capabilitySource: "builtin",
       },
     ])
+  })
+
+  it("首次同步只有一个模型时自动启用", () => {
+    const models = mergeDiscoveredAiProviderModels(
+      [],
+      [
+        {
+          id: "only-model",
+          name: "Only Model",
+          ownedBy: "vendor",
+          contextWindow: null,
+          maxOutputTokens: null,
+        },
+      ],
+      "openai-compatible",
+    )
+
+    expect(models).toHaveLength(1)
+    expect(models[0]?.enabled).toBe(true)
+  })
+
+  it("首次同步四百个模型时全部保持未启用", () => {
+    const discoveredModels = Array.from({ length: 400 }, (_, index) => ({
+      id: `model-${index + 1}`,
+      name: null,
+      ownedBy: null,
+      contextWindow: null,
+      maxOutputTokens: null,
+    }))
+    const models = mergeDiscoveredAiProviderModels([], discoveredModels, "openai-compatible")
+
+    expect(models).toHaveLength(400)
+    expect(models.every((model) => !model.enabled)).toBe(true)
+  })
+
+  it("可以批量启用或停用供应商的完整模型目录", () => {
+    const models = mergeDiscoveredAiProviderModels(
+      [],
+      [
+        {
+          id: "model-a",
+          name: null,
+          ownedBy: null,
+          contextWindow: null,
+          maxOutputTokens: null,
+        },
+        {
+          id: "model-b",
+          name: null,
+          ownedBy: null,
+          contextWindow: null,
+          maxOutputTokens: null,
+        },
+      ],
+      "openai-compatible",
+    )
+
+    const enabledModels = setAllAiProviderModelsEnabled(models, true)
+    expect(enabledModels.every((model) => model.enabled)).toBe(true)
+    expect(setAllAiProviderModelsEnabled(enabledModels, false).every((model) => !model.enabled)).toBe(true)
   })
 })

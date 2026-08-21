@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 文档条目与包含标题、代码围栏的 Markdown 示例
+ * [INPUT]: 文档/目录条目与包含标题、代码围栏的 Markdown 示例
  * [OUTPUT]: 侧栏排序、树结构和大纲提取的回归验证
  * [POS]: 工作区侧栏派生模型的单元测试
  * [DOC]: docs/architecture/editor.md
@@ -29,6 +29,16 @@ describe("工作区侧栏模型", () => {
 
   test("文件树优先显示文件夹", () => {
     expect(buildDocumentTree(documents, "name-asc").map((node) => node.name)).toEqual(["docs", "A.md"])
+  })
+
+  test("文件树保留没有 Markdown 文档的真实文件夹", () => {
+    const tree = buildDocumentTree(documents, "name-asc", [
+      { name: "empty", relativePath: "empty" },
+      { name: "nested", relativePath: "empty/nested" },
+    ])
+
+    expect(tree.map((node) => node.name)).toEqual(["docs", "empty", "A.md"])
+    expect(tree.find((node) => node.path === "empty")?.children[0]?.path).toBe("empty/nested")
   })
 
   test("大纲忽略代码围栏内的伪标题", () => {

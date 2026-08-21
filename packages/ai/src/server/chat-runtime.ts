@@ -36,7 +36,10 @@ function safeErrorMessage(error: unknown, apiKey: string): string {
   const fallback = "模型请求失败，请检查供应商配置、模型状态与网络连接。"
   const message = error instanceof Error ? error.message : typeof error === "string" ? error : fallback
   const withoutKey = apiKey ? message.split(apiKey).join("[已隐藏]") : message
-  const withoutAuthorization = withoutKey.replace(/(?:authorization|api[-_ ]?key)\s*[:=]\s*\S+/giu, "$1: [已隐藏]")
+  const withoutAuthorization = withoutKey.replace(
+    /(?:authorization|api[-_ ]?key)\s*[:=]\s*\S+/giu,
+    "$1: [已隐藏]",
+  )
   return withoutAuthorization.slice(0, MAX_ERROR_MESSAGE_LENGTH) || fallback
 }
 
@@ -90,8 +93,9 @@ function publicChunk(chunk: UIMessageChunk): AiChatStreamChunk | null {
     case "reasoning-end":
       return { type: chunk.type, id: chunk.id }
     case "text-delta":
-    case "reasoning-delta":
       return { type: chunk.type, id: chunk.id, delta: chunk.delta }
+    case "reasoning-delta":
+      return null
     case "source-url":
       return {
         type: "source-url",
@@ -136,12 +140,17 @@ export async function streamAiChat(
     timeout: { totalMs: 120_000, firstChunkMs: 30_000, chunkMs: 45_000 },
   })
 
+  const reasoningIds = new Set<string>()
   for await (const chunk of result.toUIMessageStream({
     originalMessages,
     sendReasoning: true,
     sendSources: true,
     onError: (error) => safeErrorMessage(error, input.apiKey),
   })) {
+    if (chunk.type === "reasoning-start") reasoningIds.add(chunk.id)
+    if (chunk.type === "reasoning-end" && reasoningIds.delete(chunk.id)) {
+      onChunk({ type: "reasoning-delta", id: chunk.id, delta: "已完成思考" })
+    }
     const sanitized = publicChunk(chunk)
     if (sanitized) onChunk(sanitized)
   }

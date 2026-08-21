@@ -1,6 +1,6 @@
 /**
- * [INPUT]: Electron 桌面应用当前需要的跨进程数据、生命周期、AI 配置与流式对话形状
- * [OUTPUT]: IPC 频道、应用信息、AI 模型/配置/对话、关闭握手与桌面 API 类型契约
+ * [INPUT]: Electron 桌面应用当前需要的跨进程数据、生命周期、工作区条目、AI 配置与流式对话形状
+ * [OUTPUT]: IPC 频道、工作区文件操作、AI 模型/配置/对话、关闭握手与桌面 API 类型契约
  * [POS]: 应用和共享包共同依赖的底层契约入口
  * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md
  *
@@ -21,11 +21,17 @@ export const IPC_CHANNELS = {
   workspaceOpenRecent: "workspace:open-recent",
   workspaceReveal: "workspace:reveal",
   workspaceListDocuments: "workspace:list-documents",
+  workspaceListDirectories: "workspace:list-directories",
   workspaceChanged: "workspace:changed",
   documentRead: "document:read",
   documentCreate: "document:create",
   documentRename: "document:rename",
   documentWrite: "document:write",
+  workspaceEntryCopyPath: "workspace-entry:copy-path",
+  workspaceEntryCreateDirectory: "workspace-entry:create-directory",
+  workspaceEntryDelete: "workspace-entry:delete",
+  workspaceEntryRenameDirectory: "workspace-entry:rename-directory",
+  workspaceEntryReveal: "workspace-entry:reveal",
   aiProviderConfigsChanged: "ai-provider:configs-changed",
   aiProviderDeleteConfig: "ai-provider:delete-config",
   aiProviderListConfigs: "ai-provider:list-configs",
@@ -159,6 +165,13 @@ export interface WorkspaceDocumentEntry {
   size: number
 }
 
+export interface WorkspaceDirectoryEntry {
+  name: string
+  relativePath: string
+}
+
+export type WorkspaceEntryKind = "document" | "directory"
+
 export interface DocumentSnapshot extends WorkspaceDocumentEntry {
   content: string
 }
@@ -181,9 +194,15 @@ export interface DesktopApi {
   openRecentWorkspace(workspaceId: string): Promise<WorkspaceInfo>
   revealCurrentWorkspace(): Promise<void>
   listWorkspaceDocuments(): Promise<WorkspaceDocumentEntry[]>
+  listWorkspaceDirectories(): Promise<WorkspaceDirectoryEntry[]>
   readDocument(relativePath: string): Promise<DocumentSnapshot>
-  createDocument(): Promise<DocumentSnapshot>
+  createDocument(parentRelativePath?: string): Promise<DocumentSnapshot>
+  createDirectory(parentRelativePath?: string): Promise<WorkspaceDirectoryEntry>
   renameDocument(relativePath: string): Promise<DocumentSnapshot | null>
+  renameDirectory(relativePath: string): Promise<WorkspaceDirectoryEntry | null>
+  deleteWorkspaceEntry(relativePath: string, kind: WorkspaceEntryKind): Promise<boolean>
+  revealWorkspaceEntry(relativePath: string): Promise<void>
+  copyWorkspaceEntryPath(relativePath: string): Promise<void>
   writeDocument(
     relativePath: string,
     content: string,

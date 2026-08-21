@@ -1,8 +1,8 @@
 /**
- * [INPUT]: 侧栏状态、设置入口与本地输入草稿
- * [OUTPUT]: 新任务页、居中任务输入框和未接运行时的交互反馈
- * [POS]: Tessera 主导航中的任务创建表面
- * [DOC]: design.md、docs/architecture.md
+ * [INPUT]: 侧栏/设置回调、已持久化 AI 模型、Electron useChat Transport 与本地输入草稿
+ * [OUTPUT]: 从居中新任务输入平滑进入多轮流式对话的普通 AI 对话页面
+ * [POS]: Tessera 主导航中的普通对话与后续 Agent 共用任务表面
+ * [DOC]: design.md、docs/architecture/ai-chat-agent-todo.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -10,20 +10,19 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import {
-  AiBrain01Icon,
-  ArrowDown01Icon,
-  ArrowUp01Icon,
-  Attachment01Icon,
-  Mic01Icon,
-  PanelLeftOpenIcon,
-  Settings01Icon,
-  Shield01Icon,
-} from "@tessera/design-system/components/icons"
+import { useElectronChat } from "@tessera/ai/react"
+import type { AiChatReasoning } from "@tessera/contracts"
+import { PanelLeftOpenIcon, Settings01Icon } from "@tessera/design-system/components/icons"
 import { Button } from "@tessera/design-system/components/ui/button"
 import { Icon } from "@tessera/design-system/components/ui/icon"
-import { Textarea } from "@tessera/design-system/components/ui/textarea"
-import { type FormEvent, type KeyboardEvent, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { useAiModels } from "../hooks/use-ai-models"
+import { ChatMessage } from "./chat-message"
+import { type ComposerImage, TaskComposer, aiModelKey } from "./task-composer"
+
+const ACCEPTED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"])
+const MAX_IMAGES = 4
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024
 
 interface TaskPageProps {
   hasWorkspace: boolean
@@ -32,22 +31,141 @@ interface TaskPageProps {
   onOpenSettings: () => void
 }
 
+function fileDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.addEventListener("load", () =>
+      typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("无法读取图片。")),
+    )
+    reader.addEventListener("error", () => reject(new Error("无法读取图片。")))
+    reader.readAsDataURL(file)
+  })
+}
+
 export function TaskPage({ hasWorkspace, sidebarOpen, onToggleSidebar, onOpenSettings }: TaskPageProps) {
+  const { error: modelError, loading, models } = useAiModels()
+  const [selectedModelKey, setSelectedModelKey] = useState("")
   const [prompt, setPrompt] = useState("")
+  const [images, setImages] = useState<ComposerImage[]>([])
+  const [webSearch, setWebSearch] = useState(false)
+  const [reasoning, setReasoning] = useState<AiChatReasoning>("auto")
   const [notice, setNotice] = useState("")
-  const canSubmit = prompt.trim().length > 0
+  const conversationEndRef = useRef<HTMLDivElement>(null)
+  const selectedModel = useMemo(
+    () => models.find((model) => aiModelKey(model) === selectedModelKey),
+    [models, selectedModelKey],
+  )
+  const chat = useElectronChat({
+    bridge: window.tessera,
+    providerId: selectedModel?.providerId ?? "openai-compatible",
+    modelId: selectedModel?.id ?? "",
+    reasoning,
+    webSearch,
+  })
+  const running = chat.status === "submitted" || chat.status === "streaming"
 
-  const submitPreview = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    if (!canSubmit) return
-    setNotice("任务输入界面已就绪，执行能力接入后会从这里开始处理。")
+  useEffect(() => {
+    if (selectedModel) return
+    setSelectedModelKey(models[0] ? aiModelKey(models[0]) : "")
+  }, [models, selectedModel])
+
+  useEffect(() => {
+    if (!selectedModel) return
+    if (selectedModel.capabilities?.search !== "supported") setWebSearch(false)
+    if (selectedModel.capabilities?.reasoning !== "supported") setReasoning("auto")
+    if (selectedModel.capabilities?.imageInput === "unsupported") setImages([])
+  }, [selectedModel])
+
+  useEffect(() => {
+    if (chat.messages.length === 0) return
+    conversationEndRef.current?.scrollIntoView({ behavior: running ? "auto" : "smooth", block: "end" })
+  }, [chat.messages, running])
+
+  const addImages = async (files: FileList) => {
+    const availableSlots = MAX_IMAGES - images.length
+    const selectedFiles = [...files].slice(0, availableSlots)
+    const invalidType = selectedFiles.find((file) => !ACCEPTED_IMAGE_TYPES.has(file.type))
+    const oversized = selectedFiles.find((file) => file.size > MAX_IMAGE_BYTES)
+    if (invalidType) {
+      setNotice("当前仅支持 PNG、JPEG、WebP 和 GIF 图片。")
+      return
+    }
+    if (oversized) {
+      setNotice("单张图片不能超过 8 MB。")
+      return
+    }
+    try {
+      const nextImages = await Promise.all(
+        selectedFiles.map(async (file) => ({
+          id: globalThis.crypto.randomUUID(),
+          filename: file.name,
+          mediaType: file.type,
+          url: await fileDataUrl(file),
+        })),
+      )
+      setImages((current) => [...current, ...nextImages].slice(0, MAX_IMAGES))
+      setNotice(files.length > availableSlots ? `一次最多添加 ${MAX_IMAGES} 张图片。` : "")
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "读取图片失败。")
+    }
   }
 
-  const handlePromptKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return
-    event.preventDefault()
-    event.currentTarget.form?.requestSubmit()
+  const send = () => {
+    if (!selectedModel || running || (!prompt.trim() && images.length === 0)) return
+    const text = prompt
+    const files = images.map((image) => ({
+      type: "file" as const,
+      url: image.url,
+      mediaType: image.mediaType,
+      filename: image.filename,
+    }))
+    setPrompt("")
+    setImages([])
+    setNotice("")
+    void chat.sendMessage({ text, files }).catch((error) => {
+      setNotice(error instanceof Error ? error.message : "发送消息失败。")
+      setPrompt(text)
+      setImages(images)
+    })
   }
+
+  const composerNotice =
+    notice ||
+    chat.error?.message ||
+    modelError ||
+    (loading
+      ? "正在读取可用模型…"
+      : models.length === 0
+        ? "请先在设置中保存并启用一个供应商与模型。"
+        : hasWorkspace
+          ? "普通对话不会读取当前工作区；只有你输入或上传的内容会发给模型。"
+          : "普通对话只会发送你输入或上传的内容。")
+
+  const composer = (compact = false) => (
+    <TaskComposer
+      compact={compact}
+      value={prompt}
+      images={images}
+      models={models}
+      model={selectedModel}
+      selectedModelKey={selectedModelKey}
+      reasoning={reasoning}
+      webSearch={webSearch}
+      status={chat.status}
+      notice={composerNotice}
+      onChange={(value) => {
+        setPrompt(value)
+        if (notice) setNotice("")
+      }}
+      onAddImages={(files) => void addImages(files)}
+      onRemoveImage={(id) => setImages((current) => current.filter((image) => image.id !== id))}
+      onModelChange={setSelectedModelKey}
+      onReasoningChange={setReasoning}
+      onWebSearchChange={setWebSearch}
+      onSubmit={send}
+      onStop={() => void chat.stop()}
+    />
+  )
 
   return (
     <section className="flex h-full min-h-0 flex-col bg-background">
@@ -70,7 +188,7 @@ export function TaskPage({ hasWorkspace, sidebarOpen, onToggleSidebar, onOpenSet
           ) : null}
         </div>
         <span className="pointer-events-none absolute inset-x-0 text-center text-[13px] font-medium">
-          新任务
+          {chat.messages.length > 0 ? selectedModel?.name || selectedModel?.id || "新任务" : "新任务"}
         </span>
         <div className="app-no-drag ml-auto">
           <Button
@@ -86,95 +204,43 @@ export function TaskPage({ hasWorkspace, sidebarOpen, onToggleSidebar, onOpenSet
         </div>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col items-center justify-center px-6 py-16 pb-24">
-          <div className="mb-7 text-center">
-            <div className="mx-auto flex size-10 items-center justify-center rounded-xl bg-muted text-foreground">
-              <Icon icon={AiBrain01Icon} size={19} />
+      {chat.messages.length === 0 ? (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col items-center justify-center px-6 py-14 pb-24">
+            <div className="mb-7 text-center">
+              <h1 className="text-xl font-semibold tracking-tight">今天想做点什么？</h1>
+              <p className="mt-1.5 text-sm text-muted-foreground">研究、阅读、理解与写作，从一个问题开始。</p>
             </div>
-            <h1 className="mt-4 text-xl font-semibold tracking-tight">开始一个新任务</h1>
-            <p className="mt-1.5 text-sm text-muted-foreground">从研究问题、材料整理或一段想法开始。</p>
+            {composer()}
+            {models.length === 0 && !loading ? (
+              <Button variant="outline" size="sm" className="mt-2" onClick={onOpenSettings}>
+                配置模型供应商
+              </Button>
+            ) : null}
           </div>
-
-          <form className="w-full" onSubmit={submitPreview}>
-            <div className="rounded-2xl border border-input bg-background shadow-sm transition-[border-color,box-shadow] focus-within:border-ring focus-within:shadow-md">
-              <Textarea
-                value={prompt}
-                autoFocus
-                className="min-h-32 resize-none border-0 bg-transparent px-5 py-4 text-[15px] leading-7 shadow-none focus-visible:ring-0 dark:bg-transparent"
-                placeholder="描述你想研究、阅读或写作的内容…"
-                aria-label="新任务内容"
-                aria-describedby="task-composer-notice"
-                onChange={(event) => {
-                  setPrompt(event.target.value)
-                  if (notice) setNotice("")
-                }}
-                onKeyDown={handlePromptKeyDown}
-              />
-
-              <div className="flex min-h-12 items-center gap-2 px-3 pb-3">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label="添加材料，即将支持"
-                  title="添加材料（即将支持）"
-                  disabled
-                >
-                  <Icon icon={Attachment01Icon} size={16} />
-                </Button>
-
-                <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground max-[520px]:hidden">
-                  <Icon icon={Shield01Icon} size={14} className="shrink-0" />
-                  <span className="truncate">{hasWorkspace ? "仅当前工作区" : "未选择工作区"}</span>
-                </div>
-
-                <div className="ml-auto flex items-center gap-1">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 gap-1 px-2 text-xs font-normal max-[600px]:hidden"
-                    aria-label="模型：自动选择，即将支持切换"
-                    title="模型选择（即将支持）"
-                    disabled
-                  >
-                    <span>自动选择</span>
-                    <Icon icon={ArrowDown01Icon} size={12} className="text-muted-foreground" />
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label="语音输入，即将支持"
-                    title="语音输入（即将支持）"
-                    disabled
-                  >
-                    <Icon icon={Mic01Icon} size={16} />
-                  </Button>
-                  <Button
-                    type="submit"
-                    size="icon-lg"
-                    className="rounded-full"
-                    aria-label="创建任务"
-                    title="创建任务"
-                    disabled={!canSubmit}
-                  >
-                    <Icon icon={ArrowUp01Icon} size={17} />
-                  </Button>
-                </div>
-              </div>
-            </div>
-            <p
-              id="task-composer-notice"
-              className="mt-3 min-h-5 text-center text-xs text-muted-foreground"
-              aria-live="polite"
-            >
-              {notice || "Enter 创建任务，Shift + Enter 换行"}
-            </p>
-          </form>
         </div>
-      </div>
+      ) : (
+        <>
+          <div className="min-h-0 flex-1 overflow-y-auto px-5">
+            <div className="mx-auto w-full max-w-3xl space-y-8 py-8 pb-12">
+              {chat.messages.map((message, index) => (
+                <ChatMessage
+                  key={message.id}
+                  message={message}
+                  isLast={index === chat.messages.length - 1}
+                  running={running}
+                  onRegenerate={() => void chat.regenerate()}
+                />
+              ))}
+              <div ref={conversationEndRef} className="h-px" />
+            </div>
+          </div>
+          <div className="shrink-0 bg-gradient-to-t from-background via-background to-transparent px-5 pt-3 pb-4">
+            <div className="mx-auto w-full max-w-3xl">{composer(true)}</div>
+          </div>
+        </>
+      )}
     </section>
   )
 }
+

@@ -12,7 +12,7 @@
 
 import type { AiProviderId } from "@tessera/contracts"
 import { describe, expect, it } from "vitest"
-import { createAiSdkLanguageModel } from "./ai-sdk-runtime"
+import { createAiSdkChatRuntime, createAiSdkLanguageModel } from "./ai-sdk-runtime"
 
 describe("AI SDK 供应商适配", () => {
   it.each<[AiProviderId, string, string]>([
@@ -46,5 +46,30 @@ describe("AI SDK 供应商适配", () => {
         apiKey: "test-key",
       }),
     ).toThrow("有效的 http(s) URL")
+  })
+
+  it.each([
+    ["anthropic-compatible", "https://api.anthropic.com/v1", "claude-sonnet-4"],
+    ["grok", "https://api.x.ai/v1", "grok-4"],
+  ] as const)("为 %s 接入供应商原生联网工具", (providerId, baseUrl, modelId) => {
+    const runtime = createAiSdkChatRuntime(
+      { providerId, baseUrl, modelId, apiKey: "test-key" },
+      { webSearch: true },
+    )
+    expect(runtime.tools).toHaveProperty("web_search")
+  })
+
+  it("不会为能力未知的兼容端点伪装联网搜索", () => {
+    expect(() =>
+      createAiSdkChatRuntime(
+        {
+          providerId: "openai-compatible",
+          baseUrl: "https://relay.example.com/v1",
+          modelId: "custom-model",
+          apiKey: "test-key",
+        },
+        { webSearch: true },
+      ),
+    ).toThrow("尚未接入")
   })
 })

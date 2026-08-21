@@ -1,6 +1,6 @@
 /**
- * [INPUT]: AI 设置 React 组件
- * [OUTPUT]: @tessera/ai/react 公开组件入口
+ * [INPUT]: AI 设置组件与 Electron 普通对话 React Transport
+ * [OUTPUT]: @tessera/ai/react 的设置组件、消息类型与 useElectronChat 公开入口
  * [POS]: AI 包的 React 子路径边界
  * [DOC]: design.md、docs/architecture/ai-providers.md
  *
@@ -12,3 +12,8 @@
 
 export { type AiProviderSettingsProps, AiProviderSettings } from "./ai-provider-settings"
 export { AiSettings } from "./ai-settings"
+export {
+  type UIMessage,
+  type UseElectronChatOptions,
+  useElectronChat,
+} from "./use-electron-chat"
