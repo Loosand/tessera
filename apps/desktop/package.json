@@ -19,6 +19,7 @@
     "clean": "rm -rf out"
   },
   "dependencies": {
+    "@tessera/ai": "workspace:*",
     "@tessera/contracts": "workspace:*",
     "@tessera/core": "workspace:*",
     "@tessera/database": "workspace:*",

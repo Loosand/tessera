@@ -1,48 +1,106 @@
 # Tessera 系统架构
 
-> 代码源头：`apps/desktop/src/main/index.ts`、`packages/agent-runtime/src/index.ts`、
+> 代码源头：`apps/desktop/src/main/index.ts`、`apps/desktop/src/preload/index.ts`、
+> `packages/agent-runtime/src/index.ts`、`packages/ai/src/index.ts`、`packages/skills/src/index.ts`、
 > `packages/database/client.ts`
 >
 > 状态：部分实现。
 
-## 产品边界
+## 目标与边界
 
-Tessera 管理用户文档、工作区权限、本地索引、活动历史和最终文件写入。Agent 运行时可以提出操作，
-但不能绕过 Tessera 核心层。
+Tessera 管理本地工作区、文档、索引、Agent 权限和最终文件写入。外部 Agent、模型和 Skill 可以提出操作，
+但不能绕过主进程的工作区与权限边界。
 
 ```text
-Electron 渲染层
-      ↓ 类型化 IPC
-Electron 主进程 / Tessera 核心
-      ├── 工作区与文件
-      ├── SQLite 与搜索
-      ├── 订阅源与活动
-      ├── 权限与审计
-      └── 经审查的文件写入
-              ↓ AgentRuntime
-         原生实现 | 外部适配器 | 后续适配器
+网页 / 订阅源 / 外部模型             本地文件
+          |                            |
+          | 明确的网络与权限边界        | 工作区路径边界
+          v                            v
+     采集与研究适配器              Markdown / 附件
+                \                    /
+                 Tessera 核心层
+        工作区 | 索引 | 权限 | Diff | 审计
+                    |
+          类型化 IPC / AgentRuntime
+                    |
+       阅读器 | 编辑器 | Agent 协作界面
 ```
 
-## 运行时规则
+Markdown 是正文事实源。SQLite 保存工作区登记、可重建索引和运行状态。编辑器、Agent 对话和数据库都不能持有
+无法从工作区恢复的正文唯一副本。
 
-- **已实现**：渲染层不直接访问 Node.js 或文件系统。
-- **已实现**：Electron 使用 `contextIsolation`、沙箱渲染层和窄预加载接口。
-- **已实现**：Markdown 文件作为内容事实源，主进程通过工作区边界读取并原子写入。
-- **已实现**：文档重命名由主进程校验文件名和工作区边界，并拒绝覆盖同名文件。
-- **已实现**：Drizzle + SQLite 已接入主进程生命周期，用于恢复最近工作区等本地状态。
-- **已实现**：最近工作区列表、切换和 Finder 定位通过窄 IPC 暴露，渲染层不接触数据库或任意系统路径。
-- **已实现**：主窗口允许缩至 `520 × 420`，渲染层在窄宽度下自动收起工作区侧栏并将按需面板改为覆盖显示。
-- **已实现**：窗口级工作区会话负责文件监听，渲染层在外部修改与本地草稿冲突时停止自动保存。
-- **已实现**：TipTap 负责即时预览编辑和延迟 Markdown 转换，草稿 flush 与串行保存由工作区层统一处理。
-- **已实现**：窗口关闭和应用退出先通过窄 IPC 请求渲染层 flush、保存当前草稿，保存成功后主进程才继续关闭；失败或冲突会取消本次关闭。
-- **规划**：Agent 写入在权限层和 Diff 层批准前只是一项提案。
-- **已实现**：核心包兼容 Node.js/Bun；Bun 专用 API 必须位于显式适配器后方。
-- **规划**：未来可通过 N-API、WASM 或独立进程引入 Rust，不改变领域契约。
+## 运行时边界
+
+### 渲染层
+
+- **已实现**：渲染层运行在沙箱中，不直接访问 Node.js、文件系统或数据库。
+- **已实现**：平台操作只通过 `packages/contracts` 定义的预加载接口调用。
+- **已实现**：TipTap 与源码表面共享同一份 Markdown 草稿和保存协议。
+- **规划**：Agent 建议、引用、权限请求和 Diff 使用独立的可审查界面。
+
+### 主进程与核心层
+
+- **已实现**：主进程解析并校验工作区路径，读取、重命名和原子写入 Markdown。
+- **已实现**：窗口级会话管理文件监听、外部修改冲突、最近工作区和关闭前保存握手。
+- **已实现**：SQLite 随主进程生命周期打开和关闭，渲染层不持有连接。
+- **规划**：采集、全文索引、权限、Diff 与审计通过核心服务暴露窄接口。
+- **规划**：所有出站请求记录目标、目的和数据范围。
+
+### Agent 与 Skills
+
+- **部分实现**：`AgentRuntime` 已定义请求、异步事件、取消和权限事件，尚无产品可用的运行时适配器。
+- **部分实现**：`@tessera/ai` 独立封装供应商目录、配置模型和 React 设置界面，已提供 OpenAI 兼容、Anthropic 兼容、DeepSeek、Grok 与 OpenRouter 的远程 API 配置，预填官方 API 地址并由适配器约定模型发现路径；配置目前仅保留在渲染会话，安全存储、模型发现与 AI SDK 调用尚未接入。
+- **部分实现**：`packages/skills` 已定义用户级、工作区级 Skill 描述和权限声明，尚未实现发现与执行。
+- **规划**：Skill 只描述工作流和所需资源；具体权限在每次执行时由 Tessera 判断。
+- **规划**：Agent 对文件的修改以文本补丁提出，批准后由核心层写入。
+
+## 已实现的数据流
+
+```text
+用户输入
+  -> TipTap transaction
+  -> 延迟生成 Markdown 草稿
+  -> 工作区串行保存队列
+  -> 类型化 IPC
+  -> 主进程校验磁盘版本与工作区路径
+  -> 同目录原子替换
+```
+
+文件监听发现外部修改时，无本地草稿则刷新文档；存在本地草稿时暂停自动保存并提示冲突。窗口关闭和应用退出前，
+主进程请求渲染层提交待处理编辑并保存，失败或冲突会取消关闭。
+
+## 规划的数据流
+
+```text
+研究问题
+  -> AgentRuntime
+  -> 搜索 / 抓取 / 本地材料读取权限
+  -> 来源与原文保存到工作区
+  -> 跨材料分析与引用
+  -> 对当前 Markdown 提出补丁
+  -> 用户审查 Diff
+  -> 核心层写入并记录审计事件
+```
+
+采集结果、引用和 Agent 事件需要使用稳定标识关联，但正文仍以可读文件保存。索引或会话损坏不能导致用户文章丢失。
 
 ## 包边界
 
-初始基建有意保持较少的包数量。当前已有 `contracts`、`core`、`agent-runtime`、`database`、
-`skills` 和 `design-system`。当真实实现需要独立依赖或生命周期时，再提取 `filesystem`、`library`、`reader`、
-`editor`、`feeds`、`activity`、`permissions`、`diff` 与具体的 Agent 适配器。
+| 包 | 职责 |
+| --- | --- |
+| `contracts` | IPC 与跨进程共享类型 |
+| `core` | 平台无关的应用服务与领域编排 |
+| `ai` | 模型供应商目录、AI SDK 适配边界与可复用 React 界面 |
+| `agent-runtime` | 可替换 Agent 运行时端口 |
+| `skills` | `SKILL.md` 描述、作用域和权限契约 |
+| `database` | SQLite 连接、迁移、索引与运行状态 |
+| `design-system` | 语义 token、交互原语和共享组件 |
 
-不要只为目录整齐提前拆包；边界必须由安全性、运行时、依赖方向或独立测试需求驱动。
+只有独立的安全边界、运行时、依赖或测试生命周期出现后，才新增包。应用依赖包，包不反向依赖 `apps/`。
+
+## 相关文档
+
+- [产品边界](product.md)
+- [编辑器与 Markdown](architecture/editor.md)
+- [本地数据库](architecture/database.md)
+- [设计规范](../design.md)

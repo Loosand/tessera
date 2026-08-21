@@ -28,11 +28,13 @@ export function SettingSection({
   ...props
 }: SettingSectionProps) {
   return (
-    <section className={cn("space-y-3", className)} {...props}>
-      <header className="flex min-h-11 items-end justify-between gap-6 px-1">
+    <section className={cn("space-y-2.5", className)} {...props}>
+      <header className="flex min-h-10 items-end justify-between gap-5 px-1">
         <div className="min-w-0">
-          <h2 className="text-base font-semibold tracking-tight text-foreground">{title}</h2>
-          {description ? <p className="mt-1 text-sm leading-5 text-muted-foreground">{description}</p> : null}
+          <h2 className="text-[15px] font-medium tracking-[-0.01em] text-foreground">{title}</h2>
+          {description ? (
+            <p className="mt-1 text-[13px] leading-5 text-muted-foreground">{description}</p>
+          ) : null}
         </div>
         {action}
       </header>

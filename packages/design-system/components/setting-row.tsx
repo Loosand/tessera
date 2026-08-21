@@ -23,15 +23,15 @@ export function SettingRow({ title, description, control, className, children, .
   return (
     <div
       className={cn(
-        "grid min-h-20 grid-cols-[minmax(0,1fr)_auto] items-center gap-8 border-b border-border px-5 py-4 last:border-b-0",
+        "grid min-h-17 grid-cols-[minmax(0,1fr)_auto] items-center gap-6 border-b border-border px-4 py-3.5 last:border-b-0 [&_[data-slot=button]]:text-[13px] [&_[data-slot=input]]:text-[13px] [&_[data-slot=select-trigger]]:text-[13px]",
         className,
       )}
       {...props}
     >
       <div className="min-w-0">
-        <h3 className="text-sm font-medium text-foreground">{title}</h3>
+        <h3 className="text-[13px] font-medium text-foreground">{title}</h3>
         {description ? (
-          <p className="mt-1 max-w-2xl text-sm leading-5 text-muted-foreground">{description}</p>
+          <p className="mt-1 max-w-2xl text-[13px] leading-5 text-muted-foreground">{description}</p>
         ) : null}
         {children}
       </div>
