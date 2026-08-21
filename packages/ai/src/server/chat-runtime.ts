@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 已解析的供应商连接、任务消息、可选 Skill、客户端交互/研究计划工具、普通对话能力开关与 AI SDK UIMessageChunk
- * [OUTPUT]: 注入当前 Skill instructions、可暂停等待用户并发布研究计划的普通 Chat 流，以及 Chat/Agent 共用的输入校验、错误脱敏和公开增量裁剪
+ * [OUTPUT]: 注入当前 Skill instructions、按模式分配搜索额度、每个用户请求至多暂停一次以消解核心语义歧义并可发布研究计划的普通 Chat 流，以及 Chat/Agent 共用的输入校验、错误归类脱敏和公开增量裁剪
  * [POS]: Electron 主进程与各 AI SDK 供应商之间的普通对话运行时及共享流边界
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/ai-providers.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -28,12 +28,17 @@ import {
 } from "ai"
 import { createAiSdkChatRuntime } from "./ai-sdk-runtime"
 import { buildTaskSkillInstructions } from "./skill-instructions"
-import { createTaskInteractionTools } from "./task-interaction-tools"
+import {
+  createTaskInteractionTools,
+  hasRequestedUserInputSinceLastUserMessage,
+} from "./task-interaction-tools"
 
 const MAX_MESSAGES = 200
 const MAX_TEXT_CHARACTERS = 2_000_000
 const MAX_FILE_DATA_URL_CHARACTERS = 12_000_000
 const MAX_ERROR_MESSAGE_LENGTH = 320
+const DEFAULT_WEB_SEARCH_MAX_USES = 5
+const RESEARCH_WEB_SEARCH_MAX_USES = 15
 
 export type AiChatRuntimeInput = AiChatStartInput & AiProviderConnectionInput
 
@@ -50,12 +55,26 @@ export type UiMessageValidationOptions<Message extends UIMessage> = Omit<
 export function safeErrorMessage(error: unknown, apiKey: string): string {
   const fallback = "模型请求失败，请检查供应商配置、模型状态与网络连接。"
   const message = error instanceof Error ? error.message : typeof error === "string" ? error : fallback
+  const searchableMessage = message.toLowerCase()
+  if (searchableMessage.includes("max_uses_exceeded")) {
+    return "联网搜索已达到本轮次数上限，已有结果已保留。可继续整理答案或缩小范围后重试。"
+  }
+  if (
+    searchableMessage.includes("type validation failed") &&
+    searchableMessage.includes("web_search_tool_result")
+  ) {
+    return "联网搜索服务返回了不兼容的结果格式，请稍后重试或暂时关闭联网搜索。"
+  }
   const withoutKey = apiKey ? message.split(apiKey).join("[已隐藏]") : message
   const withoutAuthorization = withoutKey.replace(
-    /(?:authorization|api[-_ ]?key)\s*[:=]\s*\S+/giu,
+    /(authorization|api[-_ ]?key)\s*[:=]\s*\S+/giu,
     "$1: [已隐藏]",
   )
   return withoutAuthorization.slice(0, MAX_ERROR_MESSAGE_LENGTH) || fallback
+}
+
+export function webSearchMaxUsesForSkill(skillId: AiChatStartInput["skillId"]) {
+  return skillId === "research" ? RESEARCH_WEB_SEARCH_MAX_USES : DEFAULT_WEB_SEARCH_MAX_USES
 }
 
 function validateDataImage(url: string, mediaType: string) {
@@ -200,8 +219,16 @@ export async function streamAiChat(
   input: AiChatRuntimeInput,
   { abortSignal, onChunk }: AiChatRuntimeOptions,
 ): Promise<void> {
-  const runtime = createAiSdkChatRuntime(input, { webSearch: input.webSearch })
-  const tools = { ...(runtime.tools ?? {}), ...createTaskInteractionTools(input.skillId) }
+  const runtime = createAiSdkChatRuntime(input, {
+    webSearch: input.webSearch,
+    webSearchMaxUses: webSearchMaxUsesForSkill(input.skillId),
+  })
+  const tools = {
+    ...(runtime.tools ?? {}),
+    ...createTaskInteractionTools(input.skillId, {
+      allowUserInput: !hasRequestedUserInputSinceLastUserMessage(input.messages),
+    }),
+  }
   type ChatUiMessage = UIMessage<unknown, never, InferUITools<typeof tools>>
   const originalMessages = await toUiMessages<ChatUiMessage>(input.messages, { tools })
   const instructions = await buildTaskSkillInstructions(input.skillId)

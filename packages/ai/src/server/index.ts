@@ -51,6 +51,7 @@ export {
 } from "./provider-config-service"
 export {
   createTaskInteractionTools,
+  hasRequestedUserInputSinceLastUserMessage,
   publishResearchPlanTool,
   requestUserInputTool,
   taskResearchPlanInputSchema,

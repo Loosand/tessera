@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 五类供应商配置与真实 AI SDK provider 工厂
- * [OUTPUT]: 供应商到 AI SDK LanguageModel 的映射回归验证
+ * [INPUT]: 五类供应商配置、联网搜索额度与真实 AI SDK provider 工厂
+ * [OUTPUT]: 供应商到 AI SDK LanguageModel、原生联网工具和有界搜索额度的映射回归验证
  * [POS]: @tessera/ai/server AI SDK 适配器单元测试
  * [DOC]: docs/architecture/ai-providers.md
  *
@@ -66,6 +66,33 @@ describe("AI SDK 供应商适配", () => {
       { webSearch: true },
     )
     expect(runtime.tools).toHaveProperty("web_search")
+  })
+
+  it("把研究模式指定的搜索额度传给 Anthropic 与 DeepSeek 原生工具", () => {
+    for (const [providerId, baseUrl, modelId] of [
+      ["anthropic-compatible", "https://api.anthropic.com/v1", "claude-sonnet-4"],
+      ["deepseek", "https://api.deepseek.com", "deepseek-v4-flash"],
+    ] as const) {
+      const runtime = createAiSdkChatRuntime(
+        { configId: providerId, providerId, baseUrl, modelId, apiKey: "test-key" },
+        { webSearch: true, webSearchMaxUses: 15 },
+      )
+      expect(runtime.tools?.web_search).toMatchObject({ args: { maxUses: 15 } })
+    }
+  })
+
+  it("把异常搜索额度约束到运行时安全范围", () => {
+    const runtime = createAiSdkChatRuntime(
+      {
+        configId: "deepseek",
+        providerId: "deepseek",
+        baseUrl: "https://api.deepseek.com",
+        modelId: "deepseek-v4-flash",
+        apiKey: "test-key",
+      },
+      { webSearch: true, webSearchMaxUses: 99 },
+    )
+    expect(runtime.tools?.web_search).toMatchObject({ args: { maxUses: 20 } })
   })
 
   it("不会为能力未知的兼容端点伪装联网搜索", () => {

@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 应用信息、工作区摘要、界面偏好、设置导航操作与共享 Motion 参数
- * [OUTPUT]: 带连续选中态的可搜索分类、独立 AI/供应商入口和紧凑供应商工作区
+ * [OUTPUT]: 带连续选中态的可搜索分类、统一宽度的常规设置内容和独立供应商工作区
  * [POS]: 桌面应用的产品级设置视图
  * [DOC]: design.md、docs/architecture/ai-providers.md
  *
@@ -299,9 +299,7 @@ export function SettingsPage({
         </div>
 
         <div className={activeSection === "providers" ? "hidden" : "min-h-0 flex-1 overflow-y-auto"}>
-          <article
-            className={`mx-auto w-full px-[clamp(20px,5vw,64px)] pt-10 pb-24 ${activeSection === "editor" ? "max-w-300" : activeSection === "shortcuts" ? "max-w-260" : activeSection === "appearance" ? "max-w-230" : "max-w-205"}`}
-          >
+          <article className="mx-auto w-full max-w-300 px-[clamp(20px,5vw,64px)] pt-10 pb-24">
             <p className="text-[11px] font-medium tracking-[0.08em] text-muted-foreground uppercase">设置</p>
             <h1 className="mt-2 text-2xl font-medium tracking-[-0.02em]">{activeNavigation.label}</h1>
             <p className="mt-1.5 text-[13px] leading-5 text-muted-foreground">

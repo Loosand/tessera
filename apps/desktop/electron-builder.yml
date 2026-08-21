@@ -9,16 +9,24 @@ directories:
 files:
   - out/**/*
   - package.json
+  - '!node_modules/!(better-sqlite3)/**/*'
+  - '!node_modules/better-sqlite3/{binding.gyp,README.md}'
+  - '!node_modules/better-sqlite3/{deps,src}/**/*'
+  - '!node_modules/better-sqlite3/prebuilds/!(darwin-arm64.node)'
   - '!out/**/*.map'
 
 asar: true
 asarUnpack:
-  - node_modules/better-sqlite3/prebuilds/**/*
+  - node_modules/better-sqlite3/prebuilds/darwin-arm64.node
 
 npmRebuild: false
 
 mac:
   category: public.app-category.productivity
+  electronLanguages:
+    - en
+    - zh_CN
+    - zh_TW
   identity: '-'
   hardenedRuntime: true
   entitlements: build/entitlements.mac.plist
@@ -33,6 +41,7 @@ mac:
   artifactName: ${productName}-${version}-${arch}.${ext}
 
 dmg:
+  format: ULMO
   title: ${productName} ${version}
   contents:
     - x: 140

@@ -22,7 +22,7 @@
 - `模型供应商` 菜单使用紧凑目录与常驻内容区的主从布局；目录提供全部连接入口，内容区在总览和单个连接详情之间切换。兼容协议可以添加多条具名连接，官方服务保持单例。
 - 供应商切换不离开当前工作区，并显式复位详情滚动位置；长模型目录保留粘性工具栏，模型按已启用与未启用分组。
 - 模型目录最终只有一个模型时，该模型在首次发现时自动启用；目录包含多个模型时，新发现模型默认停用，重新同步保留已有模型的显式开关状态。工具栏提供作用于完整目录的全部启用与全部停用操作。
-- 供应商和模型图标按需加载 `@lobehub/icons` 的 `ProviderIcon` 与 `ModelIcon`；模型图标按完整模型 ID 匹配，未知 ID 仍显示默认头像，完整映射不会进入工作区首屏 bundle。
+- 供应商和模型图标直接按需加载 `@lobehub/icons` 的精选品牌组件；模型图标按完整模型 ID 匹配常用品牌，未知 ID 显示中性头像，包根的完整图标目录不会进入首屏或发行 bundle。
 - 任务输入区的模型选择器使用按供应商分组的浮层，同时显示模型头像、能力摘要和选中状态；思考强度等普通单选仍使用原生控件。
 - 模型目录同步只要求 API 根地址。OpenRouter 的官方公共目录在首次进入详情时自动同步；其他目录若要求鉴权，则在输入 API Key 后重试。目录发现是可选能力：兼容端点返回 404/405 时保留连接和已保存模型，只提示用户手动添加完整模型 ID，不把目录缺失误报为推理连接失效。
 - 模型同步、手动增删、单个启停和批量启停成功后立即保存完整模型目录；主进程广播配置变更，任务页自动重新读取。每次进入新任务视图时，后台重新请求所有已启用且已配置密钥的供应商目录并保存结果，而不是只重读 SQLite；已保存目录为空时只启用第一个发现模型，已有显式启停选择不被覆盖。
@@ -50,7 +50,7 @@
   -> 任务页重新筛选可用模型
 ```
 
-模型发现不用 `generateText`，因此目录检查和刷新不会产生推理费用，也不能证明推理接口一定可用。生成运行时通过另一个边界 `createAiSdkLanguageModel` 建立：OpenAI 兼容与 OpenRouter 使用 `@ai-sdk/openai-compatible`，Anthropic、DeepSeek 和 Grok 分别使用 `@ai-sdk/anthropic`、`@ai-sdk/deepseek` 与 `@ai-sdk/xai`。DeepSeek 普通对话仍走 OpenAI 格式适配器；V4 模型开启联网时切到官方 Anthropic 兼容端点，以使用服务端 Web Search tool。
+模型发现不用 `generateText`，因此目录检查和刷新不会产生推理费用，也不能证明推理接口一定可用。生成运行时通过另一个边界 `createAiSdkLanguageModel` 建立：OpenAI 兼容与 OpenRouter 使用 `@ai-sdk/openai-compatible`，Anthropic、DeepSeek 和 Grok 分别使用 `@ai-sdk/anthropic`、`@ai-sdk/deepseek` 与 `@ai-sdk/xai`。DeepSeek 普通对话仍走 OpenAI 格式适配器；V4 模型开启联网时切到官方 Anthropic 兼容端点，以使用服务端 Web Search tool。DeepSeek 把 Web Search 次数耗尽错误包装成单元素数组，与 Anthropic 协议的单对象定义不同；主进程只在 DeepSeek 官方 `/anthropic` 响应进入 SDK Schema 前归一化这一种已知差异，正常搜索结果数组和其他内容不改写。
 
 ## 模型能力事实
 
@@ -78,7 +78,7 @@ useChat + Electron ChatTransport
 
 普通对话只发送用户显式输入、上传图片与当前对话历史，不读取工作区。主进程会把供应商明确返回的 reasoning 增量按 AI SDK Part 原始顺序送入 renderer，界面以默认展开、可折叠且最大高度 12rem 的紧凑 Markdown 过程块展示；长内容在块内独立滚动，流式追加只在用户仍贴近末尾时自动跟随。正文与 reasoning 共享禁用原始 HTML 的语义渲染器。reasoning 不作为下一轮对话历史回传，也不把供应商未返回的内部思维链补写成可见内容。
 
-开启联网搜索后，主进程保留供应商 `web_search` 的查询、工具输出与 URL 来源 Part；renderer 按同一助手消息聚合真实搜索次数、去重来源和执行状态，过滤非 http(s) URL，并以可展开过程轨迹呈现。每个来源先通过 HTTPS 请求站点 `/favicon.ico`，失败后请求 Favicon.im，二者均失败时回退通用图标；图片懒加载且不发送 Referer。供应商用于续轮引用的加密内容保留在工具历史中，不进入可见界面；没有真实工具 Part 时不根据 reasoning 文本伪造搜索活动。
+开启联网搜索后，主进程保留供应商 `web_search` 的查询、工具输出与 URL 来源 Part；renderer 按同一助手消息聚合真实搜索次数、去重来源和执行状态，过滤非 http(s) URL，并以可展开过程轨迹呈现。每个来源先通过 HTTPS 请求站点 `/favicon.ico`，失败后请求 Favicon.im，二者均失败时回退通用图标；图片懒加载且不发送 Referer。普通问答和写作每轮最多搜索 5 次，研究 Skill 每轮最多 15 次，运行时再以 20 次作为防御性硬上限；额度耗尽由工具结果表达，不能因供应商兼容差异升级为整轮 Schema 崩溃。供应商用于续轮引用的加密内容保留在工具历史中，不进入可见界面；没有真实工具 Part 时不根据 reasoning 文本伪造搜索活动。供应商原始校验错误在公开前映射为可操作文案，不向 renderer 暴露 Schema、堆栈或凭据。
 
 路由切换和组件卸载只断开 renderer 订阅，不中止主进程 `AbortController`；返回任务页时 AI SDK 的 resumable stream 入口读取主进程事件快照并按 sequence 去重重放。只有用户显式停止、任务删除、窗口销毁或应用退出会取消运行。该机制当前使用主进程内存日志，保证页面级续流，但不保证 Electron 进程退出后的恢复。
 

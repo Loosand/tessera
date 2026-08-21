@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 首批 AI API 供应商元数据、LobeHub 图标、持久化配置与类型化模型发现函数
+ * [INPUT]: 首批 AI API 供应商元数据、精选 LobeHub 品牌图标、持久化配置与类型化模型发现函数
  * [OUTPUT]: 可恢复配置、兼容协议多连接、加密密钥状态、目录检查与即时持久化的分组模型目录
  * [POS]: @tessera/ai/react 提供的模型供应商管理视图
  * [DOC]: design.md、docs/architecture/ai-providers.md
@@ -30,7 +30,18 @@ import { Button } from "@tessera/design-system/components/ui/button"
 import { Icon } from "@tessera/design-system/components/ui/icon"
 import { Input } from "@tessera/design-system/components/ui/input"
 import { Switch } from "@tessera/design-system/components/ui/switch"
-import { Suspense, lazy, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react"
+import {
+  type ComponentType,
+  type LazyExoticComponent,
+  Suspense,
+  lazy,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import {
   AI_PROVIDER_DEFINITIONS,
   type AiProviderDefinition,
@@ -48,18 +59,16 @@ import {
 } from "../provider-catalog"
 import { AiModelIcon } from "./ai-model-icon"
 
-const PROVIDER_ICON_KEYS: Record<AiProviderId, string> = {
-  "openai-compatible": "openai",
-  "anthropic-compatible": "anthropic",
-  deepseek: "deepseek",
-  grok: "xai",
-  openrouter: "openrouter",
-}
+type ProviderIconProps = { size?: number }
+type LazyProviderIcon = LazyExoticComponent<ComponentType<ProviderIconProps>>
 
-const ProviderIcon = lazy(async () => {
-  const icons = await import("@lobehub/icons")
-  return { default: icons.ProviderIcon }
-})
+const PROVIDER_ICONS = {
+  "openai-compatible": lazy(() => import("@lobehub/icons/es/OpenAI/components/Mono")),
+  "anthropic-compatible": lazy(() => import("@lobehub/icons/es/Anthropic/components/Mono")),
+  deepseek: lazy(() => import("@lobehub/icons/es/DeepSeek/components/Color")),
+  grok: lazy(() => import("@lobehub/icons/es/XAI/components/Mono")),
+  openrouter: lazy(() => import("@lobehub/icons/es/OpenRouter/components/Color")),
+} satisfies Record<AiProviderId, LazyProviderIcon>
 
 type ProviderSelection = "all" | string
 
@@ -89,6 +98,7 @@ function listProviderConnections(drafts: AiProviderDrafts): ProviderConnectionVi
 
 function ProviderMark({ provider, size = "lg" }: { provider: AiProviderDefinition; size?: "sm" | "lg" }) {
   const compact = size === "sm"
+  const ProviderIcon = PROVIDER_ICONS[provider.id]
 
   return (
     <span
@@ -98,7 +108,7 @@ function ProviderMark({ provider, size = "lg" }: { provider: AiProviderDefinitio
       <Suspense
         fallback={<span className={`${compact ? "size-4.5" : "size-6"} animate-pulse rounded bg-muted`} />}
       >
-        <ProviderIcon provider={PROVIDER_ICON_KEYS[provider.id]} size={compact ? 18 : 24} type="color" />
+        <ProviderIcon size={compact ? 18 : 24} />
       </Suspense>
     </span>
   )

@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 类型化供应商连接、模型 ID、联网开关与 AI SDK 官方供应商适配器
- * [OUTPUT]: 可交给 AI SDK generateText/streamText 的统一 LanguageModel、协议切换与原生联网工具
+ * [INPUT]: 类型化供应商连接、模型 ID、联网开关、搜索额度与 AI SDK 官方供应商适配器
+ * [OUTPUT]: 可交给 AI SDK generateText/streamText 的统一 LanguageModel、协议切换、分层搜索额度、DeepSeek 响应兼容与原生联网工具
  * [POS]: @tessera/ai/server 的真实生成模型适配边界
  * [DOC]: docs/architecture/ai-providers.md
  *
@@ -16,6 +16,10 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
 import { createXai } from "@ai-sdk/xai"
 import type { AiProviderConnectionInput } from "@tessera/contracts"
 import type { LanguageModel, ToolSet } from "ai"
+import { createDeepSeekAnthropicFetch } from "./deepseek-anthropic-response"
+
+const DEFAULT_WEB_SEARCH_MAX_USES = 5
+const MAX_WEB_SEARCH_MAX_USES = 20
 
 export type AiLanguageModelInput = AiProviderConnectionInput & {
   modelId: string
@@ -23,6 +27,7 @@ export type AiLanguageModelInput = AiProviderConnectionInput & {
 
 export type AiChatRuntimeOptions = {
   webSearch?: boolean
+  webSearchMaxUses?: number
 }
 
 export type AiSdkChatRuntime = {
@@ -65,11 +70,17 @@ function deepSeekAnthropicBaseUrl(baseURL: string) {
   return "https://api.deepseek.com/anthropic"
 }
 
+function normalizedWebSearchMaxUses(value: number | undefined) {
+  if (value === undefined || !Number.isFinite(value)) return DEFAULT_WEB_SEARCH_MAX_USES
+  return Math.min(MAX_WEB_SEARCH_MAX_USES, Math.max(1, Math.trunc(value)))
+}
+
 export function createAiSdkChatRuntime(
   input: AiLanguageModelInput,
-  { webSearch = false }: AiChatRuntimeOptions = {},
+  { webSearch = false, webSearchMaxUses }: AiChatRuntimeOptions = {},
 ): AiSdkChatRuntime {
   const { apiKey, baseURL, modelId } = normalizedRuntimeInput(input)
+  const maxUses = normalizedWebSearchMaxUses(webSearchMaxUses)
 
   switch (input.providerId) {
     case "openai-compatible":
@@ -86,7 +97,7 @@ export function createAiSdkChatRuntime(
       const anthropic = createAnthropic({ apiKey, baseURL })
       return {
         model: anthropic(modelId),
-        ...(webSearch ? { tools: { web_search: anthropic.tools.webSearch_20260209({ maxUses: 5 }) } } : {}),
+        ...(webSearch ? { tools: { web_search: anthropic.tools.webSearch_20260209({ maxUses }) } } : {}),
       }
     }
     case "deepseek": {
@@ -95,11 +106,12 @@ export function createAiSdkChatRuntime(
       const deepSeekAnthropic = createAnthropic({
         apiKey,
         baseURL: deepSeekAnthropicBaseUrl(baseURL),
+        fetch: createDeepSeekAnthropicFetch(),
       })
       return {
         model: deepSeekAnthropic(modelId),
         tools: {
-          web_search: deepSeekAnthropic.tools.webSearch_20250305({ maxUses: 5 }),
+          web_search: deepSeekAnthropic.tools.webSearch_20250305({ maxUses }),
         },
       }
     }

@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 当前任务 Skill 与模型对澄清问题、研究计划的结构化调用
- * [OUTPUT]: 可由客户端回答的 request-user-input 工具，以及无副作用的 publish-research-plan 工具
+ * [OUTPUT]: 仅用于核心语义消歧且每个用户请求最多出现一次的 request-user-input 工具，以及无副作用的 publish-research-plan 工具
  * [POS]: Chat streamText 与 ToolLoopAgent 共用的人机交互和研究展示工具集合
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -13,6 +13,7 @@
 import {
   PUBLISH_RESEARCH_PLAN_TOOL_NAME,
   REQUEST_USER_INPUT_TOOL_NAME,
+  type TaskMessage,
   type TaskSkillId,
 } from "@tessera/contracts"
 import { tool } from "ai"
@@ -49,7 +50,7 @@ export const taskUserInputRequestSchema = z.strictObject({
       ]),
     )
     .min(1)
-    .max(3),
+    .max(1),
 })
 
 export const taskUserInputResultSchema = z.discriminatedUnion("status", [
@@ -92,7 +93,7 @@ export const taskResearchPlanOutputSchema = z.strictObject({
 
 export const requestUserInputTool = tool({
   description:
-    "当用户请求存在会显著改变结果的歧义或缺少必要选择时，暂停任务并向用户提出 1 到 3 个简短问题。不要用它替代可以安全推断的小细节。",
+    "极少使用的核心语义消歧工具。只有当用户请求存在多个互斥且同样合理的核心指代或目标、上下文无法判断、任意猜测都会让答案答非所问时，才暂停并询问一个决定方向的问题；例如“什么是奥德赛”可能指荷马史诗、电影、游戏或其他作品。不得为了平台、篇幅、风格、语气、受众、文章角度、输出格式、资料范围、个性化或提高质量而询问，这些细节必须采用合理默认值并直接完成。只要能产出有用答案就不要调用；每个用户请求最多调用一次。",
   inputSchema: taskUserInputRequestSchema,
   outputSchema: taskUserInputResultSchema,
 })
@@ -108,11 +109,38 @@ export const publishResearchPlanTool = tool({
   }),
 })
 
-export function createTaskInteractionTools(skillId: TaskSkillId) {
-  return skillId === "research"
-    ? {
-        [REQUEST_USER_INPUT_TOOL_NAME]: requestUserInputTool,
-        [PUBLISH_RESEARCH_PLAN_TOOL_NAME]: publishResearchPlanTool,
-      }
-    : { [REQUEST_USER_INPUT_TOOL_NAME]: requestUserInputTool }
+type TaskInteractionToolOptions = {
+  readonly allowUserInput?: boolean
+}
+
+function messagePartToolName(part: TaskMessage["parts"][number]) {
+  if (part.type === "dynamic-tool") return part.toolName
+  return part.type.startsWith("tool-") ? part.type.slice("tool-".length) : null
+}
+
+export function hasRequestedUserInputSinceLastUserMessage(messages: readonly TaskMessage[]) {
+  let lastUserMessageIndex = -1
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === "user") {
+      lastUserMessageIndex = index
+      break
+    }
+  }
+  return messages
+    .slice(lastUserMessageIndex + 1)
+    .some(
+      (message) =>
+        message.role === "assistant" &&
+        message.parts.some((part) => messagePartToolName(part) === REQUEST_USER_INPUT_TOOL_NAME),
+    )
+}
+
+export function createTaskInteractionTools(
+  skillId: TaskSkillId,
+  { allowUserInput = true }: TaskInteractionToolOptions = {},
+) {
+  return {
+    ...(allowUserInput ? { [REQUEST_USER_INPUT_TOOL_NAME]: requestUserInputTool } : {}),
+    ...(skillId === "research" ? { [PUBLISH_RESEARCH_PLAN_TOOL_NAME]: publishResearchPlanTool } : {}),
+  }
 }

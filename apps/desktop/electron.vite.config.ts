@@ -6,7 +6,14 @@ export default defineConfig({
   main: {
     build: {
       externalizeDeps: {
-        exclude: ["@tessera/ai", "@tessera/database"],
+        exclude: [
+          "@tessera/agent-runtime",
+          "@tessera/ai",
+          "@tessera/contracts",
+          "@tessera/core",
+          "@tessera/database",
+          "@tessera/skills",
+        ],
       },
       rollupOptions: {
         external: ["better-sqlite3"],

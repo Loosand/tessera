@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 已解析供应商连接、当前 Skill、客户端交互/研究计划工具、完整 AI SDK UIMessage 历史、主进程注入的受限工作区能力与中止信号
- * [OUTPUT]: 注入当前 Skill instructions、可暂停等待用户并发布研究计划、受步骤/时间/token 边界约束且使用标准 toolApproval 的 AI SDK ToolLoopAgent 增量流
+ * [OUTPUT]: 注入当前 Skill instructions、每个用户请求至多暂停一次以消解核心语义歧义并可发布研究计划、受步骤/时间/token 边界约束且使用标准 toolApproval 的 AI SDK ToolLoopAgent 增量流
  * [POS]: @tessera/ai/server 中可读并可经人工批准修改 Markdown 的工作区 Agent 编排边界
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -24,7 +24,10 @@ import {
   toUiMessages,
 } from "./chat-runtime"
 import { buildTaskSkillInstructions } from "./skill-instructions"
-import { createTaskInteractionTools } from "./task-interaction-tools"
+import {
+  createTaskInteractionTools,
+  hasRequestedUserInputSinceLastUserMessage,
+} from "./task-interaction-tools"
 
 const MAX_AGENT_STEPS = 8
 const MAX_AGENT_TOTAL_TOKENS = 80_000
@@ -142,7 +145,9 @@ async function* runAiSdkAgent(
   })
   const tools = {
     ...readonlyTools,
-    ...createTaskInteractionTools(input.skillId),
+    ...createTaskInteractionTools(input.skillId, {
+      allowUserInput: !hasRequestedUserInputSinceLastUserMessage(input.messages),
+    }),
     "delegate-workspace-research": tool({
       description: "把跨多个 Markdown 文件、上下文消耗较大的独立研究委派给只读子 Agent。",
       inputSchema: z.strictObject({

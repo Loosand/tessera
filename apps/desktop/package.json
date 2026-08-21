@@ -15,7 +15,7 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "dist:mac": "bun run build && electron-builder --config electron-builder.yml --mac --arm64 --publish never",
+    "dist:mac": "bun run build && bun scripts/release-preflight.ts && electron-builder --config electron-builder.yml --mac --arm64 --publish never",
     "benchmark:editor": "bun run build && electron scripts",
     "benchmark:editor:check": "bun run build && electron scripts --check",
     "benchmark:editor:parser": "bun scripts/editor-parser-profile.ts",
