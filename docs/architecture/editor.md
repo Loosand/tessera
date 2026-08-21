@@ -57,3 +57,6 @@ Escape 关闭。菜单只调用编辑器命令，不读写文件，也不创建�
 - 图片附件、数学公式与代码高亮需要各自的 Markdown 往返测试后再加入 schema。
 - 源码模式后续替换为 CodeMirror，并复用相同草稿与保存协议。
 - 补充未知 HTML、嵌套列表及复杂表格的兼容性用例。
+
+编辑器模型、主题 ABI、性能风险与基准计划见
+[Markdown 编辑器技术路线评估](markdown-editor-evaluation.md)。
