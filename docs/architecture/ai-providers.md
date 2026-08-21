@@ -1,9 +1,11 @@
 # AI 供应商与模型发现
 
 > 代码源头：`packages/ai/src/provider-catalog.ts`、`packages/ai/src/server/provider-config-service.ts`、
-> `packages/ai/src/server/model-discovery.ts`、`packages/ai/src/server/ai-sdk-runtime.ts`、
+> `packages/ai/src/model-capabilities.ts`、`packages/ai/src/server/model-discovery.ts`、
+> `packages/ai/src/server/ai-sdk-runtime.ts`、`packages/ai/src/server/chat-runtime.ts`、
 > `packages/database/ai-provider-config-repository.ts`、`packages/contracts/src/index.ts`、
-> `apps/desktop/src/main/index.ts`、`packages/ai/src/react/ai-settings.tsx`、
+> `apps/desktop/src/main/ai-service.ts`、`apps/desktop/src/main/index.ts`、
+> `packages/ai/src/react/ai-settings.tsx`、
 > `packages/ai/src/react/ai-provider-settings.tsx`
 >
 > 状态：部分实现。
@@ -44,6 +46,31 @@
 
 模型发现不用 `generateText`，因此测试连接和刷新目录不会产生推理费用。生成运行时通过另一个边界 `createAiSdkLanguageModel` 建立：OpenAI 兼容与 OpenRouter 使用 `@ai-sdk/openai-compatible`，Anthropic、DeepSeek 和 Grok 分别使用 `@ai-sdk/anthropic`、`@ai-sdk/deepseek` 与 `@ai-sdk/xai`。
 
+## 模型能力事实
+
+模型列表 API 没有统一、可靠的能力协议。LobeHub 也没有只依赖供应商 `/models`：其开源仓库在本地 `model-bank` 中维护 `vision`、`reasoning`、`search`、`functionCall` 等能力，并把搜索实现区分为 `tool`、`params` 与 `internal`。Tessera 采用同样的“本地能力库 + 远端信号 + 用户配置”思路，但保持最小首版：
+
+- 能力使用 `supported`、`unsupported`、`unknown` 三态，未知不伪装成可用。
+- OpenRouter 返回的 `architecture.input_modalities` 与 `supported_parameters` 可补充图片、思考和工具能力；普通模型目录仅返回 ID 时，由保守的内建规则补足常见模型。
+- 能力携带 `builtin`、`remote`、`custom` 或 `unknown` 来源；内建规则升级后会重新计算，不让旧推断永久固化。
+- 目前只有 Anthropic 兼容模型与 Grok 的已验证原生搜索进入运行时；前者使用 Anthropic Web Search tool，后者切到 xAI Responses API 与 Web Search tool。OpenAI 兼容、DeepSeek 和 OpenRouter 不会仅凭模型名称伪装联网能力。
+
+参考实现与类型事实来自 LobeHub 官方仓库的 [模型能力类型](https://github.com/lobehub/lobehub/blob/canary/packages/model-bank/src/types/aiModel.ts)、[搜索能力决策](https://github.com/lobehub/lobehub/blob/canary/packages/model-bank/src/utils.ts) 与 [Google 模型目录示例](https://github.com/lobehub/lobehub/blob/canary/packages/model-bank/src/aiModels/google.ts)。
+
+## 普通对话运行时
+
+```text
+useChat + Electron ChatTransport
+  -> preload start/cancel/event 窄接口
+  -> 主进程确认供应商已启用、模型已启用且能力匹配
+  -> safeStorage 按需解密 Key
+  -> AI SDK streamText
+  -> 文本、完成原因、来源与思考状态增量
+  -> Markdown 消息界面
+```
+
+普通对话只发送用户显式输入、上传图片与当前对话历史，不读取工作区。主进程只转发“已完成思考”状态，不把供应商原始 reasoning 文本送入 renderer。窗口销毁、用户停止或应用退出都会中止对应 `AbortController`。
+
 ## 端点与鉴权
 
 | 供应商 | 默认 API 根地址 | 模型目录与鉴权 |
@@ -69,5 +96,5 @@
 
 ## 后续能力
 
-- **规划**：把 `createAiSdkLanguageModel` 接入对话流式生成、工具调用与取消协议。
+- **部分实现**：普通对话已接入流式生成、取消、Markdown、来源、图片和模型能力控件；会话数据库、重启恢复、用量与耗时记录仍未实现。
 - **规划**：为出站 AI 请求记录不含密钥和正文的目标、目的与数据范围审计事件。

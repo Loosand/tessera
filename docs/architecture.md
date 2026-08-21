@@ -36,7 +36,7 @@ Markdown 是正文事实源。SQLite 保存工作区登记、可重建索引和�
 - **已实现**：渲染层运行在沙箱中，不直接访问 Node.js、文件系统或数据库。
 - **已实现**：平台操作只通过 `packages/contracts` 定义的预加载接口调用。
 - **已实现**：TipTap 与源码表面共享同一份 Markdown 草稿和保存协议。
-- **已实现**：主导航提供「新任务」入口和本地输入草稿；提交目前只显示界面反馈，不调用 AgentRuntime。
+- **部分实现**：主导航「新任务」已接入不读取工作区的普通 AI 多轮流式对话，支持模型、思考、联网、图片、Markdown、来源、停止与重试；会话持久化和工作区 Agent 尚未接入。
 - **规划**：Agent 建议、引用、权限请求和 Diff 使用独立的可审查界面。
 
 ### 主进程与核心层
@@ -51,7 +51,7 @@ Markdown 是正文事实源。SQLite 保存工作区登记、可重建索引和�
 ### Agent 与 Skills
 
 - **部分实现**：`AgentRuntime` 已定义请求、异步事件、取消和权限事件，尚无产品可用的运行时适配器。
-- **部分实现**：`@tessera/ai` 独立封装 OpenAI 兼容、Anthropic 兼容、DeepSeek、Grok 与 OpenRouter。已实现官方默认地址、AI SDK provider 工厂、主进程模型发现、公共目录自动同步、LobeHub 图标、连接测试，以及 SQLite 配置恢复与 Electron safeStorage 密钥加密；生成/流式调用仍按独立阶段接入产品界面。
+- **部分实现**：`@tessera/ai` 独立封装 OpenAI 兼容、Anthropic 兼容、DeepSeek、Grok 与 OpenRouter。已实现官方默认地址、AI SDK provider 工厂、能力归一化、主进程模型发现、公共目录自动同步、LobeHub 图标、连接测试、SQLite 配置恢复、Electron safeStorage 密钥加密，以及普通对话流式调用；Agent 工具与会话恢复仍按后续阶段接入。
 - **部分实现**：`packages/skills` 已定义用户级、工作区级 Skill 描述和权限声明，尚未实现发现与执行。
 - **规划**：Skill 只描述工作流和所需资源；具体权限在每次执行时由 Tessera 判断。
 - **规划**：Agent 对文件的修改以文本补丁提出，批准后由核心层写入。
