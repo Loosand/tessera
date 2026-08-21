@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 源码编辑器文档长度、选区/滚动快照与目标 Markdown 行号
- * [OUTPUT]: 可恢复的安全会话快照和跨组件源码跳行事件
+ * [OUTPUT]: 可恢复的安全会话快照、已校验的跳行事件和跨组件源码跳行请求
  * [POS]: CodeMirror React 生命周期之外的纯状态与导航协议
  * [DOC]: docs/architecture/editor.md
  *
@@ -12,14 +12,14 @@
 
 export const SOURCE_EDITOR_NAVIGATE_EVENT = "tessera:source-editor-navigate"
 
-export interface SourceEditorSessionSnapshot {
-  anchor: number
-  head: number
-  scrollTop: number
+export type SourceEditorSessionSnapshot = {
+  readonly anchor: number
+  readonly head: number
+  readonly scrollTop: number
 }
 
-export interface SourceEditorNavigateDetail {
-  line: number
+export type SourceEditorNavigateDetail = {
+  readonly line: number
 }
 
 let pendingSourceEditorLine: number | null = null
@@ -46,6 +46,18 @@ export function clampSourceEditorSession(
 export function normalizeSourceEditorLine(line: number) {
   if (!Number.isFinite(line)) return 1
   return Math.max(1, Math.floor(line))
+}
+
+export function isSourceEditorNavigateEvent(event: Event): event is CustomEvent<SourceEditorNavigateDetail> {
+  if (!("detail" in event)) return false
+  const detail = event.detail
+  return (
+    typeof detail === "object" &&
+    detail !== null &&
+    "line" in detail &&
+    typeof detail.line === "number" &&
+    Number.isFinite(detail.line)
+  )
 }
 
 export function queueSourceEditorLine(line: number) {

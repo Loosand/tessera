@@ -267,9 +267,7 @@ export function TaskComposer({
                 }
               />
               <TooltipContent>
-                {supportsReasoning
-                  ? `思考模式：${reasoningLabel(reasoning)}`
-                  : "当前模型不支持思考强度控制"}
+                {supportsReasoning ? `思考模式：${reasoningLabel(reasoning)}` : "当前模型不支持思考强度控制"}
               </TooltipContent>
             </Tooltip>
 

@@ -24,8 +24,8 @@ import {
 import { Button } from "@tessera/design-system/components/ui/button"
 import { Icon } from "@tessera/design-system/components/ui/icon"
 import { Input } from "@tessera/design-system/components/ui/input"
-import { listBuiltInSkills, type BuiltInSkillDescriptor, type SkillPermission } from "@tessera/skills"
-import { useState } from "react"
+import { type BuiltInSkillDescriptor, type SkillPermission, listBuiltInSkills } from "@tessera/skills"
+import React, { useState } from "react"
 
 interface SkillManagementPageProps {
   sidebarOpen: boolean
@@ -89,9 +89,7 @@ function SkillCard({
               内置
             </span>
           </span>
-          <span className="mt-0.5 block font-mono text-[10px] text-muted-foreground">
-            ${skill.name}
-          </span>
+          <span className="mt-0.5 block font-mono text-[10px] text-muted-foreground">${skill.name}</span>
         </span>
         <span className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
           <Icon icon={CheckmarkCircle02Icon} size={12} />
@@ -99,9 +97,7 @@ function SkillCard({
         </span>
       </div>
 
-      <span className="mt-4 block text-xs leading-5 text-muted-foreground">
-        {skill.shortDescription}
-      </span>
+      <span className="mt-4 block text-xs leading-5 text-muted-foreground">{skill.shortDescription}</span>
 
       <span className="mt-auto flex flex-wrap gap-1.5 pt-5">
         {skill.permissions.map((permission) => (
@@ -194,16 +190,11 @@ function SkillDetail({
   )
 }
 
-export function SkillManagementPage({
-  sidebarOpen,
-  onToggleSidebar,
-  onUseSkill,
-}: SkillManagementPageProps) {
+export function SkillManagementPage({ sidebarOpen, onToggleSidebar, onUseSkill }: SkillManagementPageProps) {
   const [query, setQuery] = useState("")
   const [selectedSkillId, setSelectedSkillId] = useState<BuiltInTaskSkillId>("research")
   const filteredSkills = BUILT_IN_SKILLS.filter((skill) => matchesQuery(skill, query))
-  const selectedSkill =
-    filteredSkills.find((skill) => skill.name === selectedSkillId) ?? filteredSkills[0]
+  const selectedSkill = filteredSkills.find((skill) => skill.name === selectedSkillId) ?? filteredSkills[0]
 
   return (
     <section className="flex h-full min-h-0 flex-col bg-background">
@@ -238,7 +229,7 @@ export function SkillManagementPage({
                 管理模型可按需加载的本地工作流，并检查它们声明的能力边界。
               </p>
             </div>
-            <label className="relative block w-64 max-w-full">
+            <label className="relative block w-64 max-w-full" htmlFor="skill-search">
               <span className="sr-only">搜索技能</span>
               <Icon
                 icon={Search01Icon}
@@ -246,6 +237,7 @@ export function SkillManagementPage({
                 className="pointer-events-none absolute top-1/2 left-2.5 z-10 -translate-y-1/2 text-muted-foreground"
               />
               <Input
+                id="skill-search"
                 type="search"
                 value={query}
                 className="pl-8"

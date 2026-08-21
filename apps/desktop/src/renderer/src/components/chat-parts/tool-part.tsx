@@ -1,6 +1,6 @@
 /**
  * [INPUT]: AI SDK dynamic-tool 或 tool-* Part、Agent 变更预览与工具审批回调
- * [OUTPUT]: 工作区/联网/子 Agent 工具状态、通用确认，以及 Markdown 写工具的高亮 Diff 审批
+ * [OUTPUT]: Tool Chips 工具状态、通用确认，以及 Markdown 写工具的高亮 Diff 审批
  * [POS]: ChatMessage 内可独立演进的工具呈现单元
  * [DOC]: design.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
  *
@@ -13,8 +13,10 @@
 import type { UIMessage } from "@tessera/ai/react"
 import type { AgentChangePreview } from "@tessera/contracts"
 import { TaskAdd01Icon } from "@tessera/design-system/components/icons"
+import { ToolChips } from "@tessera/design-system/components/tool-chips"
 import { Button } from "@tessera/design-system/components/ui/button"
 import { Icon } from "@tessera/design-system/components/ui/icon"
+import React from "react"
 import { AgentChangeReview } from "./agent-change-review"
 
 type MessagePart = UIMessage["parts"][number]
@@ -47,6 +49,8 @@ const toolLabels: Record<string, string> = {
   web_search: "联网搜索",
 }
 
+const maxToolInputLength = 1_600
+
 function isUnknownRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
@@ -58,6 +62,19 @@ function toolResource(part: ToolMessagePart) {
   if (typeof input.directory === "string" && input.directory) return input.directory
   if (typeof input.query === "string") return `“${input.query}”`
   return ""
+}
+
+function toolInputText(part: ToolMessagePart) {
+  if (!("input" in part) || part.input === undefined) return ""
+
+  try {
+    const serialized = typeof part.input === "string" ? part.input : JSON.stringify(part.input, null, 2)
+    if (!serialized) return ""
+    if (serialized.length <= maxToolInputLength) return serialized
+    return `${serialized.slice(0, maxToolInputLength)}\n…内容过长，已截断`
+  } catch {
+    return String(part.input)
+  }
 }
 
 export function isToolPart(part: MessagePart): part is ToolMessagePart {
@@ -73,8 +90,22 @@ function stateLabel(part: ToolMessagePart) {
 export function ToolPart({ loadAgentChangePreview, onOpenDocument, onToolApproval, part }: ToolPartProps) {
   const toolName = part.type === "dynamic-tool" ? part.toolName : part.type.slice("tool-".length)
   const resource = toolResource(part)
-  const busy = part.state === "input-streaming" || part.state === "input-available"
   const errorText = part.state === "output-error" ? part.errorText : ""
+  const inputText = toolInputText(part)
+  const details =
+    inputText || errorText ? (
+      <div className="space-y-2">
+        {inputText ? (
+          <div>
+            <p className="mb-1 font-medium text-foreground/75">工具输入</p>
+            <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-code-background px-3 py-2 font-mono text-[10px] leading-5 text-code-foreground">
+              {inputText}
+            </pre>
+          </div>
+        ) : null}
+        {errorText ? <p className="text-destructive">{errorText}</p> : null}
+      </div>
+    ) : undefined
 
   const changeApproval =
     toolName === "write-workspace-document" && part.approval && loadAgentChangePreview ? part.approval : null
@@ -84,21 +115,22 @@ export function ToolPart({ loadAgentChangePreview, onOpenDocument, onToolApprova
       : null
 
   return (
-    <div className="my-3" aria-busy={busy}>
-      <div className="flex items-center gap-2 rounded-lg bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
-        <Icon icon={TaskAdd01Icon} size={14} />
-        <span className="min-w-0 flex-1 truncate">
-          {part.title || toolLabels[toolName] || toolName}
-          {resource ? <span className="ml-1.5 text-muted-foreground/75">· {resource}</span> : null}
-        </span>
-        <span
-          className={`max-w-72 truncate ${part.state === "output-error" ? "text-destructive" : ""}`}
-          title={errorText || undefined}
-        >
-          {stateLabel(part)}
-          {errorText ? ` · ${errorText}` : ""}
-        </span>
-      </div>
+    <div className="my-3">
+      <ToolChips
+        className="my-0"
+        items={[
+          {
+            defaultExpanded: part.state === "output-error",
+            details,
+            icon: <Icon icon={TaskAdd01Icon} size={14} />,
+            id: part.toolCallId,
+            label: part.title || toolLabels[toolName] || toolName,
+            meta: resource || undefined,
+            status: part.state,
+            statusLabel: stateLabel(part),
+          },
+        ]}
+      />
       {changeApproval && loadAgentChangePreview ? (
         <AgentChangeReview
           approvalId={changeApproval.id}

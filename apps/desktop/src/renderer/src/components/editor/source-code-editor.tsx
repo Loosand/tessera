@@ -20,21 +20,21 @@ import { basicSetup } from "codemirror"
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react"
 import {
   SOURCE_EDITOR_NAVIGATE_EVENT,
-  type SourceEditorNavigateDetail,
   type SourceEditorSessionSnapshot,
   clampSourceEditorSession,
   consumePendingSourceEditorLine,
+  isSourceEditorNavigateEvent,
   normalizeSourceEditorLine,
 } from "./source-code-editor-state"
 
-interface SourceCodeEditorProps {
-  active: boolean
-  content: string
-  documentName: string
-  documentPath: string
-  spellCheck: boolean
-  onContentChange: (documentPath: string, content: string) => void
-  onFlushPendingEditsReady: (flush: (() => void) | null) => void
+type SourceCodeEditorProps = {
+  readonly active: boolean
+  readonly content: string
+  readonly documentName: string
+  readonly documentPath: string
+  readonly spellCheck: boolean
+  readonly onContentChange: (documentPath: string, content: string) => void
+  readonly onFlushPendingEditsReady: (flush: (() => void) | null) => void
 }
 
 const SOURCE_EDITOR_THEME = EditorView.theme({
@@ -315,9 +315,8 @@ export function SourceCodeEditor({
     const handleNavigate = (event: Event) => {
       if (!activeRef.current) return
       const view = viewRef.current
-      const detail = (event as CustomEvent<SourceEditorNavigateDetail>).detail
-      if (!view || !detail) return
-      navigateToSourceLine(view, consumePendingSourceEditorLine() ?? detail.line)
+      if (!view || !isSourceEditorNavigateEvent(event)) return
+      navigateToSourceLine(view, consumePendingSourceEditorLine() ?? event.detail.line)
     }
 
     window.addEventListener(SOURCE_EDITOR_NAVIGATE_EVENT, handleNavigate)

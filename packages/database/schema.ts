@@ -59,7 +59,6 @@ export const agentSessions = sqliteTable(
     })
       .notNull()
       .default("idle"),
-    waitingForInput: integer("waiting_for_input", { mode: "boolean" }).notNull().default(false),
     createdAt,
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
   },
@@ -111,6 +110,7 @@ export const taskSessions = sqliteTable(
     })
       .notNull()
       .default("idle"),
+    waitingForInput: integer("waiting_for_input", { mode: "boolean" }).notNull().default(false),
     createdAt,
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
   },

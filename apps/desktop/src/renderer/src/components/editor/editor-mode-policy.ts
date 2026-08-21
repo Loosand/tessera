@@ -56,9 +56,9 @@ export function estimateMarkdownBlockCount(markdown: string, stopAt = Number.POS
     if (blockCount >= stopAt) return blockCount
 
     if (openingFence?.[1]) {
-      fence = {
-        character: openingFence[1][0] as "`" | "~",
-        length: openingFence[1].length,
+      const character = openingFence[1][0]
+      if (character === "`" || character === "~") {
+        fence = { character, length: openingFence[1].length }
       }
     }
     previousLineBlank = false

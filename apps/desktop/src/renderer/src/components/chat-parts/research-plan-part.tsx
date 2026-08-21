@@ -14,9 +14,11 @@ import type { UIMessage } from "@tessera/ai/react"
 import {
   PUBLISH_RESEARCH_PLAN_TOOL_NAME,
   type TaskResearchPlanInput,
+  type TaskResearchQuestion,
 } from "@tessera/contracts"
 import { ListChecksIcon } from "@tessera/design-system/components/icons"
 import { Icon } from "@tessera/design-system/components/ui/icon"
+import React from "react"
 
 type MessagePart = UIMessage["parts"][number]
 export type ResearchPlanToolPart = Extract<MessagePart, { type: "dynamic-tool" | `tool-${string}` }>
@@ -29,6 +31,10 @@ function toolName(part: ResearchPlanToolPart) {
   return part.type === "dynamic-tool" ? part.toolName : part.type.slice("tool-".length)
 }
 
+function isResearchQuestion(value: unknown): value is TaskResearchQuestion {
+  return isRecord(value) && typeof value.id === "string" && typeof value.title === "string"
+}
+
 export function parseResearchPlan(value: unknown): TaskResearchPlanInput | null {
   if (
     !isRecord(value) ||
@@ -36,24 +42,37 @@ export function parseResearchPlan(value: unknown): TaskResearchPlanInput | null 
     (value.scope !== undefined && typeof value.scope !== "string") ||
     (value.deliverable !== undefined && typeof value.deliverable !== "string") ||
     !Array.isArray(value.questions) ||
-    value.questions.length < 1 ||
-    !value.questions.every(
-      (question) => isRecord(question) && typeof question.id === "string" && typeof question.title === "string",
-    )
+    value.questions.length < 1
   ) {
     return null
   }
-  return value as TaskResearchPlanInput
+
+  const questions = value.questions.filter(isResearchQuestion)
+  if (questions.length !== value.questions.length) return null
+
+  return {
+    objective: value.objective,
+    questions,
+    ...(typeof value.scope === "string" ? { scope: value.scope } : {}),
+    ...(typeof value.deliverable === "string" ? { deliverable: value.deliverable } : {}),
+  }
 }
 
 export function isResearchPlanToolPart(part: MessagePart): part is ResearchPlanToolPart {
-  return (
-    (part.type === "dynamic-tool" || part.type.startsWith("tool-")) &&
-    toolName(part as ResearchPlanToolPart) === PUBLISH_RESEARCH_PLAN_TOOL_NAME
-  )
+  if (!isToolMessagePart(part)) return false
+  return toolName(part) === PUBLISH_RESEARCH_PLAN_TOOL_NAME
 }
 
-export function ResearchPlanPart({ part, streaming }: { part: ResearchPlanToolPart; streaming: boolean }) {
+function isToolMessagePart(part: MessagePart): part is ResearchPlanToolPart {
+  return part.type === "dynamic-tool" || part.type.startsWith("tool-")
+}
+
+type ResearchPlanPartProps = {
+  readonly part: ResearchPlanToolPart
+  readonly streaming: boolean
+}
+
+export function ResearchPlanPart({ part, streaming }: ResearchPlanPartProps) {
   const input = "input" in part ? parseResearchPlan(part.input) : null
   const busy = streaming || part.state === "input-streaming" || part.state === "input-available"
 
@@ -66,15 +85,13 @@ export function ResearchPlanPart({ part, streaming }: { part: ResearchPlanToolPa
   }
 
   return (
-    <details
-      open
-      className="my-3 rounded-2xl border border-border bg-background text-xs"
-      aria-busy={busy}
-    >
+    <details open className="my-3 rounded-2xl border border-border bg-background text-xs" aria-busy={busy}>
       <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 font-semibold text-foreground">
         <Icon icon={ListChecksIcon} size={15} />
         <span className="flex-1">研究计划</span>
-        <span className="font-normal text-muted-foreground">{busy ? "研究中" : `${input.questions.length} 个问题`}</span>
+        <span className="font-normal text-muted-foreground">
+          {busy ? "研究中" : `${input.questions.length} 个问题`}
+        </span>
       </summary>
       <div className="border-t border-border px-4 py-3">
         <p className="font-medium leading-5 text-foreground">{input.objective}</p>

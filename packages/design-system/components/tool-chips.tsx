@@ -11,7 +11,7 @@
  */
 
 import { cn } from "@tessera/design-system/lib/utils"
-import React, { type ComponentProps, type ReactNode, useId, useState } from "react"
+import React, { type ComponentProps, type ReactNode, useEffect, useId, useState } from "react"
 import { createPortal } from "react-dom"
 import { ArrowDown01Icon } from "./icons"
 import { Button } from "./ui/button"
@@ -68,11 +68,7 @@ interface DiffPreviewState {
   top: number
 }
 
-const activeStatuses = new Set<ToolChipStatus>([
-  "input-streaming",
-  "input-available",
-  "approval-responded",
-])
+const activeStatuses = new Set<ToolChipStatus>(["input-streaming", "input-available", "approval-responded"])
 
 function statusClassName(status: ToolChipStatus) {
   if (status === "output-error" || status === "output-denied") return "text-destructive"
@@ -86,7 +82,10 @@ function ToolChipRowContent({ item, expanded }: { item: ToolChipItem; expanded: 
 
   return (
     <>
-      <span aria-hidden="true" className="flex size-4 shrink-0 items-center justify-center text-foreground/75">
+      <span
+        aria-hidden="true"
+        className="flex size-4 shrink-0 items-center justify-center text-foreground/75"
+      >
         {item.icon}
       </span>
       <span className="min-w-0 truncate font-medium text-foreground/85">{item.label}</span>
@@ -98,10 +97,11 @@ function ToolChipRowContent({ item, expanded }: { item: ToolChipItem; expanded: 
       <span
         aria-live="polite"
         className={cn(
-          "ml-auto shrink-0 text-[11px]",
+          "ml-auto max-w-40 shrink-0 truncate text-[11px]",
           statusClassName(item.status),
           active && "tessera-loading-label bg-clip-text text-transparent",
         )}
+        title={item.statusLabel}
       >
         {item.statusLabel}
       </span>
@@ -130,7 +130,9 @@ function DiffPreview({ preview }: { preview: DiffPreviewState }) {
       style={{ left: preview.left, top: preview.top }}
     >
       <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-2">
-        <span className="min-w-0 truncate font-mono text-[11px] text-popover-foreground">{preview.diff.file}</span>
+        <span className="min-w-0 truncate font-mono text-[11px] text-popover-foreground">
+          {preview.diff.file}
+        </span>
         <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
           +{preview.diff.additions} / −{preview.diff.deletions}
         </span>
@@ -180,6 +182,22 @@ export function ToolChips({
   const busy = items.some((item) => activeStatuses.has(item.status))
   const showContent = summary === undefined || expanded
 
+  useEffect(() => {
+    const idsToExpand = items.filter((item) => item.defaultExpanded).map((item) => item.id)
+    if (idsToExpand.length === 0) return
+
+    setExpandedRows((current) => {
+      const next = new Set(current)
+      let changed = false
+      for (const id of idsToExpand) {
+        if (next.has(id)) continue
+        next.add(id)
+        changed = true
+      }
+      return changed ? next : current
+    })
+  }, [items])
+
   function toggleRow(id: string) {
     setExpandedRows((current) => {
       const next = new Set(current)
@@ -212,7 +230,7 @@ export function ToolChips({
       inert={!showContent}
     >
       <div className="overflow-hidden">
-        <div className={cn("space-y-1", summary && "mt-1 ml-[7px] border-l border-border py-1 pl-[22px]")}> 
+        <div className={cn("space-y-1", summary && "mt-1 ml-[7px] border-l border-border py-1 pl-[22px]")}>
           {items.map((item) => {
             const rowExpanded = expandedRows.has(item.id)
             const expandable = item.details !== undefined && item.details !== null
@@ -259,6 +277,7 @@ export function ToolChips({
             <div className="flex flex-wrap items-center gap-1.5 px-2 pt-1">
               {diffs.map((diff) => (
                 <button
+                  aria-expanded={preview?.diff.id === diff.id}
                   aria-label={`${diff.file}，增加 ${diff.additions} 行，删除 ${diff.deletions} 行`}
                   className="rounded-md border border-border bg-background px-2 py-1 font-mono text-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                   key={diff.id}
@@ -268,7 +287,7 @@ export function ToolChips({
                   onMouseLeave={() => setPreview(null)}
                   type="button"
                 >
-                  <span className="max-w-36 truncate align-bottom">{diff.file}</span>
+                  <span className="inline-block max-w-36 truncate align-bottom">{diff.file}</span>
                   <span className="ml-1.5">+{diff.additions}</span>
                   <span className="ml-1 text-destructive">−{diff.deletions}</span>
                 </button>
@@ -294,10 +313,10 @@ export function ToolChips({
 
   return (
     <section
+      {...props}
       aria-busy={busy}
       className={cn("my-3 max-w-2xl text-muted-foreground", className)}
       data-slot="tool-chips"
-      {...props}
     >
       {summary !== undefined ? (
         <Button
@@ -322,7 +341,9 @@ export function ToolChips({
         </Button>
       ) : null}
       {content}
-      {preview && typeof document !== "undefined" ? createPortal(<DiffPreview preview={preview} />, document.body) : null}
+      {preview && typeof document !== "undefined"
+        ? createPortal(<DiffPreview preview={preview} />, document.body)
+        : null}
     </section>
   )
 }

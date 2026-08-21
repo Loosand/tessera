@@ -11,12 +11,12 @@
  */
 
 import { useChat } from "@ai-sdk/react"
+import { REQUEST_USER_INPUT_TOOL_NAME } from "@tessera/contracts"
 import type {
   AiChatReasoning,
   AiChatStreamEvent,
   AiProviderId,
   DesktopApi,
-  REQUEST_USER_INPUT_TOOL_NAME,
   TaskMessage,
   TaskMessageMetadata,
   TaskMode,

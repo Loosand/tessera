@@ -93,7 +93,7 @@ function shouldOmitRunningAssistantTail(message: UIMessage | undefined) {
   if (message.parts.length === 0) return true
   return message.parts.some((part) => {
     if (part.type === "text" || part.type === "reasoning") return part.state === "streaming"
-    if (part.type === "dynamic-tool" || part.type.startsWith("tool-")) {
+    if ((part.type === "dynamic-tool" || part.type.startsWith("tool-")) && "state" in part) {
       return part.state === "input-streaming" || part.state === "input-available"
     }
     return false

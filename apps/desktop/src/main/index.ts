@@ -62,6 +62,7 @@ import {
   shell,
 } from "electron"
 import { AgentChangeError, type AgentChangeService, createAgentChangeService } from "./agent-change-service"
+import { parseAiChatStreamEvent } from "./ai-chat-event"
 import { type DesktopAiService, createDesktopAiService } from "./ai-service"
 import { handleDesktopInvoke, onDesktopSend } from "./ipc-contract"
 import { createReadonlyWorkspaceAgentTools } from "./read-only-agent-tools"
@@ -771,7 +772,7 @@ function registerIpcHandlers() {
         run: {
           active: persisted.status === "running",
           configId: persisted.configId ?? persisted.providerId,
-          events: persisted.events.map((record) => JSON.parse(record.payloadJson) as AiChatStreamEvent),
+          events: persisted.events.map((record) => parseAiChatStreamEvent(record.payloadJson)),
           modelId: persisted.modelId,
           providerId: persisted.providerId,
           requestId: persisted.requestId,

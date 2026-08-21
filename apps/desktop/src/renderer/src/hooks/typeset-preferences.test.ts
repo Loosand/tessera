@@ -15,6 +15,8 @@ import {
   TYPESET_REFERENCE_PRESET,
   createRandomTypesetPreferences,
   createTypesetCssVariables,
+  isTypesetMonoFontPreference,
+  isTypesetProportionalFontPreference,
   readTypesetPreferences,
 } from "./typeset-preferences"
 
@@ -68,6 +70,13 @@ describe("Typeset preferences", () => {
       typesetMonoFont: "system-mono",
       typesetSize: 18,
     })
+  })
+
+  it("为原生字体控件提供同一份运行时值守卫", () => {
+    expect(isTypesetProportionalFontPreference("lora")).toBe(true)
+    expect(isTypesetProportionalFontPreference("remote-font")).toBe(false)
+    expect(isTypesetMonoFontPreference("jetbrains-mono")).toBe(true)
+    expect(isTypesetMonoFontPreference(null)).toBe(false)
   })
 
   it("把旧版正文排版偏好迁移为等价 Typeset 设置", () => {

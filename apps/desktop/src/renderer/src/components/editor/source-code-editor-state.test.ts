@@ -14,6 +14,7 @@ import { describe, expect, it } from "vitest"
 import {
   clampSourceEditorSession,
   consumePendingSourceEditorLine,
+  isSourceEditorNavigateEvent,
   normalizeSourceEditorLine,
   queueSourceEditorLine,
 } from "./source-code-editor-state"
@@ -50,5 +51,16 @@ describe("CodeMirror source editor state", () => {
     queueSourceEditorLine(12)
     expect(consumePendingSourceEditorLine()).toBe(12)
     expect(consumePendingSourceEditorLine()).toBeNull()
+  })
+
+  it("只接受包含有限数值行号的源码跳转事件", () => {
+    const validEvent = new Event("navigate")
+    Object.defineProperty(validEvent, "detail", { value: { line: 12 } })
+    const invalidEvent = new Event("navigate")
+    Object.defineProperty(invalidEvent, "detail", { value: { line: "12" } })
+
+    expect(isSourceEditorNavigateEvent(validEvent)).toBe(true)
+    expect(isSourceEditorNavigateEvent(invalidEvent)).toBe(false)
+    expect(isSourceEditorNavigateEvent(new Event("navigate"))).toBe(false)
   })
 })

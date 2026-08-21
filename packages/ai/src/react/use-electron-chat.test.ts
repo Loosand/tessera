@@ -17,6 +17,8 @@ import { describe, expect, it, vi } from "vitest"
 import {
   type ElectronChatBridge,
   ElectronChatTransport,
+  hasPendingTaskUserInput,
+  shouldAutomaticallyContinueTask,
   toAiChatMessages,
   toTaskMessages,
   toUiMessages,
@@ -233,6 +235,72 @@ describe("ElectronChatTransport", () => {
       state: "approval-responded",
       approval: { id: "approval-write", approved: true },
     })
+  })
+
+  it("识别等待用户回答的客户端工具，并只在回答完整后自动续轮", () => {
+    const waitingMessages = [
+      {
+        id: "assistant-question",
+        role: "assistant",
+        parts: [
+          {
+            type: "tool-request-user-input",
+            toolCallId: "question-call",
+            state: "input-available",
+            input: {
+              questions: [
+                {
+                  id: "meaning",
+                  kind: "single",
+                  prompt: "你指的是哪一个？",
+                  options: [
+                    { id: "a", label: "选项 A" },
+                    { id: "b", label: "选项 B" },
+                  ],
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ] as UIMessage[]
+
+    expect(hasPendingTaskUserInput(waitingMessages)).toBe(true)
+    expect(shouldAutomaticallyContinueTask({ messages: waitingMessages })).toBe(false)
+
+    const answeredMessages = structuredClone(waitingMessages)
+    const answeredPart = answeredMessages[0]?.parts[0]
+    if (!answeredPart || !("state" in answeredPart)) throw new Error("缺少测试工具 Part。")
+    Object.assign(answeredPart, {
+      state: "output-available",
+      output: {
+        status: "answered",
+        answers: [{ questionId: "meaning", optionIds: ["a"] }],
+      },
+    })
+
+    expect(hasPendingTaskUserInput(answeredMessages)).toBe(false)
+    expect(shouldAutomaticallyContinueTask({ messages: answeredMessages })).toBe(true)
+  })
+
+  it("不会因为普通工具完成而额外发起一轮模型请求", () => {
+    const messages = [
+      {
+        id: "assistant-tool",
+        role: "assistant",
+        parts: [
+          {
+            type: "tool-read-workspace-file",
+            toolCallId: "read-call",
+            state: "output-available",
+            input: { path: "README.md" },
+            output: { path: "README.md" },
+          },
+        ],
+      },
+    ] as UIMessage[]
+
+    expect(shouldAutomaticallyContinueTask({ messages })).toBe(false)
   })
 
   it("页面断开时只移除订阅，显式停止才取消后台请求", async () => {

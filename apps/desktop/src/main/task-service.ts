@@ -205,7 +205,8 @@ function toTaskSummary(record: ReturnType<typeof listRecentTaskSessions>[number]
 function toTaskSnapshot(record: TaskRecord): TaskSessionSnapshot {
   const messages = record.messagePayloads.map((payload) => {
     try {
-      return JSON.parse(payload) as unknown
+      const message: unknown = JSON.parse(payload)
+      return message
     } catch {
       throw new Error("任务消息已经损坏，无法恢复。")
     }

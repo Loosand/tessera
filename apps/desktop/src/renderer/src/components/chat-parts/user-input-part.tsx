@@ -14,6 +14,7 @@ import type { UIMessage } from "@tessera/ai/react"
 import {
   REQUEST_USER_INPUT_TOOL_NAME,
   type TaskUserInputAnswer,
+  type TaskUserInputOption,
   type TaskUserInputQuestion,
   type TaskUserInputRequest,
   type TaskUserInputResult,
@@ -21,20 +22,22 @@ import {
 import { CheckmarkCircle02Icon, Message01Icon } from "@tessera/design-system/components/icons"
 import { Button } from "@tessera/design-system/components/ui/button"
 import { Icon } from "@tessera/design-system/components/ui/icon"
-import { useMemo, useState } from "react"
+import React, { useMemo, useState } from "react"
 
 type MessagePart = UIMessage["parts"][number]
 export type UserInputToolPart = Extract<MessagePart, { type: "dynamic-tool" | `tool-${string}` }>
 
 type DraftAnswer = {
-  customText: string
-  optionIds: string[]
-  text: string
+  readonly customText: string
+  readonly optionIds: readonly string[]
+  readonly text: string
 }
 
-interface UserInputPartProps {
-  onSubmit?: ((toolCallId: string, output: TaskUserInputResult) => void | PromiseLike<void>) | undefined
-  part: UserInputToolPart
+type UserInputPartProps = {
+  readonly onSubmit?:
+    | ((toolCallId: string, output: TaskUserInputResult) => void | PromiseLike<void>)
+    | undefined
+  readonly part: UserInputToolPart
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -45,7 +48,7 @@ function toolName(part: UserInputToolPart) {
   return part.type === "dynamic-tool" ? part.toolName : part.type.slice("tool-".length)
 }
 
-function isOption(value: unknown) {
+function isOption(value: unknown): value is TaskUserInputOption {
   return (
     isRecord(value) &&
     typeof value.id === "string" &&
@@ -75,12 +78,19 @@ export function parseTaskUserInputRequest(value: unknown): TaskUserInputRequest 
     (value.title !== undefined && typeof value.title !== "string") ||
     (value.description !== undefined && typeof value.description !== "string") ||
     !Array.isArray(value.questions) ||
-    value.questions.length < 1 ||
-    !value.questions.every(isQuestion)
+    value.questions.length < 1
   ) {
     return null
   }
-  return value as TaskUserInputRequest
+
+  const questions = value.questions.filter(isQuestion)
+  if (questions.length !== value.questions.length) return null
+
+  return {
+    questions,
+    ...(typeof value.title === "string" ? { title: value.title } : {}),
+    ...(typeof value.description === "string" ? { description: value.description } : {}),
+  }
 }
 
 function parseTaskUserInputResult(value: unknown): TaskUserInputResult | null {
@@ -108,10 +118,12 @@ function parseTaskUserInputResult(value: unknown): TaskUserInputResult | null {
 }
 
 export function isUserInputToolPart(part: MessagePart): part is UserInputToolPart {
-  return (
-    (part.type === "dynamic-tool" || part.type.startsWith("tool-")) &&
-    toolName(part as UserInputToolPart) === REQUEST_USER_INPUT_TOOL_NAME
-  )
+  if (!isToolMessagePart(part)) return false
+  return toolName(part) === REQUEST_USER_INPUT_TOOL_NAME
+}
+
+function isToolMessagePart(part: MessagePart): part is UserInputToolPart {
+  return part.type === "dynamic-tool" || part.type.startsWith("tool-")
 }
 
 function emptyDraft(): DraftAnswer {
@@ -126,7 +138,12 @@ function answerLabel(question: TaskUserInputQuestion, answer: TaskUserInputAnswe
   return labels.join("、") || "未填写"
 }
 
-function AnsweredSummary({ input, output }: { input: TaskUserInputRequest; output: TaskUserInputResult }) {
+type AnsweredSummaryProps = {
+  readonly input: TaskUserInputRequest
+  readonly output: TaskUserInputResult
+}
+
+function AnsweredSummary({ input, output }: AnsweredSummaryProps) {
   if (output.status !== "answered") {
     return (
       <div className="my-3 flex items-center gap-2 rounded-lg bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
@@ -164,16 +181,18 @@ export function UserInputPart({ onSubmit, part }: UserInputPartProps) {
   const [drafts, setDrafts] = useState<Record<string, DraftAnswer>>({})
   const [submitting, setSubmitting] = useState(false)
 
-  const completedOutput =
-    part.state === "output-available" ? parseTaskUserInputResult(part.output) : null
+  const completedOutput = part.state === "output-available" ? parseTaskUserInputResult(part.output) : null
   const valid = useMemo(() => {
     if (!input) return false
-    return input.questions.every((question) => {
-      if (question.required === false) return true
+    const hasAnswer = (question: TaskUserInputQuestion) => {
       const draft = drafts[question.id] ?? emptyDraft()
       if (question.kind === "text") return Boolean(draft.text.trim())
       return draft.optionIds.length > 0 || Boolean(draft.customText.trim())
-    })
+    }
+    return (
+      input.questions.every((question) => question.required === false || hasAnswer(question)) &&
+      input.questions.some(hasAnswer)
+    )
   }, [drafts, input])
 
   if (input && completedOutput) return <AnsweredSummary input={input} output={completedOutput} />
@@ -212,7 +231,7 @@ export function UserInputPart({ onSubmit, part }: UserInputPartProps) {
       return [
         {
           questionId: question.id,
-          ...(draft.optionIds.length > 0 ? { optionIds: draft.optionIds } : {}),
+          ...(draft.optionIds.length > 0 ? { optionIds: [...draft.optionIds] } : {}),
           ...(text ? { text } : {}),
         },
       ] satisfies TaskUserInputAnswer[]

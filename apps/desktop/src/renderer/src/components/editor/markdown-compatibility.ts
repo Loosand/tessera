@@ -59,12 +59,12 @@ function maskMarkdownCode(markdown: string) {
 
     const opening = line.match(/^[ \t]{0,3}(`{3,}|~{3,})/)
     if (opening?.[1]) {
-      fence = {
-        character: opening[1][0] as "`" | "~",
-        length: opening[1].length,
+      const character = opening[1][0]
+      if (character === "`" || character === "~") {
+        fence = { character, length: opening[1].length }
+        maskedLines.push(" ".repeat(line.length))
+        continue
       }
-      maskedLines.push(" ".repeat(line.length))
-      continue
     }
 
     if (/^(?: {4}|\t)/.test(line)) {

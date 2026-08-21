@@ -18,6 +18,7 @@ import type {
   TaskMessage,
 } from "@tessera/contracts"
 import {
+  type InferUITools,
   type UIMessage,
   type UIMessageChunk,
   convertToModelMessages,
@@ -201,7 +202,8 @@ export async function streamAiChat(
 ): Promise<void> {
   const runtime = createAiSdkChatRuntime(input, { webSearch: input.webSearch })
   const tools = { ...(runtime.tools ?? {}), ...createTaskInteractionTools(input.skillId) }
-  const originalMessages = await toUiMessages(input.messages, { tools })
+  type ChatUiMessage = UIMessage<unknown, never, InferUITools<typeof tools>>
+  const originalMessages = await toUiMessages<ChatUiMessage>(input.messages, { tools })
   const instructions = await buildTaskSkillInstructions(input.skillId)
   const result = streamText({
     model: runtime.model,

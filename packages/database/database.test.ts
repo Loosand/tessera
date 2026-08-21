@@ -312,6 +312,44 @@ describe("本地数据库基建", () => {
     client.close()
   })
 
+  test("等待用户回答的任务状态可以持久化并恢复", () => {
+    const client = openDatabase({ path: ":memory:" })
+    saveTaskSession(client, {
+      id: "waiting-task",
+      mode: "chat",
+      skillId: "research",
+      workspaceId: null,
+      title: "等待确认研究方向",
+      status: "waiting-input",
+      updatedAt: new Date(100),
+      messagePayloads: [
+        JSON.stringify({
+          id: "assistant-question",
+          role: "assistant",
+          parts: [
+            {
+              type: "tool-request-user-input",
+              toolCallId: "question-call",
+              state: "input-available",
+              input: { questions: [] },
+            },
+          ],
+        }),
+      ],
+    })
+
+    expect(findTaskSession(client, "waiting-task")).toMatchObject({
+      status: "waiting-input",
+      messagePayloads: [expect.stringContaining("tool-request-user-input")],
+    })
+    expect(
+      client.connection
+        .prepare("SELECT status, waiting_for_input FROM task_sessions WHERE id = ?")
+        .get("waiting-task"),
+    ).toEqual({ status: "running", waiting_for_input: 1 })
+    client.close()
+  })
+
   test("任务运行事件按 request 和 sequence 持久化并可恢复", () => {
     const client = openDatabase({ path: ":memory:" })
     saveTaskSession(client, {
