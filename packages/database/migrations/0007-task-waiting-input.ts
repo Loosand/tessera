@@ -14,7 +14,5 @@ import type { DatabaseMigration } from "./types"
 
 export const taskWaitingInputMigration = {
   id: "0007-task-waiting-input",
-  statements: [
-    "ALTER TABLE task_sessions ADD COLUMN waiting_for_input INTEGER NOT NULL DEFAULT 0",
-  ],
+  statements: ["ALTER TABLE task_sessions ADD COLUMN waiting_for_input INTEGER NOT NULL DEFAULT 0"],
 } as const satisfies DatabaseMigration

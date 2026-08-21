@@ -3,11 +3,14 @@
 > 代码源头：`packages/contracts/src/index.ts`、`packages/database/schema.ts`、
 > `packages/database/task-session-repository.ts`、`apps/desktop/src/main/task-service.ts`、
 > `apps/desktop/src/main/read-only-agent-tools.ts`、`packages/skills/src/index.ts`、`packages/ai/src/server/agent-runtime.ts`、
-> `packages/ai/src/react/use-electron-chat.ts`、`apps/desktop/src/main/index.ts`、
+> `packages/ai/src/server/task-interaction-tools.ts`、`packages/ai/src/react/use-electron-chat.ts`、`apps/desktop/src/main/index.ts`、
 > `apps/desktop/src/renderer/src/hooks/use-tasks.ts`、`apps/desktop/src/renderer/src/components/app-shell.tsx`、
-> `apps/desktop/src/renderer/src/components/task-page.tsx`
+> `apps/desktop/src/renderer/src/components/task-page.tsx`、
+> `apps/desktop/src/renderer/src/components/task-composer.tsx`、
+> `apps/desktop/src/renderer/src/components/task-capability-picker.tsx`、
+> `apps/desktop/src/renderer/src/components/chat-parts/`
 >
-> 状态：部分实现。普通 Chat、工作区 Agent、Markdown Diff 审批、任务运行事件恢复和消息历史已实现；Shell、MCP、真正跨进程续跑与多窗口接管尚未实现。
+> 状态：部分实现。普通 Chat、工作区 Agent、客户端问题暂停/续跑、研究计划、Markdown Diff 审批、任务运行事件恢复和消息历史已实现；Shell、MCP、真正跨进程续跑与多窗口接管尚未实现。
 
 ## 地位
 
@@ -19,22 +22,40 @@
 - `chat` 可以不绑定工作区；一级侧栏的“新任务”默认创建这种独立草稿，只有从工作区二级页面新建时才关联当前工作区。
 - “草稿”只是未绑定 Chat 的导航标签，不创建工作区记录、磁盘目录或隐式文件上下文。
 - `agent` 必须绑定工作区。renderer 显式提交预期工作区 ID，主进程与当前窗口会话重新核对；工作区根路径只留在主进程闭包内。
-- mode 在首条消息前通过任务输入框内的分段控件选择；任务首次保存后不可切换。
-- Skill 与 mode 正交：`null`、`research`、`writing` 分别呈现为问答、研究、写作，并由第二组原生单选选择；任务首次保存后不可切换。问答不加载 Skill，研究/写作只按需加载当前 `SKILL.md`。
+- mode 在首条消息前通过任务输入框内的紧凑单值原生选择器切换；任务首次保存后不可切换。
+- Skill 与 mode 正交：`null`、`research`、`writing` 分别呈现为问答、研究、写作，并集中在对话能力浮层选择；任务首次保存后不可切换。问答不加载 Skill，研究/写作只按需加载当前 `SKILL.md`。联网和思考强度也进入同一浮层，但继续作为独立的本轮设置。
 - Skill 不授予工具权限。研究不会自动开启 Chat 联网或为 Agent 注册网络工具；写作不会自动切换 Agent，也不能绕过 Markdown Diff 审批。
 - Agent 仅允许使用已声明支持工具调用的模型；缺少工作区或工具能力时必须阻止发送并明确说明，禁止降级到普通 Chat。
 - 恢复 Agent 任务或开始运行前，主进程重新核对任务绑定与窗口当前工作区。
 
 ## 持久化
 
-`task_sessions` 保存 mode、可选 `skill_id`、可选工作区、标题、状态与时间；`task_messages` 按序保存应用自有的版本化消息 JSON。
+`task_sessions` 保存 mode、可选 `skill_id`、可选工作区、标题、状态、等待输入标记与时间；`task_messages` 按序保存应用自有的版本化消息 JSON。由于已发布迁移中的旧状态列带固定 `CHECK`，`waiting-input` 在物理层兼容编码为 `status = running` 加 `waiting_for_input = 1`，仓储读写时统一映射为公开状态；后续迁移不重写用户已有表。
 消息契约保留正文、reasoning、来源、附件、工具状态、审批状态以及助手消息使用的供应商和模型。
 模型运行输入使用经主进程校验的完整 `UIMessage` 历史，再由 AI SDK `convertToModelMessages` 转换；工具结果与审批响应可以进入下一轮，应用元数据仍不会自动变成模型正文。
 主进程同时核对 IPC 请求中的 Skill 与已保存任务；当前 Skill 正文通过 AI SDK `instructions` 注入，不伪装为用户消息，也不把未选中 Skill 放入模型上下文。
 
 任务直到发送第一条消息时才落库。保存输入必须显式携带可空的工作区 ID：`null` 表示独立草稿；非空值必须与主进程当前窗口打开的工作区一致，防止渲染层把任务绑定到任意路径。
 
-运行中的消息快照只保存已经稳定的历史消息；若末尾助手消息仍在流式生成，renderer 不把这段未完成内容写入任务快照。页面返回时由后台事件重放重建这条助手消息，避免“数据库里的半条消息 + 重放增量”造成正文和思考过程重复。运行完成后再保存完整助手消息。
+运行中的消息快照只保存已经稳定的历史消息；若末尾助手消息仍在流式生成或工具输入仍在增量到达，renderer 不把这段未完成内容写入任务快照。页面返回时由后台事件重放重建这条助手消息，避免“数据库里的半条消息 + 重放增量”造成正文和思考过程重复。完整的工具请求和工具输出属于稳定历史，自动续轮期间继续保留；运行完成后再保存完整助手消息。
+
+## 等待用户输入与自动续跑
+
+`request-user-input` 与写入审批解决不同问题：前者收集影响任务语义的选择，不执行服务端副作用；后者批准具体文件写入。客户端问题工具不提供 `execute`，所以 AI SDK 在工具请求完成后结束当前模型请求。此时 renderer 保存包含完整问题输入的助手消息，并把任务标记为 `waiting-input`；普通输入框不再提交竞争消息，但用户仍可在专用卡片里回答、跳过或关闭。
+
+回答被写成同一 tool call 的类型化输出；`useChat` 只在最后一个 step 的客户端问题已经获得输出时自动发送下一轮，普通工具完成不会误触发额外请求。完整流程如下：
+
+```text
+模型调用 request-user-input
+  -> 当前模型请求以工具调用结束
+  -> task_messages 保存问题 Part，task_sessions 进入 waiting-input
+  -> 用户回答/跳过/关闭
+  -> renderer addToolOutput
+  -> 带工具输出的下一轮自动发送
+  -> 新的稳定消息覆盖等待态，任务恢复 running/completed
+```
+
+单次模型请求对应的 `task_run` 已经正常结束，而整个 `task_session` 可以继续等待用户；二者不共用一个“运行中”语义。应用重启后，持久化的工具请求仍呈现同一问题卡片，用户作答即可继续，不需要重放已经结束的模型请求。
 
 旧开发版本曾把普通 Chat 快照写入 `agent_sessions` / `agent_events`。`0002-task-sessions` 只迁移带
 `chat.snapshot` 的会话，保留消息顺序；既有 Agent 专用表不被重写。
@@ -88,7 +109,7 @@
 
 ## 工作区 Agent 运行时
 
-- AI SDK `ToolLoopAgent` 通过 `@tessera/agent-runtime` 的泛型 `AgentRuntime` 端口运行；主 Agent 获得四个只读 Markdown 工具、一个需要审批的写工具和一个只读研究子 Agent 工具，根路径不进入 IPC、renderer 或模型提示词。
+- AI SDK `ToolLoopAgent` 通过 `@tessera/agent-runtime` 的泛型 `AgentRuntime` 端口运行；主 Agent 获得共享客户端问题工具，以及四个只读 Markdown 工具、一个需要审批的写工具和一个只读研究子 Agent 工具；研究 Skill 额外获得无副作用的计划展示工具。根路径不进入 IPC、renderer 或模型提示词，结构化交互工具也不扩大文件或网络权限。
 - 工具只遍历可见的 `.md` / `.markdown`，忽略隐藏目录、`.git`、`.tessera`、`node_modules` 和遍历时遇到的符号链接。
 - 每次直接读取都会重新执行相对路径、真实路径与扩展名校验；`../`、绝对路径、隐藏路径和指向工作区外部的符号链接均不可用。当前文档只作为相对路径提示传入，读取时执行相同校验。
 - 单文件读取上限为 256 KiB；文件列表最多返回 500 项、最多扫描 2,000 项；搜索最多扫描 8 MiB 并返回 100 个匹配，触顶时返回结构化 `truncated`、上限和跳过文件信息。

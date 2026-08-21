@@ -30,8 +30,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "reac
 import { createPortal } from "react-dom"
 import { motionSprings } from "../../motion"
 
-interface SlashCommandMenuProps {
-  editor: Editor
+type SlashCommandMenuProps = {
+  readonly editor: Editor
 }
 
 interface SlashRange {

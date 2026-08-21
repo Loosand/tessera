@@ -19,14 +19,14 @@ import { handleStructuredMarkdownPaste } from "./markdown-paste"
 import { SlashCommandMenu } from "./slash-command-menu"
 import { TopLevelBlockHandle } from "./top-level-block-handle"
 
-interface RichTextEditorProps {
-  active: boolean
-  content: string
-  documentName: string
-  documentPath: string
-  spellCheck: boolean
-  onContentChange: (documentPath: string, content: string) => void
-  onFlushPendingEditsReady: (flush: (() => void) | null) => void
+type RichTextEditorProps = {
+  readonly active: boolean
+  readonly content: string
+  readonly documentName: string
+  readonly documentPath: string
+  readonly spellCheck: boolean
+  readonly onContentChange: (documentPath: string, content: string) => void
+  readonly onFlushPendingEditsReady: (flush: (() => void) | null) => void
 }
 
 const MARKDOWN_PASTE_MANAGER = createEditorMarkdownManager()

@@ -27,14 +27,14 @@ import {
 import { Icon } from "@tessera/design-system/components/ui/icon"
 import type { ReactElement } from "react"
 
-interface WorkspaceContextMenuProps {
+type WorkspaceContextMenuProps = Readonly<{
   trigger: ReactElement
   workspace: WorkspaceInfo
   onCopyPath: (workspaceId: string) => void
   onOpen: (workspaceId: string) => void
   onRemove: (workspaceId: string) => void
   onReveal: (workspaceId: string) => void
-}
+}>
 
 export function WorkspaceContextMenu({
   trigger,

@@ -15,10 +15,10 @@ import { ChatMarkdown } from "./chat-markdown"
 
 type TextMessagePart = Extract<UIMessage["parts"][number], { type: "text" }>
 
-interface TextPartProps {
-  onOpenWorkspaceReference?: ((path: string, line?: number) => void) | undefined
-  part: TextMessagePart
-  streaming: boolean
+type TextPartProps = {
+  readonly onOpenWorkspaceReference?: ((path: string, line?: number) => void) | undefined
+  readonly part: TextMessagePart
+  readonly streaming: boolean
 }
 
 export function TextPart({ onOpenWorkspaceReference, part, streaming }: TextPartProps) {

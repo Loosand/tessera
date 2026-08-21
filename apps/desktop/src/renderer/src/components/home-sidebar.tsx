@@ -25,10 +25,10 @@ import { Icon } from "@tessera/design-system/components/ui/icon"
 import { TaskContextMenu } from "./task-context-menu"
 import { WorkspaceContextMenu } from "./workspace-context-menu"
 
-interface HomeSidebarProps {
+type HomeSidebarProps = Readonly<{
   activeItem: "new-task" | "skills" | "workspaces"
-  recentTasks: TaskSessionSummary[]
-  workspaces: WorkspaceInfo[]
+  recentTasks: readonly TaskSessionSummary[]
+  workspaces: readonly WorkspaceInfo[]
   onCollapse: () => void
   onNewTask: () => void
   onOpenSettings: () => void
@@ -41,7 +41,7 @@ interface HomeSidebarProps {
   onRemoveWorkspace: (workspaceId: string) => void
   onShowSkills: () => void
   onShowWorkspaces: () => void
-}
+}>
 
 function NavigationRow({
   icon,

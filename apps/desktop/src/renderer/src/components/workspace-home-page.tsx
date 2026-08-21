@@ -17,10 +17,10 @@ import { Icon } from "@tessera/design-system/components/ui/icon"
 import { TaskContextMenu } from "./task-context-menu"
 import { WorkspaceContextMenu } from "./workspace-context-menu"
 
-interface WorkspaceHomePageProps {
-  recentTasks: TaskSessionSummary[]
+type WorkspaceHomePageProps = Readonly<{
+  recentTasks: readonly TaskSessionSummary[]
   sidebarOpen: boolean
-  workspaces: WorkspaceInfo[]
+  workspaces: readonly WorkspaceInfo[]
   onOpenTask: (task: TaskSessionSummary) => void
   onOpenWorkspace: (workspaceId: string) => void
   onRenameTask: (taskId: string, title: string) => Promise<boolean>
@@ -30,7 +30,7 @@ interface WorkspaceHomePageProps {
   onRemoveWorkspace: (workspaceId: string) => void
   onSelectWorkspace: () => void
   onToggleSidebar: () => void
-}
+}>
 
 const RELATIVE_TIME = new Intl.RelativeTimeFormat("zh-CN", { numeric: "auto" })
 

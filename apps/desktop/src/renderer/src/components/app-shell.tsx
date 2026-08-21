@@ -29,9 +29,9 @@ import { TaskPage } from "./task-page"
 import { WorkspaceHomePage } from "./workspace-home-page"
 import { WorkspaceSidebar } from "./workspace-sidebar"
 
-interface AppShellProps {
+type AppShellProps = Readonly<{
   appInfo: AppInfo | undefined
-}
+}>
 
 type PrimaryView = "home" | "skills" | "task" | "workspace"
 type AppView = PrimaryView | "settings"

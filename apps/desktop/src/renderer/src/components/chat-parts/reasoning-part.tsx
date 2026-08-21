@@ -18,9 +18,9 @@ import { ChatMarkdown } from "./chat-markdown"
 
 type ReasoningMessagePart = Extract<UIMessage["parts"][number], { type: "reasoning" }>
 
-interface ReasoningPartProps {
-  part: ReasoningMessagePart
-  streaming: boolean
+type ReasoningPartProps = {
+  readonly part: ReasoningMessagePart
+  readonly streaming: boolean
 }
 
 function reasoningLabel(streaming: boolean, elapsedSeconds: number) {

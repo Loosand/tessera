@@ -89,6 +89,14 @@ bun run check
 `bun run benchmark:editor:parser`、`bun run benchmark:editor:parser:cpu`。CodeMirror 源码模式的真实 renderer 基准
 仍在下一轮编辑器工作中。
 
+在 Apple Silicon macOS 上生成用于内部验证的 ad-hoc 签名 DMG 和 ZIP：
+
+```bash
+bun run dist:mac
+```
+
+产物写入 `apps/desktop/dist/`。ad-hoc 签名构建仅用于本地或内部验证；公开分发需要 Developer ID 签名与 Apple 公证。
+
 如果当前网络无法下载 Electron 预构建文件，可以在安装时临时指定镜像：
 
 ```bash

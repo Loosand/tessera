@@ -17,6 +17,13 @@ export {
   type ActivityTraceStatus,
 } from "./components/activity-trace"
 export { LoadingState, type LoadingStateProps, type LoadingStateVariant } from "./components/loading-state"
+export {
+  SelectionActions,
+  type SelectionActionItem,
+  type SelectionActionsAnchor,
+  type SelectionActionsProps,
+  type SelectionActionsStatus,
+} from "./components/selection-actions"
 export { SettingRow, type SettingRowProps } from "./components/setting-row"
 export { SettingSection, type SettingSectionProps } from "./components/setting-section"
 export {

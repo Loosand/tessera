@@ -10,15 +10,10 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
+import { type UIMessage, hasPendingTaskUserInput, toTaskMessages, useElectronChat } from "@tessera/ai/react"
 import {
-  type UIMessage,
-  hasPendingTaskUserInput,
-  toTaskMessages,
-  useElectronChat,
-} from "@tessera/ai/react"
-import {
-  REQUEST_USER_INPUT_TOOL_NAME,
   type AiChatReasoning,
+  REQUEST_USER_INPUT_TOOL_NAME,
   type TaskMessage,
   type TaskSessionStatus,
 } from "@tessera/contracts"
@@ -44,7 +39,7 @@ const ACCEPTED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "
 const MAX_IMAGES = 4
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024
 
-interface TaskPageProps {
+type TaskPageProps = Readonly<{
   active: boolean
   currentDocumentPath?: string | undefined
   task: ActiveTask
@@ -58,7 +53,7 @@ interface TaskPageProps {
   onOpenDocument?: ((path: string, line?: number) => void) | undefined
   onToggleSidebar: () => void
   onOpenSettings: () => void
-}
+}>
 
 function fileDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {

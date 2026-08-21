@@ -162,13 +162,7 @@ export type TaskMode = "chat" | "agent"
 export const TASK_SKILL_IDS = ["research", "writing"] as const
 export type BuiltInTaskSkillId = (typeof TASK_SKILL_IDS)[number]
 export type TaskSkillId = BuiltInTaskSkillId | null
-export type TaskSessionStatus =
-  | "idle"
-  | "running"
-  | "waiting-input"
-  | "completed"
-  | "failed"
-  | "cancelled"
+export type TaskSessionStatus = "idle" | "running" | "waiting-input" | "completed" | "failed" | "cancelled"
 
 export const REQUEST_USER_INPUT_TOOL_NAME = "request-user-input" as const
 export const PUBLISH_RESEARCH_PLAN_TOOL_NAME = "publish-research-plan" as const

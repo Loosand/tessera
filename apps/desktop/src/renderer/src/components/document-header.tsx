@@ -28,7 +28,7 @@ import { useState } from "react"
 import type { DefaultEditorMode } from "../hooks/use-app-preferences"
 import type { WorkspaceSaveStatus } from "../hooks/use-workspace"
 
-interface DocumentHeaderProps {
+type DocumentHeaderProps = Readonly<{
   workspace: WorkspaceInfo | null
   document: DocumentSnapshot | null
   saveStatus: WorkspaceSaveStatus
@@ -44,7 +44,7 @@ interface DocumentHeaderProps {
   onToggleSidebar: () => void
   onOpenSettings: () => void
   onRenameDocument: () => Promise<boolean>
-}
+}>
 
 const SAVE_STATUS_LABELS: Record<WorkspaceSaveStatus, string> = {
   idle: "",

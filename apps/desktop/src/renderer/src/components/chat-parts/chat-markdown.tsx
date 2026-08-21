@@ -14,12 +14,12 @@ import React from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 
-interface ChatMarkdownProps {
-  children: string
-  className?: string
-  compact?: boolean
-  onOpenWorkspaceReference?: ((path: string, line?: number) => void) | undefined
-  streaming?: boolean
+type ChatMarkdownProps = {
+  readonly children: string
+  readonly className?: string
+  readonly compact?: boolean
+  readonly onOpenWorkspaceReference?: ((path: string, line?: number) => void) | undefined
+  readonly streaming?: boolean
 }
 
 export function parseWorkspaceReference(href: string | undefined) {

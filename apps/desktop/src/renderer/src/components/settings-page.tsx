@@ -45,7 +45,7 @@ import { ShortcutsSettings } from "./shortcuts-settings"
 
 type SettingsSectionId = "general" | "appearance" | "editor" | "shortcuts" | "ai" | "providers" | "about"
 
-interface SettingsPageProps {
+type SettingsPageProps = Readonly<{
   appInfo: AppInfo | undefined
   documentCount: number
   preferences: AppPreferences
@@ -53,7 +53,7 @@ interface SettingsPageProps {
   onBack: () => void
   onSelectWorkspace: () => void
   onUpdatePreference: UpdateAppPreference
-}
+}>
 
 interface SettingsNavigationItem {
   description: string

@@ -21,7 +21,7 @@ Markdown 文件是已批准正文的内容事实源。SQLite 保存工作区登�
 - **已实现**：工作区仓储幂等记录打开时间，可按最近使用顺序列出、定位并恢复仍然存在的工作区。
 - **已实现**：工作区可以通过 `hidden_at` 从最近列表隐藏；记录及关联任务保持不变，再次打开相同路径会清除隐藏状态。
 - **已实现**：供应商仓储保存 Base URL、启用状态、模型 JSON 和 `safeStorage` 密文；关闭并重新打开数据库后可恢复。
-- **已实现**：通用任务仓储保存 `chat` / `agent` mode、可选 `research` / `writing` Skill、可选工作区绑定和版本化消息；普通 Chat 允许没有工作区，Agent 必须绑定工作区，mode 与 Skill 在任务创建后不可切换。
+- **已实现**：通用任务仓储保存 `chat` / `agent` mode、可选 `research` / `writing` Skill、可选工作区绑定、可恢复等待用户输入状态和版本化消息；普通 Chat 允许没有工作区，Agent 必须绑定工作区，mode 与 Skill 在任务创建后不可切换。
 - **已实现**：任务可重命名或删除；删除 `task_sessions` 时由外键级联清理对应 `task_messages`。
 - **已实现**：`task_runs` / `task_run_events` 在模型调用前创建运行 ID，并按 task/request/sequence 保存公开流事件；启动时把未结束运行标记为中断供任务页重放。
 - **已实现**：`agent_change_proposals` 冻结 Markdown 基准与候选内容、模型、工具调用、人工决定和写入结果；它不是已批准正文事实源，任务删除时级联清理。
@@ -32,6 +32,8 @@ Markdown 文件是已批准正文的内容事实源。SQLite 保存工作区登�
 `__tessera_migrations`，再在单个事务内按顺序应用尚未记录的迁移。已经发布的迁移不可修改；
 schema 变化必须追加迁移，并同步结构测试。
 
+已发布的任务状态列带固定 `CHECK`，新增 `waiting-input` 不重写旧表：`0007-task-waiting-input` 追加布尔标记，仓储把公开等待态编码为物理 `status = running` 与 `waiting_for_input = 1`，读取时再统一还原。问题输入和用户答案仍保存在版本化消息 Part 中，布尔列只服务列表、恢复和状态查询。
+
 ## 初始数据域
 
 | 表 | 用途 | 是否可重建 |
@@ -41,7 +43,7 @@ schema 变化必须追加迁移，并同步结构测试。
 | `agent_sessions` | Agent 会话状态与标题 | 否 |
 | `agent_events` | 会话的有序事件流 | 否 |
 | `permission_decisions` | 工具动作、资源和权限结果审计 | 否 |
-| `task_sessions` | Chat/Agent 共用的 mode、可选内置 Skill、工作区绑定、标题和运行状态 | 否 |
+| `task_sessions` | Chat/Agent 共用的 mode、可选内置 Skill、工作区绑定、标题、运行状态和等待输入标记 | 否 |
 | `task_messages` | 按序保存的版本化消息 Part 与模型元数据 | 否 |
 | `task_runs` | 每次模型运行的供应商、模型、状态和事件游标 | 否 |
 | `task_run_events` | 按 request/sequence 保存的公开 AI SDK 流事件检查点 | 否 |

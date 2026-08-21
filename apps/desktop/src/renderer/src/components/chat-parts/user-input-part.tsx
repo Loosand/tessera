@@ -19,7 +19,11 @@ import {
   type TaskUserInputRequest,
   type TaskUserInputResult,
 } from "@tessera/contracts"
-import { CheckmarkCircle02Icon, Message01Icon } from "@tessera/design-system/components/icons"
+import {
+  CancelCircleIcon,
+  CheckmarkCircle02Icon,
+  Message01Icon,
+} from "@tessera/design-system/components/icons"
 import { Button } from "@tessera/design-system/components/ui/button"
 import { Icon } from "@tessera/design-system/components/ui/icon"
 import React, { useMemo, useState } from "react"
@@ -247,12 +251,23 @@ export function UserInputPart({ onSubmit, part }: UserInputPartProps) {
     >
       <div className="flex items-start gap-2.5">
         <Icon className="mt-0.5 text-muted-foreground" icon={Message01Icon} size={15} />
-        <div>
+        <div className="min-w-0 flex-1">
           <h3 className="text-sm font-semibold text-foreground">{input.title || "需要你确认一下"}</h3>
           {input.description ? (
             <p className="mt-1 text-xs leading-5 text-muted-foreground">{input.description}</p>
           ) : null}
         </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          aria-label="关闭问题并继续任务"
+          title="关闭"
+          disabled={!onSubmit || submitting}
+          onClick={() => void submit({ status: "dismissed" })}
+        >
+          <Icon icon={CancelCircleIcon} size={14} />
+        </Button>
       </div>
 
       <div className="mt-4 space-y-4">

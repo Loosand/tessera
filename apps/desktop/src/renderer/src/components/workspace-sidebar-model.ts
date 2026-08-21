@@ -14,20 +14,20 @@ import type { WorkspaceDirectoryEntry, WorkspaceDocumentEntry } from "@tessera/c
 
 export type SidebarSort = "name-asc" | "modified-desc"
 
-export interface DocumentTreeNode {
+export type DocumentTreeNode = {
   name: string
   path: string
   document?: WorkspaceDocumentEntry
   children: DocumentTreeNode[]
 }
 
-export interface DocumentOutlineEntry {
-  depth: number
-  line: number
-  text: string
+export type DocumentOutlineEntry = {
+  readonly depth: number
+  readonly line: number
+  readonly text: string
 }
 
-export function sortDocuments(documents: WorkspaceDocumentEntry[], sort: SidebarSort) {
+export function sortDocuments(documents: readonly WorkspaceDocumentEntry[], sort: SidebarSort) {
   return [...documents].sort((left, right) => {
     if (sort === "modified-desc" && left.modifiedAt !== right.modifiedAt) {
       return right.modifiedAt - left.modifiedAt
@@ -37,9 +37,9 @@ export function sortDocuments(documents: WorkspaceDocumentEntry[], sort: Sidebar
 }
 
 export function buildDocumentTree(
-  documents: WorkspaceDocumentEntry[],
+  documents: readonly WorkspaceDocumentEntry[],
   sort: SidebarSort,
-  directories: WorkspaceDirectoryEntry[] = [],
+  directories: readonly WorkspaceDirectoryEntry[] = [],
 ) {
   const root: DocumentTreeNode = { name: "", path: "", children: [] }
 
@@ -86,7 +86,7 @@ export function buildDocumentTree(
   return root.children
 }
 
-export function collectFolderPaths(nodes: DocumentTreeNode[], paths = new Set<string>()) {
+export function collectFolderPaths(nodes: readonly DocumentTreeNode[], paths = new Set<string>()) {
   for (const node of nodes) {
     if (node.document) continue
     paths.add(node.path)

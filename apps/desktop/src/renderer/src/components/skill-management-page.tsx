@@ -27,11 +27,11 @@ import { Input } from "@tessera/design-system/components/ui/input"
 import { type BuiltInSkillDescriptor, type SkillPermission, listBuiltInSkills } from "@tessera/skills"
 import React, { useState } from "react"
 
-interface SkillManagementPageProps {
+type SkillManagementPageProps = Readonly<{
   sidebarOpen: boolean
   onToggleSidebar: () => void
   onUseSkill: (skillId: BuiltInTaskSkillId) => void
-}
+}>
 
 const BUILT_IN_SKILLS = listBuiltInSkills()
 

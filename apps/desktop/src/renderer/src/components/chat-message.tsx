@@ -24,18 +24,16 @@ import { ToolPart, isToolPart } from "./chat-parts/tool-part"
 import { UserInputPart, isUserInputToolPart } from "./chat-parts/user-input-part"
 import { WebSearchPart, isWebSearchToolPart } from "./chat-parts/web-search-part"
 
-interface ChatMessageProps {
+type ChatMessageProps = Readonly<{
   isLast: boolean
   message: UIMessage
   loadAgentChangePreview?: ((approvalId: string) => Promise<AgentChangePreview>) | undefined
   onOpenDocument?: ((path: string, line?: number) => void) | undefined
   onRegenerate: () => void
   onToolApproval?: ((approvalId: string, approved: boolean) => void) | undefined
-  onUserInput?:
-    | ((toolCallId: string, output: TaskUserInputResult) => void | PromiseLike<void>)
-    | undefined
+  onUserInput?: ((toolCallId: string, output: TaskUserInputResult) => void | PromiseLike<void>) | undefined
   running: boolean
-}
+}>
 
 function messageText(message: UIMessage) {
   return message.parts

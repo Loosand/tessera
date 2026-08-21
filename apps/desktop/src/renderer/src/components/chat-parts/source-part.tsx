@@ -15,10 +15,10 @@ import type { UIMessage } from "@tessera/ai/react"
 type MessagePart = UIMessage["parts"][number]
 type SourceMessagePart = Extract<MessagePart, { type: "source-document" | "source-url" }>
 
-interface SourcePartProps {
-  includeUrlSources?: boolean
-  parts: readonly MessagePart[]
-  streaming: boolean
+type SourcePartProps = {
+  readonly includeUrlSources?: boolean
+  readonly parts: readonly MessagePart[]
+  readonly streaming: boolean
 }
 
 function sourceLabel(url: string) {

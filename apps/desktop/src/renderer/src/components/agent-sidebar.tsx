@@ -17,10 +17,10 @@ import { Icon } from "@tessera/design-system/components/ui/icon"
 import { m, useReducedMotion } from "motion/react"
 import { motionSprings } from "../motion"
 
-interface AgentSidebarProps {
+type AgentSidebarProps = Readonly<{
   document: DocumentSnapshot | null
   onClose: () => void
-}
+}>
 
 export function AgentSidebar({ document, onClose }: AgentSidebarProps) {
   const shouldReduceMotion = useReducedMotion()

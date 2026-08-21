@@ -2,11 +2,12 @@
 
 > 代码源头：`packages/contracts/src/index.ts`、`packages/skills/src/index.ts`、
 > `packages/skills/builtins/`、`packages/ai/src/server/skill-instructions.ts`、
+> `packages/ai/src/server/task-interaction-tools.ts`、
 > `packages/database/schema.ts`、`apps/desktop/src/main/task-service.ts`、
 > `apps/desktop/src/renderer/src/components/task-composer.tsx`、
 > `apps/desktop/src/renderer/src/components/skill-management-page.tsx`
 >
-> 状态：部分实现。标准 `SKILL.md` 校验、内置注册表、渐进式加载、任务持久化、AI SDK Chat/Agent 注入和内置 Skill 管理页已实现；用户级/工作区级发现、安装、启停、版本、资源按需加载与第三方 Skill 管理尚未实现。
+> 状态：部分实现。标准 `SKILL.md` 校验、内置注册表、渐进式加载、任务持久化、AI SDK Chat/Agent 注入、研究提问/计划工具和内置 Skill 管理页已实现；用户级/工作区级发现、安装、启停、版本、资源按需加载与第三方 Skill 管理尚未实现。
 
 ## 地位
 
@@ -51,6 +52,14 @@ research/
      -> ToolLoopAgent（Agent）
 ```
 
+## 结构化交互
+
+Skill 负责告诉模型何时需要澄清、何时应先计划；共享运行时工具负责把这个意图变成稳定协议和专用界面，两者职责分离：
+
+- `request-user-input` 是无服务端 `execute` 的客户端工具。模型只有在歧义会实质改变研究方向时才调用；工具请求结束当前模型 turn，任务保存为等待输入，renderer 回填工具输出后自动开启下一 turn。
+- `publish-research-plan` 是无副作用的展示工具，只在研究 Skill 下注册。多步研究先发布目标、范围、交付物与最多八个研究问题，再继续使用当前模式已授权的搜索或工作区工具；简单事实问答不强制制造计划。
+- 专用工具输入和输出都由共享 schema 校验，并使用固定 React 组件呈现。它们不是任意 JSON UI，也不能注册新工具、修改权限或执行来自模型的组件代码。
+
 ## 权限边界
 
 Skill 描述符可以声明 `workspace.read`、`workspace.write` 或 `network.search` 等所需能力，但声明始终是需求，不是授权：
@@ -65,14 +74,14 @@ Skill 描述符可以声明 `workspace.read`、`workspace.write` 或 `network.se
 | 选择 | Skill | 当前作用 | 声明能力 |
 | --- | --- | --- | --- |
 | 问答 | 无 | 使用基础 Chat/Agent 指令 | 无 |
-| 研究 | `$research` | 明确问题、核验来源、区分事实/推断/不确定性 | 工作区读取、网络搜索 |
+| 研究 | `$research` | 必要时结构化澄清，发布多步研究计划，核验来源并区分事实/推断/不确定性 | 工作区读取、网络搜索 |
 | 写作 | `$writing` | 识别目标/读者、规划结构、起草或修订 Markdown | 工作区读取、工作区写入 |
 
-这两份正文目前只是可验证的最小骨架。后续打磨提示、评测和专用工具时，不改变注册、持久化、权限和注入协议。
+研究正文已接通澄清与计划工具，写作正文仍保持最小可验证工作流。后续打磨提示、评测和更多专用工具时，不改变注册、持久化、权限和注入协议。
 
 ## 管理界面
 
-一级导航中的“技能”页面直接读取同一个内置注册表，不维护第二份展示清单。当前可搜索并选择研究/写作，查看来源、权限声明和渐进式加载流程，也可以带着所选 Skill 创建独立 Chat 任务；任务首次发送前仍可在输入框中切换 Chat/Agent。
+一级导航中的“技能”页面直接读取同一个内置注册表，不维护第二份展示清单。当前可搜索并选择研究/写作，查看来源、权限声明和渐进式加载流程，也可以带着所选 Skill 创建独立 Chat 任务；任务首次发送前仍可在输入框的对话能力浮层切换 Skill，并通过紧凑原生选择器切换 Chat/Agent。
 
 内置 Skill 随应用发布并始终启用，所以页面只显示真实的“内置 / 已启用”状态，不提供无效开关。用户级与工作区级安装、启停及社区发现仍是规划能力；接入前不显示可点击但无实现的市场或安装动作。
 

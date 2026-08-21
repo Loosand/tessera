@@ -45,9 +45,9 @@ import {
   transformTextTopLevelBlock,
 } from "./top-level-block-operations"
 
-interface TopLevelBlockHandleProps {
-  active: boolean
-  editor: Editor
+type TopLevelBlockHandleProps = {
+  readonly active: boolean
+  readonly editor: Editor
 }
 
 interface BlockAnchor {
@@ -829,16 +829,16 @@ export function TopLevelBlockHandle({ active: editorActive, editor }: TopLevelBl
   )
 }
 
-interface BlockMenuButtonProps {
-  ariaExpanded?: boolean
-  ariaHasPopup?: React.AriaAttributes["aria-haspopup"]
-  destructive?: boolean
-  disabled?: boolean
-  icon: Parameters<typeof Icon>[0]["icon"]
-  label: string
-  onClick: () => void
-  onMouseEnter?: () => void
-  trailing?: React.ReactNode
+type BlockMenuButtonProps = {
+  readonly ariaExpanded?: boolean
+  readonly ariaHasPopup?: React.AriaAttributes["aria-haspopup"]
+  readonly destructive?: boolean
+  readonly disabled?: boolean
+  readonly icon: Parameters<typeof Icon>[0]["icon"]
+  readonly label: string
+  readonly onClick: () => void
+  readonly onMouseEnter?: () => void
+  readonly trailing?: React.ReactNode
 }
 
 function BlockMenuButton({
@@ -872,10 +872,10 @@ function BlockMenuButton({
   )
 }
 
-interface TransformMenuButtonProps {
-  kind: TextBlockKind
-  label: string
-  onClick: () => void
+type TransformMenuButtonProps = {
+  readonly kind: TextBlockKind
+  readonly label: string
+  readonly onClick: () => void
 }
 
 function TransformMenuButton({ kind, label, onClick }: TransformMenuButtonProps) {

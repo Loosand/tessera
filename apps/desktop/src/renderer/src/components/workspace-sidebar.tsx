@@ -62,14 +62,14 @@ type SidebarPane = "files" | "outline"
 type FileLayout = "tree" | "list"
 const MODIFIED_AT_FORMATTER = new Intl.DateTimeFormat("zh-CN", { month: "short", day: "numeric" })
 
-interface WorkspaceSidebarProps {
+type WorkspaceSidebarProps = Readonly<{
   activeSection: "tasks" | "files"
   activeTaskId: string | undefined
   workspace: WorkspaceInfo | null
-  tasks: TaskSessionSummary[]
-  recentWorkspaces: WorkspaceInfo[]
-  documents: WorkspaceDocumentEntry[]
-  directories: WorkspaceDirectoryEntry[]
+  tasks: readonly TaskSessionSummary[]
+  recentWorkspaces: readonly WorkspaceInfo[]
+  documents: readonly WorkspaceDocumentEntry[]
+  directories: readonly WorkspaceDirectoryEntry[]
   activePath: string | undefined
   activeContent: string
   onCollapse: () => void
@@ -95,7 +95,7 @@ interface WorkspaceSidebarProps {
   onRevealWorkspaceEntry: (relativePath: string) => void
   onCopyWorkspaceEntryPath: (relativePath: string) => void
   onSelectOutline: (index: number, line: number) => void
-}
+}>
 
 function NavigationRow({
   icon,

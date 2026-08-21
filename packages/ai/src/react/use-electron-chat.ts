@@ -96,12 +96,14 @@ export function shouldAutomaticallyContinueTask({ messages }: { messages: UIMess
     (lastIndex, part, index) => (part.type === "step-start" ? index : lastIndex),
     -1,
   )
-  return message.parts.slice(lastStepStartIndex + 1).some(
-    (part) =>
-      isUiToolPart(part) &&
-      uiToolName(part) === REQUEST_USER_INPUT_TOOL_NAME &&
-      (part.state === "output-available" || part.state === "output-error"),
-  )
+  return message.parts
+    .slice(lastStepStartIndex + 1)
+    .some(
+      (part) =>
+        isUiToolPart(part) &&
+        uiToolName(part) === REQUEST_USER_INPUT_TOOL_NAME &&
+        (part.state === "output-available" || part.state === "output-error"),
+    )
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

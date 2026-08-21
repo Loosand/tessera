@@ -15,15 +15,15 @@ import { ArrowDown01Icon } from "@tessera/design-system/components/icons"
 import { Button } from "@tessera/design-system/components/ui/button"
 import { Icon } from "@tessera/design-system/components/ui/icon"
 import { Popover, PopoverContent, PopoverTrigger } from "@tessera/design-system/components/ui/popover"
-import { useMemo, useState } from "react"
+import React, { useMemo, useState } from "react"
 import type { AvailableAiModel } from "../hooks/use-ai-models"
 
-interface ModelPickerProps {
+type ModelPickerProps = Readonly<{
   model: AvailableAiModel | undefined
   models: readonly AvailableAiModel[]
   onModelChange: (key: string) => void
   selectedModelKey: string
-}
+}>
 
 export function aiModelKey(model: Pick<AvailableAiModel, "configId" | "id">) {
   return `${model.configId}::${model.id}`

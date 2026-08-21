@@ -31,13 +31,13 @@ import { Icon } from "@tessera/design-system/components/ui/icon"
 import { Input } from "@tessera/design-system/components/ui/input"
 import { type FormEvent, type ReactElement, useState } from "react"
 
-interface TaskContextMenuProps {
+type TaskContextMenuProps = Readonly<{
   task: TaskSessionSummary
   trigger: ReactElement
   onDelete: (taskId: string) => Promise<boolean>
   onOpen: (task: TaskSessionSummary) => void
   onRename: (taskId: string, title: string) => Promise<boolean>
-}
+}>
 
 export function TaskContextMenu({ task, trigger, onDelete, onOpen, onRename }: TaskContextMenuProps) {
   const [renameOpen, setRenameOpen] = useState(false)

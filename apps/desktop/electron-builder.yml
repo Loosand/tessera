@@ -1,0 +1,43 @@
+appId: io.tessera.desktop
+productName: Tessera
+electronDist: node_modules/electron/dist
+
+directories:
+  output: dist
+  buildResources: build
+
+files:
+  - out/**/*
+  - package.json
+  - '!out/**/*.map'
+
+asar: true
+asarUnpack:
+  - node_modules/better-sqlite3/prebuilds/**/*
+
+npmRebuild: false
+
+mac:
+  category: public.app-category.productivity
+  identity: '-'
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  target:
+    - target: dmg
+      arch:
+        - arm64
+    - target: zip
+      arch:
+        - arm64
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+dmg:
+  title: ${productName} ${version}
+  contents:
+    - x: 140
+      y: 200
+    - x: 400
+      y: 200
+      type: link
+      path: /Applications

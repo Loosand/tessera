@@ -72,6 +72,7 @@ describe("任务交互 Part", () => {
     expect(markup).toContain("确认研究方向")
     expect(markup).toContain("荷马史诗《奥德赛》")
     expect(markup).toContain("回答后任务会自动继续")
+    expect(markup).toContain("关闭问题并继续任务")
     expect(markup).not.toContain("question-call")
   })
 

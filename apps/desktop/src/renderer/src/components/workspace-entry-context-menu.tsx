@@ -30,7 +30,7 @@ import {
 import { Icon } from "@tessera/design-system/components/ui/icon"
 import type { ReactElement } from "react"
 
-interface WorkspaceEntryContextMenuProps {
+type WorkspaceEntryContextMenuProps = Readonly<{
   kind: WorkspaceEntryKind
   relativePath: string
   trigger: ReactElement
@@ -41,7 +41,7 @@ interface WorkspaceEntryContextMenuProps {
   onOpen?: () => void
   onRename: () => void
   onReveal: () => void
-}
+}>
 
 function parentPath(relativePath: string) {
   const separator = relativePath.lastIndexOf("/")

@@ -20,12 +20,12 @@ import { ChatMarkdown } from "./chat-markdown"
 
 const MAX_RENDERED_DIFF_LINES = 2_000
 
-interface AgentChangeReviewProps {
-  approvalId: string
-  canDecide: boolean
-  loadPreview: (approvalId: string) => Promise<AgentChangePreview>
-  onDecision: (approved: boolean) => void
-  onOpenDocument?: ((path: string) => void) | undefined
+type AgentChangeReviewProps = {
+  readonly approvalId: string
+  readonly canDecide: boolean
+  readonly loadPreview: (approvalId: string) => Promise<AgentChangePreview>
+  readonly onDecision: (approved: boolean) => void
+  readonly onOpenDocument?: ((path: string) => void) | undefined
 }
 
 interface DiffRow {

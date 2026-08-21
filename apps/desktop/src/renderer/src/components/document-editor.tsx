@@ -22,7 +22,7 @@ const SourceCodeEditor = lazy(() =>
   import("./editor/source-code-editor").then((module) => ({ default: module.SourceCodeEditor })),
 )
 
-interface DocumentEditorProps {
+type DocumentEditorProps = Readonly<{
   document: DocumentSnapshot | null
   content: string
   hasWorkspace: boolean
@@ -38,7 +38,7 @@ interface DocumentEditorProps {
   onModeChange: (mode: DefaultEditorMode) => void
   onSave: () => Promise<boolean>
   onReload: () => void | Promise<void>
-}
+}>
 
 export function DocumentEditor({
   document,
