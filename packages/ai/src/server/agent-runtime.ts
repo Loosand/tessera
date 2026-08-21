@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 已解析供应商连接、当前 Skill、客户端交互/研究计划工具、完整 AI SDK UIMessage 历史、主进程注入的受限工作区能力与中止信号
- * [OUTPUT]: 注入当前 Skill instructions、每个用户请求至多暂停一次以消解核心语义歧义并可发布研究计划、受步骤/时间/token 边界约束且使用标准 toolApproval 的 AI SDK ToolLoopAgent 增量流
+ * [OUTPUT]: 注入当前 Skill instructions、使用供应商兼容对象 Schema 的工作区工具、受步骤/时间/token 边界约束且使用标准 toolApproval 的 AI SDK ToolLoopAgent 增量流
  * [POS]: @tessera/ai/server 中可读并可经人工批准修改 Markdown 的工作区 Agent 编排边界
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -52,14 +52,42 @@ export type ReadonlyWorkspaceAgentTools = {
   readonly searchWorkspaceText: (input: SearchWorkspaceTextInput, signal: AbortSignal) => Promise<unknown>
 }
 
-export type WorkspaceDocumentChangeInput = Readonly<{
-  baseContentHash?: string
-  baseModifiedAt?: number
-  content: string
-  operation: "create" | "update"
-  path: string
-  reason: string
-}>
+export const workspaceDocumentChangeInputSchema = z
+  .strictObject({
+    operation: z.enum(["create", "update"]).describe("创建新文档或更新已有文档"),
+    path: z.string().min(1).max(1_024).describe("要创建或更新的 Markdown 文件相对路径"),
+    content: z.string().max(262_144).describe("完整候选 Markdown 内容"),
+    reason: z.string().min(1).max(2_000).describe("本次修改的简短理由"),
+    baseModifiedAt: z
+      .number()
+      .nonnegative()
+      .optional()
+      .describe("更新已有文档时必填：读取文件时返回的 modifiedAt"),
+    baseContentHash: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/u)
+      .optional()
+      .describe("更新已有文档时必填：读取文件时返回的 contentHash"),
+  })
+  .superRefine((input, context) => {
+    if (input.operation !== "update") return
+    if (input.baseModifiedAt === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["baseModifiedAt"],
+        message: "更新已有文档必须提供 baseModifiedAt",
+      })
+    }
+    if (input.baseContentHash === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["baseContentHash"],
+        message: "更新已有文档必须提供 baseContentHash",
+      })
+    }
+  })
+
+export type WorkspaceDocumentChangeInput = Readonly<z.infer<typeof workspaceDocumentChangeInputSchema>>
 
 export type WorkspaceAgentTools = ReadonlyWorkspaceAgentTools & {
   readonly writeWorkspaceDocument: (
@@ -164,25 +192,7 @@ async function* runAiSdkAgent(
     "write-workspace-document": tool({
       description:
         "创建或更新工作区 Markdown 文档。调用会先展示完整候选内容和 Diff，只有用户明确批准后才执行。",
-      inputSchema: z.discriminatedUnion("operation", [
-        z.strictObject({
-          operation: z.literal("create"),
-          path: z.string().min(1).max(1_024).describe("要创建的 Markdown 文件相对路径"),
-          content: z.string().max(262_144).describe("完整候选 Markdown 内容"),
-          reason: z.string().min(1).max(2_000).describe("本次修改的简短理由"),
-        }),
-        z.strictObject({
-          operation: z.literal("update"),
-          path: z.string().min(1).max(1_024).describe("要更新的 Markdown 文件相对路径"),
-          content: z.string().max(262_144).describe("完整候选 Markdown 内容"),
-          reason: z.string().min(1).max(2_000).describe("本次修改的简短理由"),
-          baseModifiedAt: z.number().nonnegative().describe("读取文件时返回的 modifiedAt"),
-          baseContentHash: z
-            .string()
-            .regex(/^[a-f0-9]{64}$/u)
-            .describe("读取文件时返回的 contentHash"),
-        }),
-      ]),
+      inputSchema: workspaceDocumentChangeInputSchema,
       execute: (toolInput, options) =>
         workspaceTools.writeWorkspaceDocument(toolInput, {
           signal: options.abortSignal ?? abortSignal,

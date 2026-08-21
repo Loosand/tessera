@@ -117,7 +117,7 @@
 - 工具输入、资源相对路径、完成或失败状态通过版本化消息 Part 展示并持久化，不把冗长工具结果直接展开成消息正文。
 - 回答中的相对 Markdown 链接可跳转到文档和源码行；路径仍由主进程在真正读取时复核。
 - provider 的 reasoning ID 只保证步骤内有效，渲染层按消息内 Part 位置生成唯一 React key，避免多步骤流式追加时复用或复制旧思考节点。
-- `write-workspace-document` 使用 AI SDK `toolApproval`。审批请求到达 renderer 前，主进程把路径、基准内容/版本、完整候选内容、模型与工具调用冻结到 SQLite；聊天内可切换渲染后文档和源码 Diff。
+- `write-workspace-document` 使用 AI SDK `toolApproval`。工具 `inputSchema` 保持供应商兼容的顶层 `type: object`，并在运行时继续要求 update 携带读取时的版本与内容哈希；审批请求到达 renderer 前，主进程把路径、基准内容/版本、完整候选内容、模型与工具调用冻结到 SQLite；聊天内可切换渲染后文档和源码 Diff。
 - 批准后的新 turn 携带完整审批 Part；主进程对账冻结提案后，工具再次校验真实路径、内容哈希和磁盘版本并原子替换。拒绝不执行，冲突不覆盖，应用重启不会自动执行待审批写入。
 - `delegate-workspace-research` 按 AI SDK 子 Agent 模式运行独立只读上下文，只把摘要返回主 Agent；子 Agent 没有写工具或审批能力。
 - 删除、重命名、Shell 和 MCP 外部工具仍未注册；它们需要独立权限与配置面，不能借用 Markdown 写审批扩大能力。

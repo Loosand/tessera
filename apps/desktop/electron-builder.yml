@@ -41,7 +41,7 @@ mac:
   artifactName: ${productName}-${version}-${arch}.${ext}
 
 dmg:
-  format: ULMO
+  format: UDBZ
   title: ${productName} ${version}
   contents:
     - x: 140

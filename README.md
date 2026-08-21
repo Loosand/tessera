@@ -96,7 +96,7 @@ bun run dist:mac
 ```
 
 产物写入 `apps/desktop/dist/`。ad-hoc 签名构建仅用于本地或内部验证；公开分发需要 Developer ID 签名与 Apple 公证。
-发行脚本会拒绝未打包的工作区 TypeScript 运行时依赖，并只携带 Electron、编译产物和 SQLite 原生模块；macOS 发行包只保留中英语言资源，DMG 使用 ULMO 压缩。
+发行脚本会拒绝未打包的工作区 TypeScript 运行时依赖，并只携带 Electron、编译产物和 SQLite 原生模块；macOS 发行包只保留中英语言资源，DMG 使用 UDBZ 压缩。
 
 如果当前网络无法下载 Electron 预构建文件，可以在安装时临时指定镜像：
 
