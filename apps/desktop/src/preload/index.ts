@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 共享桌面 API 契约与 Electron IPC 渲染器
- * [OUTPUT]: 暴露在 window.tessera 上的冻结窄接口
+ * [OUTPUT]: 暴露在 window.tessera 上的冻结窄接口和关闭保存握手
  * [POS]: 主进程与沙箱渲染层之间的安全桥
  * [DOC]: docs/architecture.md
  *
@@ -16,6 +16,8 @@ import { contextBridge, ipcRenderer } from "electron"
 
 const api: DesktopApi = Object.freeze({
   getAppInfo: () => ipcRenderer.invoke(IPC_CHANNELS.appInfo),
+  cancelClose: () => ipcRenderer.send(IPC_CHANNELS.appCancelClose),
+  confirmClose: () => ipcRenderer.send(IPC_CHANNELS.appConfirmClose),
   getCurrentWorkspace: () => ipcRenderer.invoke(IPC_CHANNELS.workspaceCurrent),
   selectWorkspace: () => ipcRenderer.invoke(IPC_CHANNELS.workspaceSelect),
   listRecentWorkspaces: () => ipcRenderer.invoke(IPC_CHANNELS.workspaceRecent),
@@ -32,6 +34,11 @@ const api: DesktopApi = Object.freeze({
     const handler = (_event: Electron.IpcRendererEvent, change: WorkspaceChangeEvent) => listener(change)
     ipcRenderer.on(IPC_CHANNELS.workspaceChanged, handler)
     return () => ipcRenderer.removeListener(IPC_CHANNELS.workspaceChanged, handler)
+  },
+  onCloseRequested: (listener: () => void) => {
+    const handler = () => listener()
+    ipcRenderer.on(IPC_CHANNELS.appCloseRequested, handler)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.appCloseRequested, handler)
   },
 })
 

@@ -1,6 +1,6 @@
 /**
  * [INPUT]: Electron 生命周期、共享 IPC 契约与 Tessera 核心服务
- * [OUTPUT]: 安全配置的桌面窗口和已注册的 IPC 处理器
+ * [OUTPUT]: 安全配置、关闭保存握手和已注册 IPC 处理器的桌面窗口
  * [POS]: Electron 主进程入口与平台安全边界
  * [DOC]: docs/architecture.md
  *
@@ -57,7 +57,11 @@ interface WorkspaceSession {
 }
 
 const activeWorkspaces = new Map<number, WorkspaceSession>()
+const approvedWindowCloseIds = new Set<number>()
+const requestedWindowCloseIds = new Set<number>()
 let databaseClient: DatabaseClient | null = null
+let appQuitApproved = false
+let appQuitRequested = false
 
 function isSafeExternalUrl(value: string) {
   try {
@@ -84,6 +88,19 @@ function closeWorkspaceSession(webContentsId: number) {
   if (session.changeTimer) clearTimeout(session.changeTimer)
   session.watcher.close()
   activeWorkspaces.delete(webContentsId)
+}
+
+function requestWindowClose(window: BrowserWindow) {
+  const webContentsId = window.webContents.id
+  if (window.webContents.isDestroyed()) return
+  if (window.webContents.isLoadingMainFrame()) {
+    approvedWindowCloseIds.add(webContentsId)
+    window.close()
+    return
+  }
+  if (requestedWindowCloseIds.has(webContentsId)) return
+  requestedWindowCloseIds.add(webContentsId)
+  window.webContents.send(IPC_CHANNELS.appCloseRequested)
 }
 
 function shouldReportWorkspacePath(relativePath: string) {
@@ -316,6 +333,17 @@ function registerIpcHandlers() {
     })
 
   ipcMain.handle(IPC_CHANNELS.appInfo, getAppInfo)
+  ipcMain.on(IPC_CHANNELS.appCancelClose, (event) => {
+    requestedWindowCloseIds.delete(event.sender.id)
+    appQuitRequested = false
+  })
+  ipcMain.on(IPC_CHANNELS.appConfirmClose, (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender)
+    if (!window || !requestedWindowCloseIds.has(event.sender.id)) return
+    requestedWindowCloseIds.delete(event.sender.id)
+    approvedWindowCloseIds.add(event.sender.id)
+    window.close()
+  })
   ipcMain.handle(
     IPC_CHANNELS.workspaceCurrent,
     (event) => activeWorkspaces.get(event.sender.id)?.workspace ?? null,
@@ -430,6 +458,19 @@ function createWindow(initialWorkspace: WorkspaceInfo | null = null) {
     if (url !== currentUrl) event.preventDefault()
   })
   const webContentsId = window.webContents.id
+  window.on("close", (event) => {
+    if (approvedWindowCloseIds.delete(webContentsId)) return
+    event.preventDefault()
+    requestWindowClose(window)
+  })
+  window.on("closed", () => {
+    requestedWindowCloseIds.delete(webContentsId)
+    approvedWindowCloseIds.delete(webContentsId)
+    if (appQuitRequested && BrowserWindow.getAllWindows().length === 0) {
+      appQuitApproved = true
+      app.quit()
+    }
+  })
   if (initialWorkspace) installWorkspaceSession(window.webContents, initialWorkspace)
   window.webContents.on("destroyed", () => closeWorkspaceSession(webContentsId))
 
@@ -452,7 +493,20 @@ app.whenReady().then(() => {
   })
 })
 
-app.on("before-quit", () => {
+app.on("before-quit", (event) => {
+  if (appQuitApproved) return
+  const windows = BrowserWindow.getAllWindows()
+  if (windows.length === 0) {
+    appQuitApproved = true
+    return
+  }
+
+  event.preventDefault()
+  appQuitRequested = true
+  for (const window of windows) requestWindowClose(window)
+})
+
+app.on("will-quit", () => {
   for (const webContentsId of activeWorkspaces.keys()) closeWorkspaceSession(webContentsId)
   databaseClient?.close()
   databaseClient = null

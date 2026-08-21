@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 当前 Markdown 文档、草稿内容与保存操作
- * [OUTPUT]: 即时预览编辑、Markdown 源码以及冲突提示
+ * [INPUT]: 当前 Markdown 文档、草稿内容、模式保护与编辑器同步操作
+ * [OUTPUT]: 保活的即时预览/源码编辑器、大文档保护以及冲突提示
  * [POS]: 工作区主区域的文档编辑编排层
  * [DOC]: design.md
  *
@@ -12,7 +12,7 @@
 
 import type { DocumentSnapshot } from "@tessera/contracts"
 import { Button } from "@tessera/design-system/components/ui/button"
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import type { DefaultEditorMode } from "../hooks/use-app-preferences"
 import { RichTextEditor } from "./editor/rich-text-editor"
 
@@ -22,10 +22,13 @@ interface DocumentEditorProps {
   hasWorkspace: boolean
   isLoading: boolean
   hasExternalConflict: boolean
+  isLargeDocumentGuarded: boolean
   mode: DefaultEditorMode
   spellCheck: boolean
   onSelectWorkspace: () => void
-  onContentChange: (content: string) => void
+  onAllowLargeDocumentRich: () => void
+  onContentChange: (documentPath: string, content: string) => void
+  onFlushPendingEditsReady: (flush: (() => void) | null) => void
   onModeChange: (mode: DefaultEditorMode) => void
   onSave: () => Promise<boolean>
   onReload: () => void | Promise<void>
@@ -37,14 +40,26 @@ export function DocumentEditor({
   hasWorkspace,
   isLoading,
   hasExternalConflict,
+  isLargeDocumentGuarded,
   mode,
   spellCheck,
   onSelectWorkspace,
+  onAllowLargeDocumentRich,
   onContentChange,
+  onFlushPendingEditsReady,
   onModeChange,
   onSave,
   onReload,
 }: DocumentEditorProps) {
+  const [richMountedDocumentPath, setRichMountedDocumentPath] = useState<string | null>(null)
+  const documentPath = document?.relativePath
+
+  useEffect(() => {
+    if (mode === "rich" && documentPath && !isLargeDocumentGuarded) {
+      setRichMountedDocumentPath(documentPath)
+    }
+  }, [documentPath, isLargeDocumentGuarded, mode])
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
@@ -96,6 +111,9 @@ export function DocumentEditor({
     )
   }
 
+  const shouldRenderRichEditor =
+    !isLargeDocumentGuarded && (mode === "rich" || richMountedDocumentPath === document.relativePath)
+
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {hasExternalConflict ? (
@@ -107,25 +125,42 @@ export function DocumentEditor({
         </div>
       ) : null}
 
+      {isLargeDocumentGuarded ? (
+        <div className="flex items-center justify-between gap-4 border-b border-border bg-muted/45 px-4 py-2 text-xs text-muted-foreground">
+          <span>文档较大，已使用 Markdown 源码模式以保持输入流畅。</span>
+          <Button
+            variant="outline"
+            size="xs"
+            className="h-6 shrink-0 px-2 text-[11px]"
+            onClick={onAllowLargeDocumentRich}
+          >
+            仍使用即时预览
+          </Button>
+        </div>
+      ) : null}
+
       <div className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-background">
-        {mode === "source" ? (
-          <textarea
-            data-source-editor
-            className="mx-auto block min-h-full w-full max-w-205 resize-none border-0 bg-transparent px-[clamp(24px,6vw,64px)] pt-12 pb-[40vh] font-mono text-[13px] leading-6 text-foreground outline-none"
-            aria-label={`编辑 ${document.name} 源码`}
-            value={content}
-            onChange={(event) => onContentChange(event.currentTarget.value)}
-            spellCheck={spellCheck}
-          />
-        ) : (
-          <RichTextEditor
-            key={document.relativePath}
-            content={content}
-            documentName={document.name}
-            spellCheck={spellCheck}
-            onContentChange={onContentChange}
-          />
-        )}
+        <textarea
+          data-source-editor
+          className={`${mode === "source" ? "block" : "hidden"} mx-auto min-h-full w-full max-w-205 resize-none border-0 bg-transparent px-[clamp(24px,6vw,64px)] pt-12 pb-[40vh] font-mono text-[13px] leading-6 text-foreground outline-none`}
+          aria-label={`编辑 ${document.name} 源码`}
+          value={content}
+          onChange={(event) => onContentChange(document.relativePath, event.currentTarget.value)}
+          spellCheck={spellCheck}
+        />
+        {shouldRenderRichEditor ? (
+          <div className={mode === "rich" ? "min-h-full" : "hidden"}>
+            <RichTextEditor
+              active={mode === "rich"}
+              content={content}
+              documentName={document.name}
+              documentPath={document.relativePath}
+              spellCheck={spellCheck}
+              onContentChange={onContentChange}
+              onFlushPendingEditsReady={onFlushPendingEditsReady}
+            />
+          </div>
+        ) : null}
       </div>
     </div>
   )

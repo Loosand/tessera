@@ -1,6 +1,6 @@
 /**
- * [INPUT]: Electron 桌面应用当前需要的跨进程数据形状
- * [OUTPUT]: IPC 频道、应用信息与桌面 API 类型契约
+ * [INPUT]: Electron 桌面应用当前需要的跨进程数据与生命周期形状
+ * [OUTPUT]: IPC 频道、应用信息、关闭握手与桌面 API 类型契约
  * [POS]: 应用和共享包共同依赖的底层契约入口
  * [DOC]: docs/architecture.md
  *
@@ -12,6 +12,9 @@
 
 export const IPC_CHANNELS = {
   appInfo: "app:info",
+  appCancelClose: "app:cancel-close",
+  appCloseRequested: "app:close-requested",
+  appConfirmClose: "app:confirm-close",
   workspaceCurrent: "workspace:current",
   workspaceSelect: "workspace:select",
   workspaceRecent: "workspace:recent",
@@ -58,6 +61,8 @@ export type DocumentWriteResult =
 
 export interface DesktopApi {
   getAppInfo(): Promise<AppInfo>
+  cancelClose(): void
+  confirmClose(): void
   getCurrentWorkspace(): Promise<WorkspaceInfo | null>
   selectWorkspace(): Promise<WorkspaceInfo | null>
   listRecentWorkspaces(): Promise<WorkspaceInfo[]>
@@ -73,4 +78,5 @@ export interface DesktopApi {
     expectedModifiedAt: number,
   ): Promise<DocumentWriteResult>
   onWorkspaceChanged(listener: (event: WorkspaceChangeEvent) => void): () => void
+  onCloseRequested(listener: () => void): () => void
 }

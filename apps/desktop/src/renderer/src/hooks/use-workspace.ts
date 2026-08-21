@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 预加载层提供的工作区、文件监听与文档读写 API
- * [OUTPUT]: 当前工作区、文档草稿、冲突状态和安全保存操作
+ * [INPUT]: 预加载层提供的工作区、文件监听、窗口关闭与文档读写 API
+ * [OUTPUT]: 当前工作区、文档草稿、编辑器 flush 注册、冲突状态和串行保存操作
  * [POS]: 渲染层工作区会话的单一状态入口
  * [DOC]: docs/architecture.md
  *
@@ -43,14 +43,25 @@ export function useWorkspace() {
   const activeDocumentRef = useRef(activeDocument)
   const draftContentRef = useRef(draftContent)
   const isDirtyRef = useRef(isDirty)
-  const savePromiseRef = useRef<Promise<boolean> | null>(null)
+  const externalDocumentRef = useRef(externalDocument)
+  const pendingEditsFlusherRef = useRef<(() => void) | null>(null)
+  const saveDrainPromiseRef = useRef<Promise<boolean> | null>(null)
   const navigationRef = useRef(navigation)
 
   workspaceRef.current = workspace
   activeDocumentRef.current = activeDocument
   draftContentRef.current = draftContent
   isDirtyRef.current = isDirty
+  externalDocumentRef.current = externalDocument
   navigationRef.current = navigation
+
+  const flushPendingEdits = useCallback(() => {
+    pendingEditsFlusherRef.current?.()
+  }, [])
+
+  const registerPendingEditsFlusher = useCallback((flush: (() => void) | null) => {
+    pendingEditsFlusherRef.current = flush
+  }, [])
 
   const commitNavigation = useCallback((nextNavigation: NavigationState) => {
     navigationRef.current = nextNavigation
@@ -81,6 +92,7 @@ export function useWorkspace() {
     setActiveDocument(document)
     setDraftContent(document?.content ?? "")
     setIsDirty(false)
+    externalDocumentRef.current = null
     setExternalDocument(null)
     setSaveStatus(document ? "saved" : "idle")
   }, [])
@@ -127,49 +139,59 @@ export function useWorkspace() {
     [applyDocument, pushNavigation, resetNavigation],
   )
 
-  const saveDocument = useCallback(async () => {
-    const desktopApi = window.tessera
-    const document = activeDocumentRef.current
-    if (!desktopApi || !document || !isDirtyRef.current) return true
-    if (savePromiseRef.current) return savePromiseRef.current
+  const saveDocument = useCallback(() => {
+    flushPendingEdits()
+    if (saveDrainPromiseRef.current) return saveDrainPromiseRef.current
 
-    const contentToSave = draftContentRef.current
-    setSaveStatus("saving")
-    setError(null)
-    const promise = desktopApi
-      .writeDocument(document.relativePath, contentToSave, document.modifiedAt)
-      .then((result) => {
-        if (result.status === "conflict") {
-          setExternalDocument(result.document)
-          setSaveStatus("conflict")
+    const drainPromise = (async () => {
+      const desktopApi = window.tessera
+      if (!desktopApi) return true
+
+      while (isDirtyRef.current) {
+        const document = activeDocumentRef.current
+        if (!document || externalDocumentRef.current) return false
+
+        const contentToSave = draftContentRef.current
+        setSaveStatus("saving")
+        setError(null)
+        try {
+          const result = await desktopApi.writeDocument(
+            document.relativePath,
+            contentToSave,
+            document.modifiedAt,
+          )
+          if (result.status === "conflict") {
+            externalDocumentRef.current = result.document
+            setExternalDocument(result.document)
+            setSaveStatus("conflict")
+            return false
+          }
+
+          if (activeDocumentRef.current?.relativePath === result.document.relativePath) {
+            activeDocumentRef.current = result.document
+            setActiveDocument(result.document)
+            if (draftContentRef.current === contentToSave) {
+              isDirtyRef.current = false
+              setIsDirty(false)
+              setSaveStatus("saved")
+            } else {
+              setSaveStatus("dirty")
+            }
+          }
+        } catch (cause) {
+          setSaveStatus("error")
+          setError(errorMessage(cause))
           return false
         }
+      }
+      return true
+    })().finally(() => {
+      saveDrainPromiseRef.current = null
+    })
 
-        if (activeDocumentRef.current?.relativePath === result.document.relativePath) {
-          activeDocumentRef.current = result.document
-          setActiveDocument(result.document)
-          if (draftContentRef.current === contentToSave) {
-            isDirtyRef.current = false
-            setIsDirty(false)
-            setSaveStatus("saved")
-          } else {
-            setSaveStatus("dirty")
-          }
-        }
-        return true
-      })
-      .catch((cause) => {
-        setSaveStatus("error")
-        setError(errorMessage(cause))
-        return false
-      })
-      .finally(() => {
-        savePromiseRef.current = null
-      })
-
-    savePromiseRef.current = promise
-    return promise
-  }, [])
+    saveDrainPromiseRef.current = drainPromise
+    return drainPromise
+  }, [flushPendingEdits])
 
   useEffect(() => {
     const desktopApi = window.tessera
@@ -201,9 +223,30 @@ export function useWorkspace() {
     const desktopApi = window.tessera
     if (!desktopApi) return
 
-    return desktopApi.onWorkspaceChanged(() => {
+    return desktopApi.onCloseRequested(() => {
+      void Promise.resolve()
+        .then(saveDocument)
+        .then((saved) => {
+          if (saved) desktopApi.confirmClose()
+          else desktopApi.cancelClose()
+        })
+        .catch((cause) => {
+          setError(errorMessage(cause))
+          desktopApi.cancelClose()
+        })
+    })
+  }, [saveDocument])
+
+  useEffect(() => {
+    const desktopApi = window.tessera
+    if (!desktopApi) return
+
+    return desktopApi.onWorkspaceChanged((change) => {
       const currentWorkspace = workspaceRef.current
       if (!currentWorkspace) return
+
+      const currentPath = activeDocumentRef.current?.relativePath
+      if (currentPath && change.paths.includes(currentPath)) flushPendingEdits()
 
       void desktopApi
         .listWorkspaceDocuments()
@@ -222,7 +265,8 @@ export function useWorkspace() {
 
           const diskDocument = await desktopApi.readDocument(currentDocument.relativePath)
           if (diskDocument.modifiedAt === activeDocumentRef.current?.modifiedAt) return
-          if (isDirtyRef.current || savePromiseRef.current) {
+          if (isDirtyRef.current || saveDrainPromiseRef.current) {
+            externalDocumentRef.current = diskDocument
             setExternalDocument(diskDocument)
             setSaveStatus("conflict")
             return
@@ -231,7 +275,7 @@ export function useWorkspace() {
         })
         .catch((cause) => setError(errorMessage(cause)))
     })
-  }, [applyDocument])
+  }, [applyDocument, flushPendingEdits])
 
   const selectWorkspace = useCallback(async () => {
     const desktopApi = window.tessera
@@ -371,17 +415,15 @@ export function useWorkspace() {
     }
   }, [applyDocument, commitNavigation, saveDocument])
 
-  const updateDraft = useCallback(
-    (content: string) => {
-      const changed = content !== activeDocumentRef.current?.content
-      draftContentRef.current = content
-      isDirtyRef.current = changed
-      setDraftContent(content)
-      setIsDirty(changed)
-      if (!externalDocument) setSaveStatus(changed ? "dirty" : "saved")
-    },
-    [externalDocument],
-  )
+  const updateDraft = useCallback((documentPath: string, content: string) => {
+    if (documentPath !== activeDocumentRef.current?.relativePath) return
+    const changed = content !== activeDocumentRef.current?.content
+    draftContentRef.current = content
+    isDirtyRef.current = changed
+    setDraftContent(content)
+    setIsDirty(changed)
+    if (!externalDocumentRef.current) setSaveStatus(changed ? "dirty" : "saved")
+  }, [])
 
   const reloadDocument = useCallback(async () => {
     const desktopApi = window.tessera
@@ -418,6 +460,8 @@ export function useWorkspace() {
     createDocument,
     renameActiveDocument,
     updateDraft,
+    flushPendingEdits,
+    registerPendingEditsFlusher,
     saveDocument,
     reloadDocument,
   }
