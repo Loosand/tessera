@@ -1,8 +1,8 @@
 /**
- * [INPUT]: Electron 生命周期、共享 IPC 契约、AI 配置/模型服务、safeStorage 与 Tessera 核心服务
- * [OUTPUT]: 受限工作区条目操作、持久化 AI 配置、关闭保存握手和桌面窗口
+ * [INPUT]: Electron 生命周期、共享 IPC 契约、AI Chat/Agent 配置、Agent 变更服务、模型服务、safeStorage 与 Tessera 核心服务
+ * [OUTPUT]: 受限工作区条目/Agent 工具、SQLite 可恢复后台 AI 运行、Diff 审批、持久化 AI 配置/任务会话、关闭保存握手和桌面窗口
  * [POS]: Electron 主进程入口与平台安全边界
- * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/database.md
+ * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/database.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -19,18 +19,21 @@ import {
   AiProviderConfigError,
   AiProviderConnectionError,
   listAiProviderModels,
+  streamAiAgent,
   streamAiChat,
 } from "@tessera/ai/server"
 import type { DesktopApi } from "@tessera/contracts"
 import {
   type AiChatStartInput,
   type AiChatStreamChunk,
+  type AiChatStreamEvent,
   type AiProviderConnectionInput,
   type AiProviderId,
   type AiProviderSaveInput,
   type DocumentSnapshot,
   type DocumentWriteResult,
   IPC_CHANNELS,
+  type TaskSessionSaveInput,
   type WorkspaceDirectoryEntry,
   type WorkspaceDocumentEntry,
   type WorkspaceEntryKind,
@@ -38,12 +41,18 @@ import {
 } from "@tessera/contracts"
 import { createAppInfo } from "@tessera/core"
 import {
+  appendTaskRunEvent,
   type DatabaseClient,
+  findLatestTaskRun,
   findMostRecentWorkspace,
   findWorkspaceById,
+  finishTaskRun,
+  hideRecentWorkspace,
+  listRunningTaskRuns,
   listRecentWorkspaces,
   openDatabase,
   saveWorkspace,
+  startTaskRun,
 } from "@tessera/database"
 import {
   BrowserWindow,
@@ -57,6 +66,9 @@ import {
   shell,
 } from "electron"
 import { type DesktopAiService, createDesktopAiService } from "./ai-service"
+import { type AgentChangeService, createAgentChangeService } from "./agent-change-service"
+import { createReadonlyWorkspaceAgentTools } from "./read-only-agent-tools"
+import { type DesktopTaskService, createDesktopTaskService } from "./task-service"
 
 const APP_USER_MODEL_ID = "com.tessera.desktop"
 const MAIN_DIRECTORY = dirname(fileURLToPath(import.meta.url))
@@ -76,19 +88,47 @@ const approvedWindowCloseIds = new Set<number>()
 const requestedWindowCloseIds = new Set<number>()
 let databaseClient: DatabaseClient | null = null
 let desktopAiService: DesktopAiService | null = null
+let desktopTaskService: DesktopTaskService | null = null
+let agentChangeService: AgentChangeService | null = null
 let appQuitApproved = false
 let appQuitRequested = false
 
 interface ActiveAiChat {
+  active: boolean
   abortController: AbortController
+  configId: string
+  events: AiChatStreamEvent[]
+  modelId: string
+  providerId: AiProviderId
+  requestId: string
+  retentionTimer: NodeJS.Timeout | null
+  taskId: string
   webContentsId: number
 }
 
 const activeAiChats = new Map<string, ActiveAiChat>()
+const aiChatRunsByTask = new Map<string, ActiveAiChat>()
+const AI_CHAT_RUN_RETENTION_MS = 30 * 60 * 1000
+
+function releaseAiChatRun(run: ActiveAiChat) {
+  if (run.retentionTimer) clearTimeout(run.retentionTimer)
+  if (activeAiChats.get(run.requestId) === run) activeAiChats.delete(run.requestId)
+  if (aiChatRunsByTask.get(run.taskId) === run) aiChatRunsByTask.delete(run.taskId)
+}
 
 function requireDesktopAiService(): DesktopAiService {
   if (!desktopAiService) throw new AiProviderConfigError("AI 服务尚未就绪。")
   return desktopAiService
+}
+
+function requireDesktopTaskService(): DesktopTaskService {
+  if (!desktopTaskService) throw new Error("任务服务尚未就绪。")
+  return desktopTaskService
+}
+
+function requireAgentChangeService(): AgentChangeService {
+  if (!agentChangeService) throw new Error("Agent 变更服务尚未就绪。")
+  return agentChangeService
 }
 
 function notifyAiProviderConfigsChanged() {
@@ -104,11 +144,60 @@ function resolveAiChatInput(input: AiChatStartInput) {
   return requireDesktopAiService().resolveChatInput(input)
 }
 
+async function streamAiTask(
+  input: ReturnType<typeof resolveAiChatInput>,
+  workspace: WorkspaceInfo | null,
+  options: Parameters<typeof streamAiChat>[1],
+) {
+  if (input.mode === "chat") return streamAiChat(input, options)
+  if (!workspace) throw new AiProviderConfigError("Agent 任务必须在已打开的工作区中运行。")
+  const readonlyTools = createReadonlyWorkspaceAgentTools({
+    rootPath: workspace.rootPath,
+    ...(input.currentDocumentPath ? { currentDocumentPath: input.currentDocumentPath } : {}),
+  })
+  return streamAiAgent(input, {
+    ...options,
+    workspaceName: workspace.name,
+    tools: {
+      ...readonlyTools,
+      writeWorkspaceDocument: (change, context) =>
+        requireAgentChangeService().execute(
+          input.taskId,
+          context.toolCallId,
+          change,
+          workspace.rootPath,
+          context.signal,
+        ),
+    },
+  })
+}
+
+function recoverInterruptedAiRuns(client: DatabaseClient) {
+  for (const run of listRunningTaskRuns(client)) {
+    const sequence = run.lastSequence + 1
+    const event: AiChatStreamEvent = {
+      requestId: run.requestId,
+      taskId: run.taskId,
+      sequence,
+      chunk: {
+        type: "error",
+        errorText: "应用上次运行时意外中断，已恢复中断前的可见进度；磁盘写入不会自动重放，请继续或重试。",
+      },
+    }
+    appendTaskRunEvent(client, {
+      requestId: run.requestId,
+      sequence,
+      payloadJson: JSON.stringify(event),
+    })
+    finishTaskRun(client, run.requestId, "interrupted")
+  }
+}
+
 function abortAiChatsForWebContents(webContentsId: number) {
-  for (const [requestId, chat] of activeAiChats) {
+  for (const chat of activeAiChats.values()) {
     if (chat.webContentsId !== webContentsId) continue
     chat.abortController.abort("窗口已关闭")
-    activeAiChats.delete(requestId)
+    releaseAiChatRun(chat)
   }
 }
 
@@ -518,9 +607,9 @@ function registerIpcHandlers() {
       }
     }
   })
-  ipcMain.handle(IPC_CHANNELS.aiProviderDeleteConfig, (_event, providerId: AiProviderId) => {
+  ipcMain.handle(IPC_CHANNELS.aiProviderDeleteConfig, (_event, configId: string) => {
     try {
-      requireDesktopAiService().deleteConfig(providerId)
+      requireDesktopAiService().deleteConfig(configId)
       notifyAiProviderConfigsChanged()
       return { ok: true }
     } catch (error) {
@@ -537,6 +626,7 @@ function registerIpcHandlers() {
     } catch (error) {
       return {
         ok: false,
+        ...(error instanceof AiProviderConnectionError ? { code: error.code } : {}),
         error:
           error instanceof AiProviderConnectionError || error instanceof AiProviderConfigError
             ? error.message
@@ -544,37 +634,157 @@ function registerIpcHandlers() {
       }
     }
   })
-  ipcMain.handle(IPC_CHANNELS.aiChatStart, (event, input: AiChatStartInput) => {
+  ipcMain.handle(IPC_CHANNELS.aiChatStart, async (event, input: AiChatStartInput) => {
     try {
       if (activeAiChats.has(input.requestId)) {
         throw new AiProviderConfigError("这个对话请求正在运行，请先停止后重试。")
       }
+      const previousRun = aiChatRunsByTask.get(input.taskId)
+      if (previousRun?.active) {
+        throw new AiProviderConfigError("这个任务正在生成，请等待完成或先停止。")
+      }
+      if (previousRun) releaseAiChatRun(previousRun)
+      const workspace = activeWorkspaces.get(event.sender.id)?.workspace ?? null
+      requireDesktopTaskService().authorizeTurn(input.taskId, input.mode, workspace)
+      if (input.mode === "agent") {
+        requireAgentChangeService().reconcileDecisions(input.taskId, input.messages)
+      }
       const runtimeInput = resolveAiChatInput(input)
+      if (!databaseClient) throw new AiProviderConfigError("本地任务数据库尚未就绪。")
+      const runDatabase = databaseClient
       const abortController = new AbortController()
       const webContentsId = event.sender.id
       let sequence = 0
-      activeAiChats.set(input.requestId, { abortController, webContentsId })
+      const run: ActiveAiChat = {
+        active: true,
+        abortController,
+        configId: input.configId,
+        events: [],
+        modelId: input.modelId,
+        providerId: input.providerId,
+        requestId: input.requestId,
+        retentionTimer: null,
+        taskId: input.taskId,
+        webContentsId,
+      }
+      activeAiChats.set(input.requestId, run)
+      aiChatRunsByTask.set(input.taskId, run)
+      startTaskRun(runDatabase, {
+        requestId: input.requestId,
+        taskId: input.taskId,
+        configId: input.configId,
+        providerId: input.providerId,
+        modelId: input.modelId,
+        startedAt: new Date(),
+      })
 
-      const emit = (chunk: AiChatStreamChunk) => {
-        if (event.sender.isDestroyed()) return
+      const pendingToolInputs = new Map<string, { input: unknown; toolName: string }>()
+
+      const emit = async (chunk: AiChatStreamChunk) => {
+        if (chunk.type === "tool-input-available") {
+          pendingToolInputs.set(chunk.toolCallId, { input: chunk.input, toolName: chunk.toolName })
+        }
+        if (chunk.type === "tool-approval-request") {
+          const pending = pendingToolInputs.get(chunk.toolCallId)
+          if (pending?.toolName === "write-workspace-document") {
+            if (!workspace) throw new Error("Agent 变更提案缺少工作区。")
+            await requireAgentChangeService().register({
+              approvalId: chunk.approvalId,
+              taskId: input.taskId,
+              requestId: input.requestId,
+              toolCallId: chunk.toolCallId,
+              providerId: input.providerId,
+              modelId: input.modelId,
+              rootPath: workspace.rootPath,
+              change: pending.input as Parameters<AgentChangeService["register"]>[0]["change"],
+            })
+          }
+        }
         sequence += 1
-        event.sender.send(IPC_CHANNELS.aiChatEvent, {
+        const streamEvent: AiChatStreamEvent = {
           requestId: input.requestId,
           sequence,
           chunk,
+          taskId: input.taskId,
+        }
+        run.events.push(streamEvent)
+        appendTaskRunEvent(runDatabase, {
+          requestId: input.requestId,
+          sequence,
+          payloadJson: JSON.stringify(streamEvent),
         })
+        if (!event.sender.isDestroyed()) event.sender.send(IPC_CHANNELS.aiChatEvent, streamEvent)
       }
 
-      void streamAiChat(runtimeInput, { abortSignal: abortController.signal, onChunk: emit })
-        .catch((error) => emit({ type: "error", errorText: aiChatErrorMessage(error) }))
+      void streamAiTask(runtimeInput, workspace, { abortSignal: abortController.signal, onChunk: emit })
+        .catch(async (error) => {
+          const lastType = run.events.at(-1)?.chunk.type
+          if (lastType === "finish" || lastType === "abort" || lastType === "error") return
+          if (abortController.signal.aborted) {
+            await emit({ type: "abort", reason: String(abortController.signal.reason ?? "生成已停止") })
+          } else {
+            await emit({ type: "error", errorText: aiChatErrorMessage(error) })
+          }
+        })
         .finally(() => {
-          const active = activeAiChats.get(input.requestId)
-          if (active?.abortController === abortController) activeAiChats.delete(input.requestId)
+          run.active = false
+          const lastType = run.events.at(-1)?.chunk.type
+          finishTaskRun(
+            runDatabase,
+            input.requestId,
+            lastType === "finish" ? "completed" : lastType === "abort" ? "cancelled" : "failed",
+          )
+          if (activeAiChats.get(input.requestId) === run) activeAiChats.delete(input.requestId)
+          if (aiChatRunsByTask.get(input.taskId) !== run) return
+          run.retentionTimer = setTimeout(() => releaseAiChatRun(run), AI_CHAT_RUN_RETENTION_MS)
+          run.retentionTimer.unref()
         })
       return { ok: true }
     } catch (error) {
       return { ok: false, error: aiChatErrorMessage(error) }
     }
+  })
+  ipcMain.handle(IPC_CHANNELS.aiChatResume, (event, taskId: string) => {
+    try {
+      const task = requireDesktopTaskService().read(taskId)
+      const run = aiChatRunsByTask.get(taskId)
+      if (run && run.webContentsId === event.sender.id) {
+        return {
+          ok: true,
+          run: {
+            active: run.active,
+            configId: run.configId,
+            events: [...run.events],
+            modelId: run.modelId,
+            providerId: run.providerId,
+            requestId: run.requestId,
+          },
+        }
+      }
+      if (task.status !== "running" || !databaseClient) return { ok: true, run: null }
+      const persisted = findLatestTaskRun(databaseClient, taskId)
+      if (!persisted) return { ok: true, run: null }
+      return {
+        ok: true,
+        run: {
+          active: persisted.status === "running",
+          configId: persisted.configId ?? persisted.providerId,
+          events: persisted.events.map(
+            (record) => JSON.parse(record.payloadJson) as AiChatStreamEvent,
+          ),
+          modelId: persisted.modelId,
+          providerId: persisted.providerId as AiProviderId,
+          requestId: persisted.requestId,
+        },
+      }
+    } catch {
+      return { ok: false, error: "无法恢复这个任务的生成流。" }
+    }
+  })
+  ipcMain.handle(IPC_CHANNELS.agentChangePreview, (event, taskId: string, approvalId: string) => {
+    const workspace = activeWorkspaces.get(event.sender.id)?.workspace ?? null
+    requireDesktopTaskService().authorizeTurn(taskId, "agent", workspace)
+    return requireAgentChangeService().preview(taskId, approvalId)
   })
   ipcMain.on(IPC_CHANNELS.aiChatCancel, (event, requestId: string) => {
     const active = activeAiChats.get(requestId)
@@ -625,6 +835,51 @@ function registerIpcHandlers() {
       .map(workspaceFromRecord)
       .filter((workspace): workspace is WorkspaceInfo => workspace !== null)
   })
+  ipcMain.handle(IPC_CHANNELS.taskListRecent, () => {
+    return requireDesktopTaskService().listRecent()
+  })
+  ipcMain.handle(IPC_CHANNELS.taskListWorkspace, (event) => {
+    const workspace = workspaceForEvent(event)
+    return requireDesktopTaskService().listWorkspace(workspace.id)
+  })
+  ipcMain.handle(IPC_CHANNELS.taskRead, (_event, taskId: string) => {
+    return requireDesktopTaskService().read(taskId)
+  })
+  ipcMain.handle(IPC_CHANNELS.taskSave, (event, input: TaskSessionSaveInput) => {
+    const workspace = activeWorkspaces.get(event.sender.id)?.workspace ?? null
+    const snapshot = requireDesktopTaskService().save(input, workspace)
+    const run = aiChatRunsByTask.get(input.id)
+    if (snapshot.status !== "running" && run && !run.active) releaseAiChatRun(run)
+    return snapshot
+  })
+  ipcMain.handle(IPC_CHANNELS.taskRename, (_event, taskId: string, title: string) => {
+    return requireDesktopTaskService().rename(taskId, title)
+  })
+  ipcMain.handle(IPC_CHANNELS.taskDelete, async (event, taskId: string) => {
+    const taskService = requireDesktopTaskService()
+    const task = taskService.read(taskId)
+    const options = {
+      type: "warning",
+      title: "删除对话",
+      message: `要删除“${task.title}”吗？`,
+      detail: "该对话及其本地消息将被删除，无法恢复。",
+      buttons: ["删除", "取消"],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+    } satisfies Electron.MessageBoxOptions
+    const window = BrowserWindow.fromWebContents(event.sender)
+    const result = window
+      ? await dialog.showMessageBox(window, options)
+      : await dialog.showMessageBox(options)
+    if (result.response !== 0) return false
+    const run = aiChatRunsByTask.get(taskId)
+    if (run) {
+      run.abortController.abort("任务已删除")
+      releaseAiChatRun(run)
+    }
+    return taskService.delete(taskId)
+  })
   ipcMain.handle(IPC_CHANNELS.workspaceOpenRecent, (event, workspaceId: string) => {
     if (!databaseClient || !workspaceId) throw new Error("找不到这个最近工作区。")
     const record = findWorkspaceById(databaseClient, workspaceId)
@@ -636,6 +891,39 @@ function registerIpcHandlers() {
   })
   ipcMain.handle(IPC_CHANNELS.workspaceReveal, (event) => {
     shell.showItemInFolder(workspaceForEvent(event).rootPath)
+  })
+  ipcMain.handle(IPC_CHANNELS.workspaceRevealRecent, (_event, workspaceId: string) => {
+    if (!databaseClient || !workspaceId) throw new Error("找不到这个最近工作区。")
+    const record = findWorkspaceById(databaseClient, workspaceId)
+    const workspace = record ? workspaceFromRecord(record) : null
+    if (!workspace) throw new Error("工作区文件夹已经移动或不可访问。")
+    shell.showItemInFolder(workspace.rootPath)
+  })
+  ipcMain.handle(IPC_CHANNELS.workspaceCopyPath, (_event, workspaceId: string) => {
+    if (!databaseClient || !workspaceId) throw new Error("找不到这个最近工作区。")
+    const record = findWorkspaceById(databaseClient, workspaceId)
+    if (!record) throw new Error("找不到这个最近工作区。")
+    clipboard.writeText(record.rootPath)
+  })
+  ipcMain.handle(IPC_CHANNELS.workspaceRemoveRecent, async (event, workspaceId: string) => {
+    if (!databaseClient || !workspaceId) throw new Error("找不到这个最近工作区。")
+    const record = findWorkspaceById(databaseClient, workspaceId)
+    if (!record) throw new Error("找不到这个最近工作区。")
+    const options = {
+      type: "question",
+      title: "移除最近工作区",
+      message: `要从最近列表移除“${record.displayName}”吗？`,
+      detail: "不会删除工作区文件或对话；重新打开该文件夹后会再次显示。",
+      buttons: ["移除", "取消"],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+    } satisfies Electron.MessageBoxOptions
+    const window = BrowserWindow.fromWebContents(event.sender)
+    const result = window
+      ? await dialog.showMessageBox(window, options)
+      : await dialog.showMessageBox(options)
+    return result.response === 0 ? hideRecentWorkspace(databaseClient, workspaceId) : false
   })
   ipcMain.handle(IPC_CHANNELS.workspaceListDocuments, async (event) => {
     const workspace = workspaceForEvent(event)
@@ -784,6 +1072,9 @@ app.whenReady().then(() => {
   app.setAppUserModelId(APP_USER_MODEL_ID)
   databaseClient = openDatabase({ path: join(app.getPath("userData"), "tessera.sqlite3") })
   desktopAiService = createDesktopAiService(databaseClient)
+  desktopTaskService = createDesktopTaskService(databaseClient)
+  agentChangeService = createAgentChangeService(databaseClient)
+  recoverInterruptedAiRuns(databaseClient)
   registerIpcHandlers()
   createWindow(restoreMostRecentWorkspace())
 
@@ -807,11 +1098,13 @@ app.on("before-quit", (event) => {
 
 app.on("will-quit", () => {
   for (const chat of activeAiChats.values()) chat.abortController.abort("应用已退出")
-  activeAiChats.clear()
+  for (const chat of aiChatRunsByTask.values()) releaseAiChatRun(chat)
   for (const webContentsId of activeWorkspaces.keys()) closeWorkspaceSession(webContentsId)
   databaseClient?.close()
   databaseClient = null
   desktopAiService = null
+  desktopTaskService = null
+  agentChangeService = null
 })
 
 app.on("window-all-closed", () => {

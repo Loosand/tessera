@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 已校验的编辑器偏好与类型安全的偏好更新操作
- * [OUTPUT]: 中文编辑器排版、行为与呈现设置界面
+ * [OUTPUT]: 带参考/随机搭配和实时预览的 Markdown 主题、编辑行为与呈现设置界面
  * [POS]: 设置页的编辑器分区内容组件
  * [DOC]: design.md、docs/architecture/editor.md
  *
@@ -12,16 +12,16 @@
 
 import { SettingRow } from "@tessera/design-system/components/setting-row"
 import { SettingSection } from "@tessera/design-system/components/setting-section"
-import { Input } from "@tessera/design-system/components/ui/input"
+import { Button } from "@tessera/design-system/components/ui/button"
 import { NativeSelect } from "@tessera/design-system/components/ui/native-select"
 import { Switch } from "@tessera/design-system/components/ui/switch"
-import type {
-  AppPreferences,
-  DefaultEditorMode,
-  EditorFontPreference,
-  EditorWidthPreference,
-  UpdateAppPreference,
-} from "../hooks/use-app-preferences"
+import {
+  TYPESET_REFERENCE_PRESET,
+  type TypesetPreferences,
+  createRandomTypesetPreferences,
+} from "../hooks/typeset-preferences"
+import type { AppPreferences, DefaultEditorMode, UpdateAppPreference } from "../hooks/use-app-preferences"
+import { TypesetThemeBuilder } from "./typeset-theme-builder"
 
 interface EditorSettingsProps {
   preferences: AppPreferences
@@ -33,68 +33,38 @@ const EDITOR_MODE_LABELS: Record<DefaultEditorMode, string> = {
   source: "Markdown 源码",
 }
 
-const EDITOR_FONT_LABELS: Record<EditorFontPreference, string> = {
-  sans: "系统无衬线",
-  serif: "系统衬线",
-}
-
-const EDITOR_WIDTH_LABELS: Record<EditorWidthPreference, string> = {
-  compact: "紧凑",
-  comfortable: "舒适",
-  wide: "宽幅",
-}
-
 function PlannedToggle({ label, checked = false }: { label: string; checked?: boolean }) {
   return <Switch checked={checked} disabled aria-label={`${label}，即将支持`} />
 }
 
 export function EditorSettings({ preferences, onUpdatePreference }: EditorSettingsProps) {
+  const applyTypeset = (nextTypeset: TypesetPreferences) => {
+    onUpdatePreference("typesetBodyFont", nextTypeset.typesetBodyFont)
+    onUpdatePreference("typesetFlow", nextTypeset.typesetFlow)
+    onUpdatePreference("typesetHeadingFont", nextTypeset.typesetHeadingFont)
+    onUpdatePreference("typesetLeading", nextTypeset.typesetLeading)
+    onUpdatePreference("typesetMeasure", nextTypeset.typesetMeasure)
+    onUpdatePreference("typesetMonoFont", nextTypeset.typesetMonoFont)
+    onUpdatePreference("typesetSize", nextTypeset.typesetSize)
+  }
+
   return (
     <div className="space-y-9">
-      <SettingSection title="编辑器排版" description="单独调整正文阅读字体和字号，不影响应用界面。">
-        <SettingRow
-          title="正文字体"
-          description="应用于即时预览与渲染后的正文；Markdown 源码仍使用等宽字体。"
-          control={
-            <NativeSelect
-              className="w-48"
-              value={preferences.editorFont}
-              aria-label="编辑器正文字体"
-              onChange={(event) => {
-                onUpdatePreference("editorFont", event.currentTarget.value as EditorFontPreference)
-              }}
-            >
-              {Object.entries(EDITOR_FONT_LABELS).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </NativeSelect>
-          }
-        />
-        <SettingRow
-          title="编辑器字号"
-          description="调整即时预览与 Markdown 源码的基础阅读字号，可设置为 12–24 像素。"
-          control={
-            <div className="flex items-center gap-2">
-              <Input
-                className="w-20 tabular-nums"
-                type="number"
-                min={12}
-                max={24}
-                step={1}
-                value={preferences.editorFontSize}
-                aria-label="编辑器字号"
-                onChange={(event) => {
-                  const nextValue = Number(event.currentTarget.value)
-                  if (!Number.isFinite(nextValue)) return
-                  onUpdatePreference("editorFontSize", Math.min(24, Math.max(12, Math.round(nextValue))))
-                }}
-              />
-              <span className="text-xs text-muted-foreground">px</span>
-            </div>
-          }
-        />
+      <SettingSection
+        title="Markdown 主题"
+        description="基于 Typeset 调整字体、阅读节奏和版心；修改会即时保存并应用到编辑器。"
+        action={
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => applyTypeset(TYPESET_REFERENCE_PRESET)}>
+              参考预设
+            </Button>
+            <Button size="sm" onClick={() => applyTypeset(createRandomTypesetPreferences())}>
+              随机搭配
+            </Button>
+          </div>
+        }
+      >
+        <TypesetThemeBuilder preferences={preferences} onUpdatePreference={onUpdatePreference} />
       </SettingSection>
 
       <SettingSection title="编辑行为" description="控制文档打开方式、输入辅助与 Markdown 结构提示。">
@@ -161,27 +131,7 @@ export function EditorSettings({ preferences, onUpdatePreference }: EditorSettin
         />
       </SettingSection>
 
-      <SettingSection title="编辑器呈现" description="选择文档在写作表面中的宽度和辅助视觉。">
-        <SettingRow
-          title="正文宽度"
-          description="紧凑适合专注写作，舒适兼顾中文阅读，宽幅适合表格与复杂材料。"
-          control={
-            <NativeSelect
-              className="w-48"
-              value={preferences.editorWidth}
-              aria-label="编辑器正文宽度"
-              onChange={(event) => {
-                onUpdatePreference("editorWidth", event.currentTarget.value as EditorWidthPreference)
-              }}
-            >
-              {Object.entries(EDITOR_WIDTH_LABELS).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </NativeSelect>
-          }
-        />
+      <SettingSection title="编辑器呈现" description="配置 Markdown 结构的辅助视觉。">
         <SettingRow
           title="标签美化"
           description="将 Markdown 标签呈现为更易辨认的行内标记；正文仍保持纯 Markdown。"

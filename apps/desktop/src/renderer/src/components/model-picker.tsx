@@ -25,8 +25,8 @@ interface ModelPickerProps {
   selectedModelKey: string
 }
 
-export function aiModelKey(model: Pick<AvailableAiModel, "id" | "providerId">) {
-  return `${model.providerId}::${model.id}`
+export function aiModelKey(model: Pick<AvailableAiModel, "configId" | "id">) {
+  return `${model.configId}::${model.id}`
 }
 
 function modelCapabilityLabel(model: AvailableAiModel) {
@@ -77,9 +77,10 @@ export function ModelPicker({ model, models, onModelChange, selectedModelKey }: 
   const modelsByProvider = useMemo(() => {
     const groups = new Map<string, AvailableAiModel[]>()
     for (const candidate of models) {
-      const group = groups.get(candidate.providerName) ?? []
+      const groupName = candidate.displayName || candidate.providerName
+      const group = groups.get(groupName) ?? []
       group.push(candidate)
-      groups.set(candidate.providerName, group)
+      groups.set(groupName, group)
     }
     return groups
   }, [models])

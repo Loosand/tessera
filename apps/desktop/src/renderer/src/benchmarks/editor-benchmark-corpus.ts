@@ -24,17 +24,17 @@ export function createEditorBenchmarkScenarios(): EditorBenchmarkScenario[] {
     {
       id: "plain-10k",
       label: "纯文本 10k / 100 块",
-      markdown: createPlainDocument(100, 100),
+      markdown: createPlainEditorBenchmarkDocument(100, 100),
     },
     {
       id: "plain-100k",
       label: "纯文本 100k / 1000 块",
-      markdown: createPlainDocument(1_000, 100),
+      markdown: createPlainEditorBenchmarkDocument(1_000, 100),
     },
     {
       id: "many-blocks-100k",
       label: "小块密集 100k / 2000 块",
-      markdown: createPlainDocument(2_000, 50),
+      markdown: createPlainEditorBenchmarkDocument(2_000, 50),
     },
     {
       id: "mixed-50k",
@@ -44,7 +44,7 @@ export function createEditorBenchmarkScenarios(): EditorBenchmarkScenario[] {
   ]
 }
 
-function createPlainDocument(blockCount: number, blockLength: number) {
+export function createPlainEditorBenchmarkDocument(blockCount: number, blockLength: number) {
   return Array.from({ length: blockCount }, (_, index) => {
     const prefix = `第 ${index + 1} 段：`
     return prefix + repeatToLength(PLAIN_TEXT, Math.max(1, blockLength - prefix.length))

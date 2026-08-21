@@ -13,6 +13,8 @@
     "build": "turbo run build",
     "benchmark:editor": "bun --cwd apps/desktop benchmark:editor",
     "benchmark:editor:check": "bun --cwd apps/desktop benchmark:editor:check",
+    "benchmark:editor:parser": "bun --cwd apps/desktop benchmark:editor:parser",
+    "benchmark:editor:parser:cpu": "bun --cwd apps/desktop benchmark:editor:parser:cpu",
     "format": "biome format --write .",
     "lint": "biome lint .",
     "test": "turbo run test",

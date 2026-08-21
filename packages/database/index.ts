@@ -11,8 +11,10 @@
  */
 
 export * from "./client"
+export * from "./agent-change-repository"
 export * from "./ai-provider-config-repository"
 export * from "./migrations"
 export * from "./schema"
 export * from "./task-session-repository"
+export * from "./task-run-repository"
 export * from "./workspace-repository"

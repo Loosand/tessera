@@ -54,6 +54,8 @@ describe("AI 供应商设置模型", () => {
   it("启动时以持久化配置覆盖默认值并保留其他供应商默认值", () => {
     const drafts = createInitialAiProviderDrafts([
       {
+        configId: "openrouter",
+        displayName: "OpenRouter",
         providerId: "openrouter",
         enabled: true,
         baseUrl: "https://relay.example.com/v1",

@@ -28,7 +28,7 @@ describe("模型能力归一化", () => {
     ).toEqual({
       imageInput: "supported",
       reasoning: "supported",
-      search: "unsupported",
+      search: "supported",
       toolUse: "supported",
     })
   })
@@ -46,6 +46,12 @@ describe("模型能力归一化", () => {
         },
       }).capabilities?.imageInput,
     ).toBe("supported")
+  })
+
+  it("不会把旧版 DeepSeek 模型标成原生联网模型", () => {
+    expect(resolveAiModelCapabilities("deepseek", model("deepseek-v3.1")).capabilities?.search).toBe(
+      "unsupported",
+    )
   })
 
   it("保留远端目录明确声明的能力", () => {

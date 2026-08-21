@@ -1,8 +1,8 @@
 /**
- * [INPUT]: AI SDK 运行时适配器与模型目录发现服务
+ * [INPUT]: AI SDK Chat/Agent 运行时适配器、受限工作区工具契约与模型目录发现服务
  * [OUTPUT]: @tessera/ai/server 的主进程安全公开入口
  * [POS]: AI 包服务端子路径边界
- * [DOC]: docs/architecture/ai-providers.md
+ * [DOC]: docs/architecture/ai-providers.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -17,6 +17,18 @@ export {
   createAiSdkChatRuntime,
   createAiSdkLanguageModel,
 } from "./ai-sdk-runtime"
+export {
+  type AiAgentRuntimeOptions,
+  type AiSdkAgentRuntimeRequest,
+  type ListWorkspaceFilesInput,
+  type ReadonlyWorkspaceAgentTools,
+  type ReadWorkspaceFileInput,
+  type SearchWorkspaceTextInput,
+  type WorkspaceAgentTools,
+  type WorkspaceDocumentChangeInput,
+  aiSdkAgentRuntime,
+  streamAiAgent,
+} from "./agent-runtime"
 export {
   type AiChatRuntimeInput,
   type AiChatRuntimeOptions as AiChatStreamRuntimeOptions,

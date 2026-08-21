@@ -1,8 +1,8 @@
 /**
  * [INPUT]: 共享桌面 API 契约与 Electron IPC 渲染器
- * [OUTPUT]: 暴露在 window.tessera 上的冻结窄接口、受限工作区条目操作和关闭保存握手
+ * [OUTPUT]: 暴露在 window.tessera 上的冻结窄接口、可恢复 AI 流、Agent 变更预览、受限工作区/任务操作和关闭保存握手
  * [POS]: 主进程与沙箱渲染层之间的安全桥
- * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md
+ * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -14,9 +14,9 @@ import type {
   AiChatStartInput,
   AiChatStreamEvent,
   AiProviderConnectionInput,
-  AiProviderId,
   AiProviderSaveInput,
   DesktopApi,
+  TaskSessionSaveInput,
   WorkspaceChangeEvent,
   WorkspaceEntryKind,
 } from "@tessera/contracts"
@@ -25,15 +25,24 @@ import { contextBridge, ipcRenderer } from "electron"
 
 const api: DesktopApi = Object.freeze({
   getAppInfo: () => ipcRenderer.invoke(IPC_CHANNELS.appInfo),
-  deleteAiProviderConfig: (providerId: AiProviderId) =>
-    ipcRenderer.invoke(IPC_CHANNELS.aiProviderDeleteConfig, providerId),
+  deleteAiProviderConfig: (configId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.aiProviderDeleteConfig, configId),
   listAiProviderConfigs: () => ipcRenderer.invoke(IPC_CHANNELS.aiProviderListConfigs),
   listAiProviderModels: (input: AiProviderConnectionInput) =>
     ipcRenderer.invoke(IPC_CHANNELS.aiProviderListModels, input),
   saveAiProviderConfig: (input: AiProviderSaveInput) =>
     ipcRenderer.invoke(IPC_CHANNELS.aiProviderSaveConfig, input),
   startAiChat: (input: AiChatStartInput) => ipcRenderer.invoke(IPC_CHANNELS.aiChatStart, input),
+  resumeAiChat: (taskId: string) => ipcRenderer.invoke(IPC_CHANNELS.aiChatResume, taskId),
   cancelAiChat: (requestId: string) => ipcRenderer.send(IPC_CHANNELS.aiChatCancel, requestId),
+  readAgentChangePreview: (taskId: string, approvalId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.agentChangePreview, taskId, approvalId),
+  listRecentTasks: () => ipcRenderer.invoke(IPC_CHANNELS.taskListRecent),
+  listWorkspaceTasks: () => ipcRenderer.invoke(IPC_CHANNELS.taskListWorkspace),
+  readTask: (taskId: string) => ipcRenderer.invoke(IPC_CHANNELS.taskRead, taskId),
+  saveTask: (input: TaskSessionSaveInput) => ipcRenderer.invoke(IPC_CHANNELS.taskSave, input),
+  renameTask: (taskId: string, title: string) => ipcRenderer.invoke(IPC_CHANNELS.taskRename, taskId, title),
+  deleteTask: (taskId: string) => ipcRenderer.invoke(IPC_CHANNELS.taskDelete, taskId),
   cancelClose: () => ipcRenderer.send(IPC_CHANNELS.appCancelClose),
   confirmClose: () => ipcRenderer.send(IPC_CHANNELS.appConfirmClose),
   getCurrentWorkspace: () => ipcRenderer.invoke(IPC_CHANNELS.workspaceCurrent),
@@ -42,6 +51,11 @@ const api: DesktopApi = Object.freeze({
   openRecentWorkspace: (workspaceId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.workspaceOpenRecent, workspaceId),
   revealCurrentWorkspace: () => ipcRenderer.invoke(IPC_CHANNELS.workspaceReveal),
+  revealWorkspace: (workspaceId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.workspaceRevealRecent, workspaceId),
+  copyWorkspacePath: (workspaceId: string) => ipcRenderer.invoke(IPC_CHANNELS.workspaceCopyPath, workspaceId),
+  removeRecentWorkspace: (workspaceId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.workspaceRemoveRecent, workspaceId),
   listWorkspaceDocuments: () => ipcRenderer.invoke(IPC_CHANNELS.workspaceListDocuments),
   listWorkspaceDirectories: () => ipcRenderer.invoke(IPC_CHANNELS.workspaceListDirectories),
   readDocument: (relativePath: string) => ipcRenderer.invoke(IPC_CHANNELS.documentRead, relativePath),

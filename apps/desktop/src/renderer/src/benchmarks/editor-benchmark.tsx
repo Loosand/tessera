@@ -276,7 +276,7 @@ async function mountEditor(root: HTMLElement, markdown: string): Promise<Mounted
     editorProps: {
       attributes: {
         "aria-label": "Markdown 编辑器性能基准",
-        class: "rich-text-content",
+        class: "typeset typeset-editor rich-text-content",
       },
     },
     extensions: EDITOR_EXTENSIONS,

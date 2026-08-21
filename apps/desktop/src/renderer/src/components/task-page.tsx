@@ -1,8 +1,8 @@
 /**
- * [INPUT]: 视图激活状态、侧栏/设置回调、自动同步 AI 模型、Electron useChat Transport 与本地输入草稿
- * [OUTPUT]: 从居中新任务输入平滑进入可脱离贴底阅读的多轮流式对话页面
- * [POS]: Tessera 主导航中的普通对话与后续 Agent 共用任务表面
- * [DOC]: design.md、docs/architecture/ai-chat-agent-todo.md
+ * [INPUT]: 任务快照、可选工作区/当前文档、视图激活状态、侧栏/设置/文件跳转回调、AI 模型与 Electron useChat Transport
+ * [OUTPUT]: 首次发送懒创建、后台生成恢复、Agent 授权范围、Diff 审批与持续保存的多轮流式任务页面
+ * [POS]: Tessera 主导航中的普通 Chat 与工作区 Agent 共用任务表面
+ * [DOC]: design.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -10,8 +10,8 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import { useElectronChat } from "@tessera/ai/react"
-import type { AiChatReasoning } from "@tessera/contracts"
+import { toTaskMessages, useElectronChat } from "@tessera/ai/react"
+import type { AiChatReasoning, TaskMessage, TaskSessionStatus } from "@tessera/contracts"
 import { PanelLeftOpenIcon, Settings01Icon } from "@tessera/design-system/components/icons"
 import { Button } from "@tessera/design-system/components/ui/button"
 import { Icon } from "@tessera/design-system/components/ui/icon"
@@ -23,8 +23,9 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "@tessera/design-system/components/ui/message-scroller"
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useAiModels } from "../hooks/use-ai-models"
+import type { ActiveTask } from "../hooks/use-tasks"
 import { ChatMessage } from "./chat-message"
 import { aiModelKey } from "./model-picker"
 import { type ComposerImage, TaskComposer } from "./task-composer"
@@ -35,7 +36,15 @@ const MAX_IMAGE_BYTES = 8 * 1024 * 1024
 
 interface TaskPageProps {
   active: boolean
+  currentDocumentPath?: string | undefined
+  task: ActiveTask
+  taskError: string | null
   sidebarOpen: boolean
+  workspaceName: string | null
+  onEnsureTask: (title: string) => Promise<unknown | null>
+  onPersistTask: (messages: TaskMessage[], status: TaskSessionStatus) => Promise<unknown | null>
+  onModeChange: (mode: ActiveTask["mode"]) => void
+  onOpenDocument?: ((path: string, line?: number) => void) | undefined
   onToggleSidebar: () => void
   onOpenSettings: () => void
 }
@@ -51,8 +60,34 @@ function fileDataUrl(file: File): Promise<string> {
   })
 }
 
-export function TaskPage({ active, sidebarOpen, onToggleSidebar, onOpenSettings }: TaskPageProps) {
-  const { error: modelError, loading, models, refresh: refreshModels } = useAiModels()
+function taskTitle(prompt: string, images: ComposerImage[]) {
+  const firstLine = prompt.trim().split(/\r?\n/u)[0]?.trim()
+  if (firstLine) return firstLine.slice(0, 48)
+  const filename = images[0]?.filename.replace(/\.[^.]+$/u, "")
+  return filename?.slice(0, 48) || "新任务"
+}
+
+function taskStatus(status: "ready" | "submitted" | "streaming" | "error"): TaskSessionStatus {
+  if (status === "submitted" || status === "streaming") return "running"
+  if (status === "error") return "failed"
+  return "completed"
+}
+
+export function TaskPage({
+  active,
+  currentDocumentPath,
+  task,
+  taskError,
+  sidebarOpen,
+  workspaceName,
+  onEnsureTask,
+  onPersistTask,
+  onModeChange,
+  onOpenDocument,
+  onToggleSidebar,
+  onOpenSettings,
+}: TaskPageProps) {
+  const { models, refresh: refreshModels } = useAiModels()
   const [selectedModelKey, setSelectedModelKey] = useState("")
   const [prompt, setPrompt] = useState("")
   const [images, setImages] = useState<ComposerImage[]>([])
@@ -65,12 +100,25 @@ export function TaskPage({ active, sidebarOpen, onToggleSidebar, onOpenSettings 
   )
   const chat = useElectronChat({
     bridge: window.tessera,
+    chatId: task.id,
+    configId: selectedModel?.configId ?? "",
+    currentDocumentPath,
+    initialMessages: task.messages,
+    mode: task.mode,
     providerId: selectedModel?.providerId ?? "openai-compatible",
     modelId: selectedModel?.id ?? "",
     reasoning,
     webSearch,
   })
   const running = chat.status === "submitted" || chat.status === "streaming"
+  const lastPersistedRef = useRef(`${task.status}:${JSON.stringify(task.messages)}`)
+  const loadAgentChangePreview = useCallback(
+    (approvalId: string) => {
+      if (!window.tessera) return Promise.reject(new Error("桌面 Agent 服务不可用。"))
+      return window.tessera.readAgentChangePreview(task.id, approvalId)
+    },
+    [task.id],
+  )
 
   useEffect(() => {
     if (active) void refreshModels()
@@ -83,10 +131,37 @@ export function TaskPage({ active, sidebarOpen, onToggleSidebar, onOpenSettings 
 
   useEffect(() => {
     if (!selectedModel) return
-    if (selectedModel.capabilities?.search !== "supported") setWebSearch(false)
+    if (task.mode === "agent" || selectedModel.capabilities?.search !== "supported") setWebSearch(false)
     if (selectedModel.capabilities?.reasoning !== "supported") setReasoning("auto")
     if (selectedModel.capabilities?.imageInput === "unsupported") setImages([])
-  }, [selectedModel])
+  }, [selectedModel, task.mode])
+
+  useEffect(() => {
+    if (!task.persisted || chat.messages.length === 0) return
+    const snapshots = toTaskMessages(
+      chat.messages,
+      selectedModel
+        ? {
+            configId: selectedModel.configId,
+            modelId: selectedModel.id,
+            providerId: selectedModel.providerId,
+          }
+        : undefined,
+    )
+    const status = taskStatus(chat.status)
+    const messages =
+      status === "running" && snapshots.at(-1)?.role === "assistant" ? snapshots.slice(0, -1) : snapshots
+    const identity = `${status}:${JSON.stringify(messages)}`
+    if (identity === lastPersistedRef.current) return
+    const timer = window.setTimeout(
+      () => {
+        lastPersistedRef.current = identity
+        void onPersistTask(messages, status)
+      },
+      running ? 500 : 120,
+    )
+    return () => window.clearTimeout(timer)
+  }, [chat.messages, chat.status, onPersistTask, running, selectedModel, task.persisted])
 
   const addImages = async (files: FileList) => {
     const availableSlots = MAX_IMAGES - images.length
@@ -117,8 +192,16 @@ export function TaskPage({ active, sidebarOpen, onToggleSidebar, onOpenSettings 
     }
   }
 
-  const send = () => {
+  const send = async () => {
     if (!selectedModel || running || (!prompt.trim() && images.length === 0)) return
+    if (task.mode === "agent" && !workspaceName) {
+      setNotice("Agent 任务必须在工作区中运行，请先打开工作区。")
+      return
+    }
+    if (task.mode === "agent" && selectedModel.capabilities?.toolUse !== "supported") {
+      setNotice("当前模型没有已验证的工具调用能力，请选择支持工具的模型。")
+      return
+    }
     const text = prompt
     const files = images.map((image) => ({
       type: "file" as const,
@@ -129,6 +212,13 @@ export function TaskPage({ active, sidebarOpen, onToggleSidebar, onOpenSettings 
     setPrompt("")
     setImages([])
     setNotice("")
+    const persistedTask = await onEnsureTask(taskTitle(text, images))
+    if (!persistedTask) {
+      setNotice("无法创建当前任务。")
+      setPrompt(text)
+      setImages(images)
+      return
+    }
     void chat.sendMessage({ text, files }).catch((error) => {
       setNotice(error instanceof Error ? error.message : "发送消息失败。")
       setPrompt(text)
@@ -136,14 +226,21 @@ export function TaskPage({ active, sidebarOpen, onToggleSidebar, onOpenSettings 
     })
   }
 
-  const composerNotice =
-    notice ||
-    chat.error?.message ||
-    modelError ||
-    (loading ? "正在读取可用模型…" : models.length === 0 ? "请先在设置中保存并启用一个供应商与模型。" : "")
+  const agentNotice =
+    task.mode === "agent" && !workspaceName
+      ? "Agent 任务必须在工作区中运行，请先打开工作区。"
+      : task.mode === "agent" && selectedModel?.capabilities?.toolUse !== "supported"
+        ? "当前模型没有已验证的工具调用能力，请选择支持工具的模型。"
+        : ""
+  const agentScope =
+    task.mode === "agent" && workspaceName
+      ? `范围：工作区「${workspaceName}」中的 Markdown；写入必须先看 Diff 并批准，不含删除、Shell 或联网工具。`
+      : ""
+  const composerNotice = notice || agentNotice || chat.error?.message || taskError || ""
 
   const composer = (compact = false) => (
     <TaskComposer
+      agentReady={Boolean(workspaceName)}
       compact={compact}
       value={prompt}
       images={images}
@@ -151,9 +248,12 @@ export function TaskPage({ active, sidebarOpen, onToggleSidebar, onOpenSettings 
       model={selectedModel}
       selectedModelKey={selectedModelKey}
       reasoning={reasoning}
+      mode={task.mode}
+      modeLocked={task.persisted || chat.messages.length > 0}
       webSearch={webSearch}
       status={chat.status}
       notice={composerNotice}
+      scope={agentScope}
       onChange={(value) => {
         setPrompt(value)
         if (notice) setNotice("")
@@ -161,9 +261,10 @@ export function TaskPage({ active, sidebarOpen, onToggleSidebar, onOpenSettings 
       onAddImages={(files) => void addImages(files)}
       onRemoveImage={(id) => setImages((current) => current.filter((image) => image.id !== id))}
       onModelChange={setSelectedModelKey}
+      onModeChange={onModeChange}
       onReasoningChange={setReasoning}
       onWebSearchChange={setWebSearch}
-      onSubmit={send}
+      onSubmit={() => void send()}
       onStop={() => void chat.stop()}
     />
   )
@@ -189,7 +290,7 @@ export function TaskPage({ active, sidebarOpen, onToggleSidebar, onOpenSettings 
           ) : null}
         </div>
         <span className="pointer-events-none absolute inset-x-0 text-center text-[13px] font-medium">
-          {chat.messages.length > 0 ? selectedModel?.name || selectedModel?.id || "新任务" : "新任务"}
+          {task.title}
         </span>
         <div className="app-no-drag ml-auto">
           <Button
@@ -213,11 +314,6 @@ export function TaskPage({ active, sidebarOpen, onToggleSidebar, onOpenSettings 
               <p className="mt-1.5 text-sm text-muted-foreground">研究、阅读、理解与写作，从一个问题开始。</p>
             </div>
             {composer()}
-            {models.length === 0 && !loading ? (
-              <Button variant="outline" size="sm" className="mt-2" onClick={onOpenSettings}>
-                配置模型供应商
-              </Button>
-            ) : null}
           </div>
         </div>
       ) : (
@@ -236,7 +332,16 @@ export function TaskPage({ active, sidebarOpen, onToggleSidebar, onOpenSettings 
                         message={message}
                         isLast={index === chat.messages.length - 1}
                         running={running}
+                        loadAgentChangePreview={loadAgentChangePreview}
+                        onOpenDocument={onOpenDocument}
                         onRegenerate={() => void chat.regenerate()}
+                        onToolApproval={(id, approved) =>
+                          chat.addToolApprovalResponse({
+                            id,
+                            approved,
+                            ...(!approved ? { reason: "用户拒绝了这次文档更改。" } : {}),
+                          })
+                        }
                       />
                     </MessageScrollerItem>
                   ))}

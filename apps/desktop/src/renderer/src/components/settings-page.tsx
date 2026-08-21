@@ -14,7 +14,6 @@ import { AiProviderSettings, AiSettings } from "@tessera/ai/react"
 import type {
   AiProviderConfig,
   AiProviderConnectionInput,
-  AiProviderId,
   AiProviderSaveInput,
   AppInfo,
   WorkspaceInfo,
@@ -130,10 +129,10 @@ async function saveAiProviderConfig(input: AiProviderSaveInput): Promise<AiProvi
   return result.config
 }
 
-async function deleteAiProviderConfig(providerId: AiProviderId): Promise<void> {
+async function deleteAiProviderConfig(configId: string): Promise<void> {
   const desktopApi = window.tessera
   if (!desktopApi) throw new Error("桌面安全桥尚未就绪，请重新打开应用。")
-  const result = await desktopApi.deleteAiProviderConfig(providerId)
+  const result = await desktopApi.deleteAiProviderConfig(configId)
   if (!result.ok) throw new Error(result.error)
 }
 
@@ -303,7 +302,7 @@ export function SettingsPage({
 
         <div className={activeSection === "providers" ? "hidden" : "min-h-0 flex-1 overflow-y-auto"}>
           <article
-            className={`mx-auto w-full px-[clamp(20px,5vw,64px)] pt-10 pb-24 ${activeSection === "shortcuts" ? "max-w-260" : activeSection === "appearance" || activeSection === "editor" ? "max-w-230" : "max-w-205"}`}
+            className={`mx-auto w-full px-[clamp(20px,5vw,64px)] pt-10 pb-24 ${activeSection === "editor" ? "max-w-300" : activeSection === "shortcuts" ? "max-w-260" : activeSection === "appearance" ? "max-w-230" : "max-w-205"}`}
           >
             <p className="text-[11px] font-medium tracking-[0.08em] text-muted-foreground uppercase">设置</p>
             <h1 className="mt-2 text-2xl font-medium tracking-[-0.02em]">{activeNavigation.label}</h1>

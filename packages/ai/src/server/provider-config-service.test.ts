@@ -20,11 +20,11 @@ import {
 function createStore(): AiProviderConfigStore {
   const records = new Map<string, AiProviderConfigStoreRecord>()
   return {
-    find: (providerId) => records.get(providerId) ?? null,
+    find: (configId) => records.get(configId) ?? null,
     list: () => [...records.values()],
-    save: (record) => records.set(record.providerId, { ...record }),
-    delete: (providerId) => {
-      records.delete(providerId)
+    save: (record) => records.set(record.configId, { ...record }),
+    delete: (configId) => {
+      records.delete(configId)
     },
   }
 }
@@ -36,6 +36,8 @@ const secretStorage = {
 }
 
 const CONFIG = {
+  configId: "openrouter",
+  displayName: "OpenRouter",
   providerId: "openrouter" as const,
   enabled: true,
   baseUrl: "https://openrouter.ai/api/v1/",
@@ -65,6 +67,7 @@ describe("AI 供应商配置服务", () => {
     expect(restarted.listConfigs()).toEqual([saved])
     expect(
       restarted.resolveConnection({
+        configId: "openrouter",
         providerId: "openrouter",
         baseUrl: CONFIG.baseUrl,
         apiKey: "",
@@ -78,13 +81,23 @@ describe("AI 供应商配置服务", () => {
     service.saveConfig({ ...CONFIG, apiKey: "first-key" })
     service.saveConfig({ ...CONFIG, enabled: false })
     expect(
-      service.resolveConnection({ providerId: "openrouter", baseUrl: CONFIG.baseUrl, apiKey: "" }).apiKey,
+      service.resolveConnection({
+        configId: "openrouter",
+        providerId: "openrouter",
+        baseUrl: CONFIG.baseUrl,
+        apiKey: "",
+      }).apiKey,
     ).toBe("first-key")
 
     const cleared = service.saveConfig({ ...CONFIG, removeApiKey: true })
     expect(cleared.apiKeyConfigured).toBe(false)
     expect(
-      service.resolveConnection({ providerId: "openrouter", baseUrl: CONFIG.baseUrl, apiKey: "" }).apiKey,
+      service.resolveConnection({
+        configId: "openrouter",
+        providerId: "openrouter",
+        baseUrl: CONFIG.baseUrl,
+        apiKey: "",
+      }).apiKey,
     ).toBe("")
   })
 

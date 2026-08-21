@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 编辑器内容同步控制器与 Vitest 假时钟
- * [OUTPUT]: 延迟合并、文档身份保持和强制提交的回归保障
+ * [OUTPUT]: 延迟合并、IME 暂停、文档身份保持和强制提交的回归保障
  * [POS]: 编辑器草稿同步协议的单元测试
  * [DOC]: docs/architecture/editor.md
  *
@@ -73,5 +73,46 @@ describe("createEditorContentSyncController", () => {
     vi.runAllTimers()
 
     expect(onContentChange).not.toHaveBeenCalled()
+  })
+
+  it("中文 IME 组合期间不读取中间态，结束后只提交最终文本", () => {
+    vi.useFakeTimers()
+    let compositionText = ""
+    const readContent = vi.fn(() => compositionText)
+    const onContentChange = vi.fn()
+    const controller = createEditorContentSyncController(300)
+
+    controller.pause()
+    for (const text of ["n", "ni", "你"]) {
+      compositionText = text
+      controller.schedule({ documentPath: "中文.md", readContent, onContentChange })
+      vi.advanceTimersByTime(500)
+    }
+
+    expect(readContent).not.toHaveBeenCalled()
+    expect(onContentChange).not.toHaveBeenCalled()
+
+    controller.resume()
+    vi.advanceTimersByTime(299)
+    expect(onContentChange).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(1)
+    expect(onContentChange).toHaveBeenCalledWith("中文.md", "你")
+    expect(readContent).toHaveBeenCalledTimes(1)
+  })
+
+  it("显式 flush 在 IME 暂停期间仍提交当前内容", () => {
+    vi.useFakeTimers()
+    const onContentChange = vi.fn()
+    const controller = createEditorContentSyncController()
+
+    controller.pause()
+    controller.schedule({
+      documentPath: "note.md",
+      readContent: () => "当前组合内容",
+      onContentChange,
+    })
+    controller.flush()
+
+    expect(onContentChange).toHaveBeenCalledWith("note.md", "当前组合内容")
   })
 })

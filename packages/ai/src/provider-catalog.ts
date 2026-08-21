@@ -21,6 +21,7 @@ export interface AiProviderDefinition {
   defaultBaseUrl: string
   description: string
   id: AiProviderId
+  multiple: boolean
   name: string
   publicModelCatalog: boolean
   protocol: string
@@ -33,15 +34,20 @@ export interface AiProviderModelDraft extends AiProviderModel {
 export interface AiProviderDraft {
   apiKeyConfigured: boolean
   baseUrl: string
+  configId: string
+  displayName: string
   enabled: boolean
   models: AiProviderModelDraft[]
+  providerId: AiProviderId
 }
 
-export type AiProviderDrafts = Record<AiProviderId, AiProviderDraft>
+export type AiProviderDrafts = Record<AiProviderId, AiProviderDraft> &
+  Record<string, AiProviderDraft>
 
 export const AI_PROVIDER_DEFINITIONS: readonly AiProviderDefinition[] = [
   {
     id: "openai-compatible",
+    multiple: true,
     name: "OpenAI 兼容",
     description: "连接实现 OpenAI API 规范的服务、中转或企业网关。",
     adapter: "AI SDK · OpenAI Compatible",
@@ -52,6 +58,7 @@ export const AI_PROVIDER_DEFINITIONS: readonly AiProviderDefinition[] = [
   },
   {
     id: "anthropic-compatible",
+    multiple: true,
     name: "Anthropic 兼容",
     description: "连接 Anthropic 官方服务或兼容 Messages API 的端点。",
     adapter: "AI SDK · Anthropic",
@@ -62,6 +69,7 @@ export const AI_PROVIDER_DEFINITIONS: readonly AiProviderDefinition[] = [
   },
   {
     id: "deepseek",
+    multiple: false,
     name: "DeepSeek",
     description: "使用 DeepSeek 的独立适配器，保留供应商能力边界。",
     adapter: "AI SDK · DeepSeek",
@@ -72,6 +80,7 @@ export const AI_PROVIDER_DEFINITIONS: readonly AiProviderDefinition[] = [
   },
   {
     id: "grok",
+    multiple: false,
     name: "Grok",
     description: "通过 xAI API 接入 Grok 模型与后续原生能力。",
     adapter: "AI SDK · xAI",
@@ -82,6 +91,7 @@ export const AI_PROVIDER_DEFINITIONS: readonly AiProviderDefinition[] = [
   },
   {
     id: "openrouter",
+    multiple: false,
     name: "OpenRouter",
     description: "通过单一账户选择多家模型，并保留实际路由信息。",
     adapter: "AI SDK · OpenRouter",
@@ -93,23 +103,63 @@ export const AI_PROVIDER_DEFINITIONS: readonly AiProviderDefinition[] = [
 ] as const
 
 export function createInitialAiProviderDrafts(configs: readonly AiProviderConfig[] = []): AiProviderDrafts {
-  const configsByProvider = new Map(configs.map((config) => [config.providerId, config]))
-  return AI_PROVIDER_DEFINITIONS.reduce<AiProviderDrafts>((drafts, provider) => {
-    const config = configsByProvider.get(provider.id)
-    drafts[provider.id] = {
-      apiKeyConfigured: config?.apiKeyConfigured ?? false,
-      baseUrl: config?.baseUrl || provider.defaultBaseUrl,
-      enabled: config?.enabled ?? false,
-      models: config?.models.map((model) => ({ ...model })) ?? [],
+  const drafts = {} as AiProviderDrafts
+
+  for (const provider of AI_PROVIDER_DEFINITIONS) {
+    const config = configs.find((candidate) => candidate.providerId === provider.id)
+    drafts[provider.id] = config
+      ? {
+          apiKeyConfigured: config.apiKeyConfigured,
+          baseUrl: config.baseUrl,
+          configId: config.configId,
+          displayName: config.displayName,
+          enabled: config.enabled,
+          models: config.models.map((model) => ({ ...model })),
+          providerId: config.providerId,
+        }
+      : createAiProviderDraft(provider)
+  }
+
+  for (const config of configs) {
+    if (config.configId === config.providerId) continue
+    drafts[config.configId] = {
+      apiKeyConfigured: config.apiKeyConfigured,
+      baseUrl: config.baseUrl,
+      configId: config.configId,
+      displayName: config.displayName,
+      enabled: config.enabled,
+      models: config.models.map((model) => ({ ...model })),
+      providerId: config.providerId,
     }
-    return drafts
-  }, {} as AiProviderDrafts)
+  }
+
+  return drafts
 }
 
-export function matchesAiProvider(provider: AiProviderDefinition, query: string): boolean {
+export function createAiProviderDraft(
+  provider: AiProviderDefinition,
+  configId = provider.id,
+  displayName = provider.name,
+): AiProviderDraft {
+  return {
+    apiKeyConfigured: false,
+    baseUrl: provider.defaultBaseUrl,
+    configId,
+    displayName,
+    enabled: false,
+    models: [],
+    providerId: provider.id,
+  }
+}
+
+export function matchesAiProvider(
+  provider: AiProviderDefinition,
+  query: string,
+  displayName = provider.name,
+): boolean {
   const normalizedQuery = query.trim().toLocaleLowerCase()
   if (!normalizedQuery) return true
-  return [provider.name, provider.description, provider.adapter, provider.protocol]
+  return [displayName, provider.name, provider.description, provider.adapter, provider.protocol]
     .join(" ")
     .toLocaleLowerCase()
     .includes(normalizedQuery)

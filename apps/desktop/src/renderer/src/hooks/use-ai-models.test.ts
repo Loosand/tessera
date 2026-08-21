@@ -26,6 +26,8 @@ const model = (id: string, enabled = true): AiProviderConfiguredModel => ({
 const config = (overrides: Partial<AiProviderConfig> = {}): AiProviderConfig => ({
   apiKeyConfigured: true,
   baseUrl: "https://api.deepseek.com/v1",
+  configId: "deepseek",
+  displayName: "DeepSeek",
   enabled: true,
   models: [model("deepseek-chat")],
   providerId: "deepseek",

@@ -36,8 +36,8 @@ Markdown 是正文事实源。SQLite 保存工作区登记、可重建索引和�
 - **已实现**：渲染层运行在沙箱中，不直接访问 Node.js、文件系统或数据库。
 - **已实现**：平台操作只通过 `packages/contracts` 定义的预加载接口调用。
 - **已实现**：TipTap 与源码表面共享同一份 Markdown 草稿和保存协议。
-- **部分实现**：主导航「新任务」已接入不读取工作区的普通 AI 多轮流式对话，支持模型、思考、联网、图片、Markdown、来源、停止与重试；会话持久化和工作区 Agent 尚未接入。
-- **规划**：Agent 建议、引用、权限请求和 Diff 使用独立的可审查界面。
+- **部分实现**：主导航「新任务」已接入普通 Chat 与工作区 Agent，支持模式锁定、模型、思考、Chat 联网/图片、Markdown、来源、工具状态、停止、重试、完整工具历史、文件引用跳转、任务/运行事件恢复，以及 Markdown 渲染 Diff 审批。
+- **部分实现**：Agent 的只读范围、工具访问路径和失败状态使用独立可见语义；建议、权限请求和 Diff 仍需可审查界面。
 
 ### 主进程与核心层
 
@@ -50,8 +50,9 @@ Markdown 是正文事实源。SQLite 保存工作区登记、可重建索引和�
 
 ### Agent 与 Skills
 
-- **部分实现**：`AgentRuntime` 已定义请求、异步事件、取消和权限事件，尚无产品可用的运行时适配器。
-- **部分实现**：`@tessera/ai` 独立封装 OpenAI 兼容、Anthropic 兼容、DeepSeek、Grok 与 OpenRouter。已实现官方默认地址、AI SDK provider 工厂、能力归一化、主进程模型发现、公共目录自动同步、LobeHub 图标、连接测试、SQLite 配置恢复、Electron safeStorage 密钥加密，以及普通对话流式调用；Agent 工具与会话恢复仍按后续阶段接入。
+- **已实现**：`AgentRuntime` 泛型端口已承载 AI SDK `ToolLoopAgent` 的类型化 `UIMessageChunk` 异步流、取消信号和审批事件；产品运行链路不再绕过独立端口。
+- **部分实现**：`@tessera/ai` 独立封装 OpenAI 兼容、Anthropic 兼容、DeepSeek、Grok 与 OpenRouter。已实现普通对话、受限工作区读写工具循环、AI SDK 标准工具审批和只读研究子 Agent；MCP、Shell 与 durable 自动续跑尚未接入。
+- **已实现**：Agent 工作区根目录只存在于主进程闭包；Markdown 列表、读取、搜索、当前文档和经批准写入统一执行真实路径、符号链接、文件类型、版本冲突与资源上限校验。删除、重命名、Shell 和任意 MCP/网络工具保持不可达。
 - **部分实现**：`packages/skills` 已定义用户级、工作区级 Skill 描述和权限声明，尚未实现发现与执行。
 - **规划**：Skill 只描述工作流和所需资源；具体权限在每次执行时由 Tessera 判断。
 - **规划**：Agent 对文件的修改以文本补丁提出，批准后由核心层写入。

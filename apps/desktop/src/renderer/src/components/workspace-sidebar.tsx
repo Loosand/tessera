@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 主视图、工作区、最近工作区、文档草稿与工作区操作
- * [OUTPUT]: 新任务入口、可收起的文件树、文档列表、大纲和工作区菜单
- * [POS]: 主应用左侧的响应式工作区导航组件
+ * [INPUT]: 当前工作区、任务/文件分区、会话列表、文档草稿与工作区操作
+ * [OUTPUT]: 可切换工作区的二级侧栏、任务列表、文件树/列表和大纲
+ * [POS]: Tessera 两级导航中的工作区侧栏
  * [DOC]: design.md、docs/architecture.md、docs/architecture/editor.md
  *
  * [PROTOCOL]:
@@ -11,6 +11,7 @@
  */
 
 import type {
+  TaskSessionSummary,
   WorkspaceDirectoryEntry,
   WorkspaceDocumentEntry,
   WorkspaceEntryKind,
@@ -18,6 +19,7 @@ import type {
 } from "@tessera/contracts"
 import {
   Add01Icon,
+  ArrowLeft01Icon,
   BookOpen01Icon,
   CancelCircleIcon,
   Clock01Icon,
@@ -28,6 +30,7 @@ import {
   Link01Icon,
   ListViewIcon,
   Menu01Icon,
+  Message01Icon,
   PanelLeftCloseIcon,
   PinIcon,
   SortingAZ01Icon,
@@ -43,6 +46,8 @@ import {
   PopoverTrigger,
 } from "@tessera/design-system/components/ui/popover"
 import { useEffect, useMemo, useState } from "react"
+import { TaskContextMenu } from "./task-context-menu"
+import { WorkspaceContextMenu } from "./workspace-context-menu"
 import { WorkspaceEntryContextMenu } from "./workspace-entry-context-menu"
 import {
   type DocumentTreeNode,
@@ -58,17 +63,27 @@ type FileLayout = "tree" | "list"
 const MODIFIED_AT_FORMATTER = new Intl.DateTimeFormat("zh-CN", { month: "short", day: "numeric" })
 
 interface WorkspaceSidebarProps {
-  activeView: "task" | "workspace"
+  activeSection: "tasks" | "files"
+  activeTaskId: string | undefined
   workspace: WorkspaceInfo | null
+  tasks: TaskSessionSummary[]
   recentWorkspaces: WorkspaceInfo[]
   documents: WorkspaceDocumentEntry[]
   directories: WorkspaceDirectoryEntry[]
   activePath: string | undefined
   activeContent: string
   onCollapse: () => void
+  onGoHome: () => void
   onNewTask: () => void
+  onOpenTask: (taskId: string) => void
+  onRenameTask: (taskId: string, title: string) => Promise<boolean>
+  onDeleteTask: (taskId: string) => Promise<boolean>
+  onSectionChange: (section: "tasks" | "files") => void
   onSelectWorkspace: () => void
   onOpenRecentWorkspace: (workspaceId: string) => void
+  onRevealRecentWorkspace: (workspaceId: string) => void
+  onCopyWorkspacePath: (workspaceId: string) => void
+  onRemoveRecentWorkspace: (workspaceId: string) => void
   onRevealWorkspace: () => void
   onRefreshDocuments: () => void
   onCreateDocument: (parentRelativePath?: string) => void
@@ -127,17 +142,27 @@ function formatModifiedAt(modifiedAt: number) {
 }
 
 export function WorkspaceSidebar({
-  activeView,
+  activeSection,
+  activeTaskId,
   workspace,
+  tasks,
   recentWorkspaces,
   documents,
   directories,
   activePath,
   activeContent,
   onCollapse,
+  onGoHome,
   onNewTask,
+  onOpenTask,
+  onRenameTask,
+  onDeleteTask,
+  onSectionChange,
   onSelectWorkspace,
   onOpenRecentWorkspace,
+  onRevealRecentWorkspace,
+  onCopyWorkspacePath,
+  onRemoveRecentWorkspace,
   onRevealWorkspace,
   onRefreshDocuments,
   onCreateDocument,
@@ -266,8 +291,8 @@ export function WorkspaceSidebar({
 
   const workspaceMenu = workspace ? (
     <PopoverContent
-      side="top"
-      align="center"
+      side="bottom"
+      align="start"
       sideOffset={6}
       className="w-[250px] overflow-hidden p-0 max-[760px]:w-[240px]"
     >
@@ -417,120 +442,214 @@ export function WorkspaceSidebar({
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col px-2">
-        <div className="mb-3 shrink-0">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-8 w-full justify-start gap-2 px-2 text-[13px] data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium"
-            data-active={activeView === "task" || undefined}
-            aria-current={activeView === "task" ? "page" : undefined}
-            onClick={onNewTask}
-          >
-            <Icon icon={TaskAdd01Icon} size={16} />
-            <span>新任务</span>
-          </Button>
-        </div>
-
         {workspace ? (
           <>
-            <header className="group/view flex h-7 shrink-0 items-center px-2">
-              <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-muted-foreground">
-                {pane === "outline" ? "大纲" : "文件"}
-              </span>
+            <div className="flex h-9 shrink-0 items-center gap-1">
               <Button
                 type="button"
                 variant="ghost"
                 size="icon-xs"
-                className="opacity-0 transition-opacity group-hover/view:opacity-100 focus-visible:opacity-100"
-                aria-label={pane === "files" ? "切换到文档大纲" : "切换到文件视图"}
-                title={pane === "files" ? "切换到文档大纲" : "切换到文件视图"}
-                onClick={() => setPane((current) => (current === "files" ? "outline" : "files"))}
+                aria-label="返回工作区主页"
+                title="返回工作区主页"
+                onClick={onGoHome}
               >
-                <Icon icon={pane === "files" ? Menu01Icon : FolderTreeIcon} size={15} />
+                <Icon icon={ArrowLeft01Icon} size={14} />
               </Button>
-            </header>
-
-            {pane === "files" ? (
-              <>
-                <div className="space-y-0.5 pb-3">
-                  <NavigationRow icon={PinIcon} label="已固定" count={0} disabled />
-                  <NavigationRow icon={BookOpen01Icon} label="全部文档" count={documents.length} active />
-                  <NavigationRow icon={StarIcon} label="收藏夹" disabled />
-                  <NavigationRow icon={Link01Icon} label="关联" disabled />
-                </div>
-                <section className="min-h-0 flex-1 overflow-y-auto pt-1 pb-2">
-                  {(layout === "tree" ? tree.length > 0 : documents.length > 0) ? (
-                    layout === "tree" ? (
-                      tree.map((node) => renderTreeNode(node, 0))
-                    ) : (
-                      <div className="grid gap-0.5">
-                        {list.map((document) => (
-                          <WorkspaceEntryContextMenu
-                            key={document.relativePath}
-                            kind="document"
-                            relativePath={document.relativePath}
-                            trigger={
-                              <button
-                                type="button"
-                                className="rounded-md px-2 py-1.5 text-left transition-colors hover:bg-sidebar-accent data-[active=true]:bg-sidebar-accent"
-                                data-active={document.relativePath === activePath || undefined}
-                                onClick={() => onOpenDocument(document.relativePath)}
-                              >
-                                <div className="flex items-center gap-2 text-xs font-medium">
-                                  <span className="min-w-0 flex-1 truncate">
-                                    {documentLabel(document.name)}
-                                  </span>
-                                  <span className="shrink-0 text-[10px] font-normal text-muted-foreground">
-                                    {formatModifiedAt(document.modifiedAt)}
-                                  </span>
-                                </div>
-                                <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
-                                  {documentLocation(document.relativePath)}
-                                </p>
-                              </button>
-                            }
-                            onOpen={() => onOpenDocument(document.relativePath)}
-                            onCreateDocument={createDocumentAt}
-                            onCreateDirectory={createDirectoryAt}
-                            onRename={() => onRenameDocument(document.relativePath)}
-                            onDelete={() => onDeleteWorkspaceEntry(document.relativePath, "document")}
-                            onReveal={() => onRevealWorkspaceEntry(document.relativePath)}
-                            onCopyPath={() => onCopyWorkspaceEntryPath(document.relativePath)}
+              <WorkspaceContextMenu
+                workspace={workspace}
+                trigger={
+                  <div className="min-w-0 flex-1">
+                    <Popover>
+                      <PopoverTrigger
+                        render={
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-full min-w-0 justify-start px-2 text-[13px] font-medium data-[popup-open]:bg-sidebar-accent"
+                            title={workspace.rootPath}
                           />
-                        ))}
-                      </div>
-                    )
-                  ) : (
-                    <p className="px-2 py-4 text-xs leading-5 text-muted-foreground">
-                      这个工作区还没有 Markdown 文档。
-                    </p>
-                  )}
+                        }
+                      >
+                        <span className="truncate">{workspace.name}</span>
+                      </PopoverTrigger>
+                      {workspaceMenu}
+                    </Popover>
+                  </div>
+                }
+                onOpen={onOpenRecentWorkspace}
+                onReveal={onRevealRecentWorkspace}
+                onCopyPath={onCopyWorkspacePath}
+                onRemove={onRemoveRecentWorkspace}
+              />
+            </div>
+
+            <div className="mt-2 mb-3 grid h-8 shrink-0 grid-cols-2 rounded-md bg-sidebar-accent/55 p-0.5">
+              <button
+                type="button"
+                className="rounded-[5px] text-xs transition-colors data-[active=true]:bg-background data-[active=true]:font-medium data-[active=true]:shadow-xs"
+                data-active={activeSection === "tasks" || undefined}
+                onClick={() => onSectionChange("tasks")}
+              >
+                任务
+              </button>
+              <button
+                type="button"
+                className="rounded-[5px] text-xs transition-colors data-[active=true]:bg-background data-[active=true]:font-medium data-[active=true]:shadow-xs"
+                data-active={activeSection === "files" || undefined}
+                onClick={() => onSectionChange("files")}
+              >
+                文件
+              </button>
+            </div>
+
+            {activeSection === "tasks" ? (
+              <>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 shrink-0 justify-start gap-2 px-2 text-[13px]"
+                  onClick={onNewTask}
+                >
+                  <Icon icon={TaskAdd01Icon} size={15} />
+                  <span>新任务</span>
+                </Button>
+                <header className="mt-3 flex h-7 shrink-0 items-center px-2 text-[11px] font-medium text-muted-foreground">
+                  <span className="min-w-0 flex-1 truncate">你的任务</span>
+                  <span className="tabular-nums">{tasks.length}</span>
+                </header>
+                <section className="min-h-0 flex-1 overflow-y-auto pb-2">
+                  <div className="grid gap-0.5">
+                    {tasks.map((task) => (
+                      <TaskContextMenu
+                        key={task.id}
+                        task={task}
+                        trigger={
+                          <button
+                            type="button"
+                            className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[12px] transition-colors hover:bg-sidebar-accent data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium"
+                            data-active={task.id === activeTaskId || undefined}
+                            title={task.title}
+                            onClick={() => onOpenTask(task.id)}
+                          >
+                            <Icon icon={Message01Icon} size={14} className="shrink-0 text-muted-foreground" />
+                            <span className="min-w-0 flex-1 truncate">{task.title}</span>
+                          </button>
+                        }
+                        onOpen={(selectedTask) => onOpenTask(selectedTask.id)}
+                        onRename={onRenameTask}
+                        onDelete={onDeleteTask}
+                      />
+                    ))}
+                    {tasks.length === 0 ? (
+                      <p className="px-2 py-4 text-xs leading-5 text-muted-foreground">
+                        还没有历史任务。发送第一条消息后会自动保存。
+                      </p>
+                    ) : null}
+                  </div>
                 </section>
               </>
             ) : (
-              <section className="min-h-0 flex-1 overflow-y-auto pt-1 pb-2">
-                {outline.length > 0 ? (
-                  <div className="grid gap-0.5">
-                    {outline.map((heading, index) => (
-                      <button
-                        key={`${heading.line}-${heading.text}`}
-                        type="button"
-                        className="min-h-7 w-full truncate rounded-md pr-2 text-left text-xs transition-colors hover:bg-sidebar-accent"
-                        style={{ paddingLeft: 8 + (heading.depth - 1) * 12 }}
-                        title={`${heading.text} · 第 ${heading.line} 行`}
-                        onClick={() => onSelectOutline(index, heading.line)}
-                      >
-                        {heading.text}
-                      </button>
-                    ))}
-                  </div>
+              <>
+                <header className="group/view flex h-7 shrink-0 items-center px-2">
+                  <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-muted-foreground">
+                    {pane === "outline" ? "大纲" : "文件"}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    className="opacity-0 transition-opacity group-hover/view:opacity-100 focus-visible:opacity-100"
+                    aria-label={pane === "files" ? "切换到文档大纲" : "切换到文件视图"}
+                    title={pane === "files" ? "切换到文档大纲" : "切换到文件视图"}
+                    onClick={() => setPane((current) => (current === "files" ? "outline" : "files"))}
+                  >
+                    <Icon icon={pane === "files" ? Menu01Icon : FolderTreeIcon} size={15} />
+                  </Button>
+                </header>
+                {pane === "files" ? (
+                  <>
+                    <div className="space-y-0.5 pb-3">
+                      <NavigationRow icon={PinIcon} label="已固定" count={0} disabled />
+                      <NavigationRow icon={BookOpen01Icon} label="全部文档" count={documents.length} active />
+                      <NavigationRow icon={StarIcon} label="收藏夹" disabled />
+                      <NavigationRow icon={Link01Icon} label="关联" disabled />
+                    </div>
+                    <section className="min-h-0 flex-1 overflow-y-auto pt-1 pb-2">
+                      {(layout === "tree" ? tree.length > 0 : documents.length > 0) ? (
+                        layout === "tree" ? (
+                          tree.map((node) => renderTreeNode(node, 0))
+                        ) : (
+                          <div className="grid gap-0.5">
+                            {list.map((document) => (
+                              <WorkspaceEntryContextMenu
+                                key={document.relativePath}
+                                kind="document"
+                                relativePath={document.relativePath}
+                                trigger={
+                                  <button
+                                    type="button"
+                                    className="rounded-md px-2 py-1.5 text-left transition-colors hover:bg-sidebar-accent data-[active=true]:bg-sidebar-accent"
+                                    data-active={document.relativePath === activePath || undefined}
+                                    onClick={() => onOpenDocument(document.relativePath)}
+                                  >
+                                    <div className="flex items-center gap-2 text-xs font-medium">
+                                      <span className="min-w-0 flex-1 truncate">
+                                        {documentLabel(document.name)}
+                                      </span>
+                                      <span className="shrink-0 text-[10px] font-normal text-muted-foreground">
+                                        {formatModifiedAt(document.modifiedAt)}
+                                      </span>
+                                    </div>
+                                    <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
+                                      {documentLocation(document.relativePath)}
+                                    </p>
+                                  </button>
+                                }
+                                onOpen={() => onOpenDocument(document.relativePath)}
+                                onCreateDocument={createDocumentAt}
+                                onCreateDirectory={createDirectoryAt}
+                                onRename={() => onRenameDocument(document.relativePath)}
+                                onDelete={() => onDeleteWorkspaceEntry(document.relativePath, "document")}
+                                onReveal={() => onRevealWorkspaceEntry(document.relativePath)}
+                                onCopyPath={() => onCopyWorkspaceEntryPath(document.relativePath)}
+                              />
+                            ))}
+                          </div>
+                        )
+                      ) : (
+                        <p className="px-2 py-4 text-xs leading-5 text-muted-foreground">
+                          这个工作区还没有 Markdown 文档。
+                        </p>
+                      )}
+                    </section>
+                  </>
                 ) : (
-                  <p className="px-2 py-4 text-xs leading-5 text-muted-foreground">
-                    当前文档还没有 Markdown 标题。
-                  </p>
+                  <section className="min-h-0 flex-1 overflow-y-auto pt-1 pb-2">
+                    {outline.length > 0 ? (
+                      <div className="grid gap-0.5">
+                        {outline.map((heading, index) => (
+                          <button
+                            key={`${heading.line}-${heading.text}`}
+                            type="button"
+                            className="min-h-7 w-full truncate rounded-md pr-2 text-left text-xs transition-colors hover:bg-sidebar-accent"
+                            style={{ paddingLeft: 8 + (heading.depth - 1) * 12 }}
+                            title={`${heading.text} · 第 ${heading.line} 行`}
+                            onClick={() => onSelectOutline(index, heading.line)}
+                          >
+                            {heading.text}
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="px-2 py-4 text-xs leading-5 text-muted-foreground">
+                        当前文档还没有 Markdown 标题。
+                      </p>
+                    )}
+                  </section>
                 )}
-              </section>
+              </>
             )}
           </>
         ) : (
@@ -548,52 +667,37 @@ export function WorkspaceSidebar({
           </div>
         )}
 
-        <footer className="-mx-2 mt-auto flex h-11 shrink-0 items-center gap-1 px-2 text-xs text-muted-foreground">
+        <footer className="-mx-2 mt-auto flex h-11 shrink-0 items-center gap-1 border-t border-sidebar-border px-2 text-xs text-muted-foreground">
           <Button
             type="button"
             variant="ghost"
             size="icon-xs"
-            aria-label="新建文档"
-            title="新建文档"
+            aria-label={activeSection === "tasks" ? "新建任务" : "新建文档"}
+            title={activeSection === "tasks" ? "新建任务" : "新建文档"}
             disabled={!workspace}
-            onClick={() => onCreateDocument()}
+            onClick={activeSection === "tasks" ? onNewTask : () => onCreateDocument()}
           >
             <Icon icon={Add01Icon} size={15} />
           </Button>
-          {workspace ? (
-            <Popover>
-              <PopoverTrigger
-                render={
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 min-w-0 flex-1 px-2 text-xs font-normal data-[popup-open]:bg-sidebar-accent data-[popup-open]:text-sidebar-accent-foreground"
-                    title={workspace.rootPath}
-                  />
-                }
-              >
-                <span className="truncate">{workspace.name}</span>
-              </PopoverTrigger>
-              {workspaceMenu}
-            </Popover>
+          <span className="min-w-0 flex-1 truncate px-2 text-center">{workspace?.name ?? "Tessera"}</span>
+          {activeSection === "files" ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              aria-label={layout === "tree" ? "切换到文档列表" : "切换到文件树"}
+              title={layout === "tree" ? "切换到文档列表" : "切换到文件树"}
+              disabled={!workspace}
+              onClick={() => {
+                setPane("files")
+                setLayout((current) => (current === "tree" ? "list" : "tree"))
+              }}
+            >
+              <Icon icon={layout === "tree" ? ListViewIcon : FolderTreeIcon} size={15} />
+            </Button>
           ) : (
-            <span className="min-w-0 flex-1 truncate px-2">Tessera</span>
+            <span className="size-7" aria-hidden="true" />
           )}
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            aria-label={layout === "tree" ? "切换到文档列表" : "切换到文件树"}
-            title={layout === "tree" ? "切换到文档列表" : "切换到文件树"}
-            disabled={!workspace}
-            onClick={() => {
-              setPane("files")
-              setLayout((current) => (current === "tree" ? "list" : "tree"))
-            }}
-          >
-            <Icon icon={layout === "tree" ? ListViewIcon : FolderTreeIcon} size={15} />
-          </Button>
         </footer>
       </div>
     </aside>

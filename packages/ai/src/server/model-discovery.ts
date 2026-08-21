@@ -37,6 +37,13 @@ export interface AiModelDiscoveryOptions {
 }
 
 export class AiProviderConnectionError extends Error {
+  constructor(
+    message: string,
+    readonly code: "catalog-unsupported" | "request-failed" = "request-failed",
+  ) {
+    super(message)
+  }
+
   override readonly name = "AiProviderConnectionError"
 }
 
@@ -55,6 +62,8 @@ function validateConnection(input: AiProviderConnectionInput) {
 
   const apiKey = typeof input.apiKey === "string" ? input.apiKey.trim() : ""
   const baseUrl = typeof input.baseUrl === "string" ? input.baseUrl.trim() : ""
+  const configId = typeof input.configId === "string" ? input.configId.trim() : ""
+  if (!configId || configId.length > 128) throw new AiProviderConnectionError("连接 ID 无效。")
   if (apiKey.length > MAX_API_KEY_LENGTH) throw new AiProviderConnectionError("API Key 长度无效。")
   if (!baseUrl || baseUrl.length > MAX_BASE_URL_LENGTH) {
     throw new AiProviderConnectionError("请输入有效的 API 地址。")
@@ -76,11 +85,11 @@ function validateConnection(input: AiProviderConnectionInput) {
     throw new AiProviderConnectionError("API 地址不能包含查询参数或片段。")
   }
 
-  return { apiKey, baseUrl: parsedBaseUrl, providerId: input.providerId }
+  return { apiKey, baseUrl: parsedBaseUrl, configId, providerId: input.providerId }
 }
 
 export function createAiModelCatalogUrl(providerId: AiProviderId, baseUrl: string): string {
-  const connection = validateConnection({ providerId, baseUrl, apiKey: "" })
+  const connection = validateConnection({ configId: providerId, providerId, baseUrl, apiKey: "" })
   const url = new URL(connection.baseUrl)
   let normalizedPath = url.pathname.replace(/\/+$/u, "")
   const lowercasePath = normalizedPath.toLocaleLowerCase()
@@ -324,6 +333,12 @@ export async function listAiProviderModels(
 
     if (emptyResult) return emptyResult
     const failure = preferredFailure(failures)
+    if (failure?.status === 404 || failure?.status === 405) {
+      throw new AiProviderConnectionError(
+        "此兼容端点未提供模型目录；这不影响推理，请手动添加模型 ID。",
+        "catalog-unsupported",
+      )
+    }
     throw new AiProviderConnectionError(failure?.message ?? "请求供应商模型列表失败。")
   } catch (error) {
     if (error instanceof AiProviderConnectionError) throw error

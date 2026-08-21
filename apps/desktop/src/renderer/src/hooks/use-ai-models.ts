@@ -33,6 +33,8 @@ export function selectAvailableAiModels(configs: readonly AiProviderConfig[]): A
           .filter((model) => model.enabled)
           .map((model) => ({
             ...model,
+            configId: config.configId,
+            displayName: config.displayName,
             providerId: config.providerId,
             providerName: PROVIDER_NAMES[config.providerId],
           }))
@@ -89,6 +91,7 @@ export function useAiModels() {
           const result = await desktopApi.listAiProviderModels({
             apiKey: "",
             baseUrl: config.baseUrl,
+            configId: config.configId,
             providerId: config.providerId,
           })
           if (!result.ok) throw new Error(`${PROVIDER_NAMES[config.providerId]}：${result.error}`)
@@ -97,6 +100,8 @@ export function useAiModels() {
           }
           const saveResult = await desktopApi.saveAiProviderConfig({
             baseUrl: config.baseUrl,
+            configId: config.configId,
+            displayName: config.displayName,
             enabled: config.enabled,
             models: mergeModelsForTaskRefresh(config, result.models),
             providerId: config.providerId,
@@ -107,10 +112,10 @@ export function useAiModels() {
       )
       if (requestVersion !== requestVersionRef.current) return
 
-      const refreshedConfigs = new Map(configs.map((config) => [config.providerId, config]))
+      const refreshedConfigs = new Map(configs.map((config) => [config.configId, config]))
       const failures: string[] = []
       for (const outcome of outcomes) {
-        if (outcome.status === "fulfilled") refreshedConfigs.set(outcome.value.providerId, outcome.value)
+        if (outcome.status === "fulfilled") refreshedConfigs.set(outcome.value.configId, outcome.value)
         else failures.push(outcome.reason instanceof Error ? outcome.reason.message : "刷新模型失败。")
       }
       setModels(selectAvailableAiModels([...refreshedConfigs.values()]))

@@ -26,16 +26,24 @@ const AI_PROVIDER_IDS = new Set<AiProviderId>([
   "grok",
   "openrouter",
 ])
+const MULTI_CONFIG_PROVIDER_IDS = new Set<AiProviderId>([
+  "openai-compatible",
+  "anthropic-compatible",
+])
 const CAPABILITY_STATES = new Set(["supported", "unsupported", "unknown"])
 const CAPABILITY_SOURCES = new Set(["builtin", "remote", "custom", "unknown"])
 const MAX_API_KEY_LENGTH = 16_384
 const MAX_BASE_URL_LENGTH = 2_048
 const MAX_MODEL_ID_LENGTH = 512
 const MAX_MODELS = 10_000
+const MAX_CONFIG_ID_LENGTH = 128
+const MAX_DISPLAY_NAME_LENGTH = 80
 
 export interface AiProviderConfigStoreRecord {
   apiKeyCiphertext: string | null
   baseUrl: string
+  configId: string
+  displayName: string
   enabled: boolean
   modelsJson: string
   providerId: string
@@ -43,8 +51,8 @@ export interface AiProviderConfigStoreRecord {
 }
 
 export interface AiProviderConfigStore {
-  delete(providerId: string): void
-  find(providerId: string): AiProviderConfigStoreRecord | null
+  delete(configId: string): void
+  find(configId: string): AiProviderConfigStoreRecord | null
   list(): AiProviderConfigStoreRecord[]
   save(record: AiProviderConfigStoreRecord): void
 }
@@ -56,7 +64,7 @@ export interface AiProviderSecretStorage {
 }
 
 export interface AiProviderConfigService {
-  deleteConfig(providerId: AiProviderId): void
+  deleteConfig(configId: string): void
   listConfigs(): AiProviderConfig[]
   resolveConnection(input: AiProviderConnectionInput): AiProviderConnectionInput
   saveConfig(input: AiProviderSaveInput): AiProviderConfig
@@ -80,6 +88,29 @@ function nullableString(value: unknown): string | null {
 
 function nullablePositiveInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null
+}
+
+function normalizeConfigId(value: unknown, providerId: AiProviderId): string {
+  const configId = typeof value === "string" ? value.trim() : ""
+  if (
+    !configId ||
+    configId.length > MAX_CONFIG_ID_LENGTH ||
+    !/^[a-z0-9][a-z0-9._:-]*$/iu.test(configId)
+  ) {
+    throw new AiProviderConfigError("连接 ID 无效。")
+  }
+  if (!MULTI_CONFIG_PROVIDER_IDS.has(providerId) && configId !== providerId) {
+    throw new AiProviderConfigError("官方供应商只允许保存一条连接。")
+  }
+  return configId
+}
+
+function normalizeDisplayName(value: unknown): string {
+  const displayName = typeof value === "string" ? value.trim() : ""
+  if (!displayName || displayName.length > MAX_DISPLAY_NAME_LENGTH) {
+    throw new AiProviderConfigError(`连接名称不能为空，且不能超过 ${MAX_DISPLAY_NAME_LENGTH} 个字符。`)
+  }
+  return displayName
 }
 
 function normalizeBaseUrl(value: unknown): string {
@@ -178,6 +209,8 @@ function hexToBytes(value: string): Uint8Array {
 function publicConfig(record: AiProviderConfigStoreRecord): AiProviderConfig | null {
   if (!isProviderId(record.providerId)) return null
   return {
+    configId: record.configId,
+    displayName: record.displayName,
     providerId: record.providerId,
     enabled: record.enabled,
     baseUrl: record.baseUrl,
@@ -214,9 +247,11 @@ export function createAiProviderConfigService({
         throw new AiProviderConfigError("不支持这个 AI 供应商。")
       }
       if (typeof input.enabled !== "boolean") throw new AiProviderConfigError("供应商启用状态无效。")
+      const configId = normalizeConfigId(input.configId, input.providerId)
+      const displayName = normalizeDisplayName(input.displayName)
       const baseUrl = normalizeBaseUrl(input.baseUrl)
       const models = normalizeModels(input.models, input.providerId)
-      const existing = store.find(input.providerId)
+      const existing = store.find(configId)
       let apiKeyCiphertext = existing?.apiKeyCiphertext ?? null
       if (input.removeApiKey) {
         apiKeyCiphertext = null
@@ -228,6 +263,8 @@ export function createAiProviderConfigService({
       }
 
       const record: AiProviderConfigStoreRecord = {
+        configId,
+        displayName,
         providerId: input.providerId,
         enabled: input.enabled,
         baseUrl,
@@ -241,23 +278,30 @@ export function createAiProviderConfigService({
       return config
     },
 
-    deleteConfig: (providerId) => {
-      if (!isProviderId(providerId)) throw new AiProviderConfigError("不支持这个 AI 供应商。")
-      store.delete(providerId)
+    deleteConfig: (configId) => {
+      if (typeof configId !== "string" || !configId.trim()) {
+        throw new AiProviderConfigError("连接 ID 无效。")
+      }
+      store.delete(configId.trim())
     },
 
     resolveConnection: (input) => {
       if (!isRecord(input) || !isProviderId(input.providerId)) {
         throw new AiProviderConfigError("不支持这个 AI 供应商。")
       }
+      const configId = normalizeConfigId(input.configId, input.providerId)
       if (typeof input.apiKey === "string" && input.apiKey.trim()) {
-        return { ...input, apiKey: input.apiKey.trim() }
+        return { ...input, configId, apiKey: input.apiKey.trim() }
       }
-      const ciphertext = store.find(input.providerId)?.apiKeyCiphertext
-      if (!ciphertext) return { ...input, apiKey: "" }
+      const config = store.find(configId)
+      if (config && config.providerId !== input.providerId) {
+        throw new AiProviderConfigError("连接与所选协议不匹配。")
+      }
+      const ciphertext = config?.apiKeyCiphertext
+      if (!ciphertext) return { ...input, configId, apiKey: "" }
       requireEncryption()
       try {
-        return { ...input, apiKey: secretStorage.decrypt(hexToBytes(ciphertext)) }
+        return { ...input, configId, apiKey: secretStorage.decrypt(hexToBytes(ciphertext)) }
       } catch (error) {
         if (error instanceof AiProviderConfigError) throw error
         throw new AiProviderConfigError("保存的 API Key 无法解密，请删除后重新保存。")

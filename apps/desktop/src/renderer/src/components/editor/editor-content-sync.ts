@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 编辑器内容读取器、文档身份、草稿回调与延迟时长
- * [OUTPUT]: 可调度、强制提交和取消的编辑器内容同步控制器
- * [POS]: 编辑器本地交易与 React 草稿提交之间的时间调度边界
+ * [OUTPUT]: 可调度、暂停、恢复、强制提交和取消的编辑器内容同步控制器
+ * [POS]: 编辑器本地交易、IME composition 与 React 草稿提交之间的时间调度边界
  * [DOC]: docs/architecture/editor.md
  *
  * [PROTOCOL]:
@@ -22,6 +22,8 @@ export interface EditorContentSyncController {
   cancel: () => void
   flush: () => void
   hasPending: () => boolean
+  pause: () => void
+  resume: () => void
   schedule: (pendingSync: PendingEditorContentSync) => void
 }
 
@@ -30,6 +32,7 @@ export function createEditorContentSyncController(
 ): EditorContentSyncController {
   let pendingSync: PendingEditorContentSync | null = null
   let timer: ReturnType<typeof setTimeout> | null = null
+  let paused = false
 
   const clearTimer = () => {
     if (timer === null) return
@@ -45,6 +48,11 @@ export function createEditorContentSyncController(
     currentSync.onContentChange(currentSync.documentPath, currentSync.readContent())
   }
 
+  const scheduleFlush = () => {
+    if (paused || !pendingSync) return
+    timer = setTimeout(flush, delay)
+  }
+
   return {
     cancel: () => {
       clearTimer()
@@ -52,10 +60,19 @@ export function createEditorContentSyncController(
     },
     flush,
     hasPending: () => pendingSync !== null,
+    pause: () => {
+      paused = true
+      clearTimer()
+    },
+    resume: () => {
+      if (!paused) return
+      paused = false
+      scheduleFlush()
+    },
     schedule: (nextSync) => {
       pendingSync = nextSync
       clearTimer()
-      timer = setTimeout(flush, delay)
+      scheduleFlush()
     },
   }
 }

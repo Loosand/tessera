@@ -1,6 +1,6 @@
 /**
- * [INPUT]: Drizzle 数据库实例、当前工作区与任务会话快照
- * [OUTPUT]: 跨工作区最近任务、工作区任务列表，以及会话消息快照的幂等读写
+ * [INPUT]: Drizzle 数据库实例、可选工作区绑定与版本化任务消息
+ * [OUTPUT]: 跨工作区最近任务、工作区任务列表，以及通用 Chat/Agent 会话的幂等读写、重命名和删除
  * [POS]: 普通对话与后续 Agent 共用的任务会话持久化边界
  * [DOC]: docs/architecture/database.md、docs/architecture/task-navigation.md
  *
@@ -10,83 +10,76 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import { and, desc, eq } from "drizzle-orm"
+import { asc, desc, eq } from "drizzle-orm"
 import type { DatabaseClient } from "./client"
-import { agentEvents, agentSessions, workspaces } from "./schema"
-
-const CHAT_SNAPSHOT_KIND = "chat.snapshot"
-const CHAT_SNAPSHOT_SEQUENCE = 0
+import { taskMessages, taskSessions, workspaces } from "./schema"
 
 export interface TaskSessionRecordInput {
   id: string
-  messagesJson: string
+  messagePayloads: readonly string[]
+  mode: "chat" | "agent"
   status: "idle" | "running" | "completed" | "failed" | "cancelled"
   title: string
   updatedAt: Date
-  workspaceId: string
+  workspaceId: string | null
 }
 
 function selectTaskSummaries(client: DatabaseClient) {
   return client.db
     .select({
-      id: agentSessions.id,
-      workspaceId: agentSessions.workspaceId,
+      id: taskSessions.id,
+      mode: taskSessions.mode,
+      workspaceId: taskSessions.workspaceId,
       workspaceName: workspaces.displayName,
-      title: agentSessions.title,
-      status: agentSessions.status,
-      createdAt: agentSessions.createdAt,
-      updatedAt: agentSessions.updatedAt,
+      title: taskSessions.title,
+      status: taskSessions.status,
+      createdAt: taskSessions.createdAt,
+      updatedAt: taskSessions.updatedAt,
     })
-    .from(agentSessions)
-    .innerJoin(workspaces, eq(agentSessions.workspaceId, workspaces.id))
+    .from(taskSessions)
+    .leftJoin(workspaces, eq(taskSessions.workspaceId, workspaces.id))
 }
 
 export function listWorkspaceTaskSessions(client: DatabaseClient, workspaceId: string, limit = 100) {
   return selectTaskSummaries(client)
-    .where(eq(agentSessions.workspaceId, workspaceId))
-    .orderBy(desc(agentSessions.updatedAt))
+    .where(eq(taskSessions.workspaceId, workspaceId))
+    .orderBy(desc(taskSessions.updatedAt))
     .limit(limit)
     .all()
 }
 
 export function listRecentTaskSessions(client: DatabaseClient, limit = 12) {
-  return selectTaskSummaries(client).orderBy(desc(agentSessions.updatedAt)).limit(limit).all()
+  return selectTaskSummaries(client).orderBy(desc(taskSessions.updatedAt)).limit(limit).all()
 }
 
-export function findTaskSession(client: DatabaseClient, workspaceId: string, taskId: string) {
-  const session = selectTaskSummaries(client)
-    .where(and(eq(agentSessions.id, taskId), eq(agentSessions.workspaceId, workspaceId)))
-    .get()
+export function findTaskSession(client: DatabaseClient, taskId: string) {
+  const session = selectTaskSummaries(client).where(eq(taskSessions.id, taskId)).get()
   if (!session) return null
 
-  const snapshot = client.db
-    .select({ payload: agentEvents.payload })
-    .from(agentEvents)
-    .where(
-      and(
-        eq(agentEvents.sessionId, taskId),
-        eq(agentEvents.sequence, CHAT_SNAPSHOT_SEQUENCE),
-        eq(agentEvents.kind, CHAT_SNAPSHOT_KIND),
-      ),
-    )
-    .get()
+  const messages = client.db
+    .select({ payloadJson: taskMessages.payloadJson })
+    .from(taskMessages)
+    .where(eq(taskMessages.taskId, taskId))
+    .orderBy(asc(taskMessages.sequence))
+    .all()
 
-  return { ...session, messagesJson: snapshot?.payload ?? "[]" }
+  return { ...session, messagePayloads: messages.map((message) => message.payloadJson) }
 }
 
 export function saveTaskSession(client: DatabaseClient, input: TaskSessionRecordInput) {
   client.db.transaction((transaction) => {
     transaction
-      .insert(agentSessions)
+      .insert(taskSessions)
       .values({
         id: input.id,
+        mode: input.mode,
         workspaceId: input.workspaceId,
         title: input.title,
         status: input.status,
         updatedAt: input.updatedAt,
       })
       .onConflictDoUpdate({
-        target: agentSessions.id,
+        target: taskSessions.id,
         set: {
           title: input.title,
           status: input.status,
@@ -95,24 +88,34 @@ export function saveTaskSession(client: DatabaseClient, input: TaskSessionRecord
       })
       .run()
 
-    transaction
-      .insert(agentEvents)
-      .values({
-        id: `${input.id}:${CHAT_SNAPSHOT_KIND}`,
-        sessionId: input.id,
-        sequence: CHAT_SNAPSHOT_SEQUENCE,
-        kind: CHAT_SNAPSHOT_KIND,
-        payload: input.messagesJson,
-      })
-      .onConflictDoUpdate({
-        target: [agentEvents.sessionId, agentEvents.sequence],
-        set: {
-          kind: CHAT_SNAPSHOT_KIND,
-          payload: input.messagesJson,
-        },
-      })
-      .run()
+    transaction.delete(taskMessages).where(eq(taskMessages.taskId, input.id)).run()
+    if (input.messagePayloads.length > 0) {
+      transaction
+        .insert(taskMessages)
+        .values(
+          input.messagePayloads.map((payloadJson, sequence) => ({
+            id: `${input.id}:${sequence}`,
+            taskId: input.id,
+            sequence,
+            payloadJson,
+          })),
+        )
+        .run()
+    }
   })
 
-  return findTaskSession(client, input.workspaceId, input.id)
+  return findTaskSession(client, input.id)
+}
+
+export function renameTaskSession(client: DatabaseClient, taskId: string, title: string) {
+  const result = client.db
+    .update(taskSessions)
+    .set({ title, updatedAt: new Date() })
+    .where(eq(taskSessions.id, taskId))
+    .run()
+  return result.changes > 0 ? findTaskSession(client, taskId) : null
+}
+
+export function deleteTaskSession(client: DatabaseClient, taskId: string) {
+  return client.db.delete(taskSessions).where(eq(taskSessions.id, taskId)).run().changes > 0
 }

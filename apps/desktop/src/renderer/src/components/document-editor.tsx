@@ -1,8 +1,8 @@
 /**
- * [INPUT]: 当前 Markdown 文档、草稿内容、模式保护与编辑器同步操作
- * [OUTPUT]: 保活的即时预览/源码编辑器、大文档保护以及冲突提示
+ * [INPUT]: 当前 Markdown 文档、草稿内容、性能/兼容性保护与编辑器同步操作
+ * [OUTPUT]: 保活的即时预览/源码编辑器、源码优先保护以及冲突提示
  * [POS]: 工作区主区域的文档编辑编排层
- * [DOC]: design.md
+ * [DOC]: design.md、docs/architecture/editor.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -14,6 +14,8 @@ import type { DocumentSnapshot } from "@tessera/contracts"
 import { Button } from "@tessera/design-system/components/ui/button"
 import { useEffect, useState } from "react"
 import type { DefaultEditorMode } from "../hooks/use-app-preferences"
+import type { RichTextEditorGuard } from "./editor/editor-mode-policy"
+import { resolveEditorShortcut } from "./editor/editor-shortcuts"
 import { RichTextEditor } from "./editor/rich-text-editor"
 
 interface DocumentEditorProps {
@@ -22,11 +24,11 @@ interface DocumentEditorProps {
   hasWorkspace: boolean
   isLoading: boolean
   hasExternalConflict: boolean
-  isLargeDocumentGuarded: boolean
+  richEditorGuard: RichTextEditorGuard | null
   mode: DefaultEditorMode
   spellCheck: boolean
   onSelectWorkspace: () => void
-  onAllowLargeDocumentRich: () => void
+  onAllowGuardedRich: () => void
   onContentChange: (documentPath: string, content: string) => void
   onFlushPendingEditsReady: (flush: (() => void) | null) => void
   onModeChange: (mode: DefaultEditorMode) => void
@@ -40,11 +42,11 @@ export function DocumentEditor({
   hasWorkspace,
   isLoading,
   hasExternalConflict,
-  isLargeDocumentGuarded,
+  richEditorGuard,
   mode,
   spellCheck,
   onSelectWorkspace,
-  onAllowLargeDocumentRich,
+  onAllowGuardedRich,
   onContentChange,
   onFlushPendingEditsReady,
   onModeChange,
@@ -55,19 +57,20 @@ export function DocumentEditor({
   const documentPath = document?.relativePath
 
   useEffect(() => {
-    if (mode === "rich" && documentPath && !isLargeDocumentGuarded) {
+    if (mode === "rich" && documentPath && !richEditorGuard) {
       setRichMountedDocumentPath(documentPath)
     }
-  }, [documentPath, isLargeDocumentGuarded, mode])
+  }, [documentPath, mode, richEditorGuard])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+      const shortcut = resolveEditorShortcut(event)
+      if (shortcut === "save") {
         event.preventDefault()
         void onSave()
         return
       }
-      if ((event.metaKey || event.ctrlKey) && event.key === "/") {
+      if (shortcut === "toggle-mode") {
         event.preventDefault()
         onModeChange(mode === "rich" ? "source" : "rich")
       }
@@ -112,7 +115,7 @@ export function DocumentEditor({
   }
 
   const shouldRenderRichEditor =
-    !isLargeDocumentGuarded && (mode === "rich" || richMountedDocumentPath === document.relativePath)
+    !richEditorGuard && (mode === "rich" || richMountedDocumentPath === document.relativePath)
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -125,14 +128,20 @@ export function DocumentEditor({
         </div>
       ) : null}
 
-      {isLargeDocumentGuarded ? (
+      {richEditorGuard ? (
         <div className="flex items-center justify-between gap-4 border-b border-border bg-muted/45 px-4 py-2 text-xs text-muted-foreground">
-          <span>文档较大，已使用 Markdown 源码模式以保持输入流畅。</span>
+          <span>
+            {richEditorGuard.kind === "large-document"
+              ? "文档较大，已使用 Markdown 源码模式以保持输入流畅。"
+              : richEditorGuard.kind === "many-blocks"
+                ? "文档区块较多，已使用 Markdown 源码模式以避免打开时卡顿。"
+                : "文档包含即时预览暂时无法保真往返的语法，已使用源码模式保护原文。"}
+          </span>
           <Button
             variant="outline"
             size="xs"
             className="h-6 shrink-0 px-2 text-[11px]"
-            onClick={onAllowLargeDocumentRich}
+            onClick={onAllowGuardedRich}
           >
             仍使用即时预览
           </Button>

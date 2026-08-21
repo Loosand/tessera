@@ -22,7 +22,7 @@ Tessera 当前聚焦文档写作，不计划为 Slides、视频或交互网页�
 
 - **已实现**：Electron 安全外壳、本地工作区、Markdown 即时预览与源码编辑、自动保存、外部修改冲突处理、
 SQLite 基础数据层和设计系统。
-- **部分实现**：`AgentRuntime`、Skill 与权限已经有领域契约，尚未形成可用的研究和写作流程。
+- **部分实现**：AI SDK `ToolLoopAgent` 已接入统一 `AgentRuntime`，支持工作区研究、只读子 Agent、可点击引用和 Markdown Diff 审批写入；MCP、Shell 与 durable 自动续跑仍在后续权限阶段。
 - **规划**：网页与文档采集、主动研究、跨材料问答、引用核查、Agent Diff 和 Skill 安装执行。
 - **待确定**：开源许可证与商业分发边界。
 
@@ -50,6 +50,8 @@ bun run check
 
 `bun run check` 依次执行格式检查、lint、类型检查、测试和构建。需要单独运行某一阶段时，可使用
 `bun run format`、`bun run lint`、`bun run typecheck`、`bun run test` 或 `bun run build`。
+编辑器性能可使用 `bun run benchmark:editor`，Markdown 解析块数曲线与 CPU 热点可分别使用
+`bun run benchmark:editor:parser`、`bun run benchmark:editor:parser:cpu`。
 
 如果当前网络无法下载 Electron 预构建文件，可以在安装时临时指定镜像：
 

@@ -1,8 +1,8 @@
 /**
- * [INPUT]: 对话草稿、附件、模型能力、生成状态与提交/停止回调
- * [OUTPUT]: 可按内容有限增高、以图标能力入口和模型状态组织的紧凑任务输入框
+ * [INPUT]: 对话草稿、任务模式、只读范围、附件、模型能力、生成状态与提交/停止回调
+ * [OUTPUT]: 可按内容有限增高、以原生模式单选、图标能力入口、模型/范围状态和行内反馈组织的紧凑任务输入框
  * [POS]: task-page 的可复用底部/空状态输入表面
- * [DOC]: design.md、docs/architecture/ai-chat-agent-todo.md
+ * [DOC]: design.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -10,7 +10,7 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import type { AiChatReasoning } from "@tessera/contracts"
+import type { AiChatReasoning, TaskMode } from "@tessera/contracts"
 import {
   Add01Icon,
   AiWebBrowsingIcon,
@@ -41,6 +41,7 @@ export interface ComposerImage {
 }
 
 interface TaskComposerProps {
+  agentReady: boolean
   compact?: boolean
   images: readonly ComposerImage[]
   model: AvailableAiModel | undefined
@@ -49,12 +50,16 @@ interface TaskComposerProps {
   onAddImages: (files: FileList) => void
   onChange: (value: string) => void
   onModelChange: (key: string) => void
+  onModeChange: (mode: TaskMode) => void
   onReasoningChange: (reasoning: AiChatReasoning) => void
   onRemoveImage: (id: string) => void
   onStop: () => void
   onSubmit: () => void
   onWebSearchChange: (enabled: boolean) => void
   reasoning: AiChatReasoning
+  scope: string
+  mode: TaskMode
+  modeLocked: boolean
   selectedModelKey: string
   status: "error" | "ready" | "streaming" | "submitted"
   value: string
@@ -70,6 +75,7 @@ const REASONING_LABELS: Record<AiChatReasoning, string> = {
 }
 
 export function TaskComposer({
+  agentReady,
   compact = false,
   images,
   model,
@@ -78,12 +84,16 @@ export function TaskComposer({
   onAddImages,
   onChange,
   onModelChange,
+  onModeChange,
   onReasoningChange,
   onRemoveImage,
   onStop,
   onSubmit,
   onWebSearchChange,
   reasoning,
+  scope,
+  mode,
+  modeLocked,
   selectedModelKey,
   status,
   value,
@@ -91,8 +101,12 @@ export function TaskComposer({
 }: TaskComposerProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const running = status === "submitted" || status === "streaming"
-  const canSubmit = Boolean(model && (value.trim() || images.length > 0))
-  const supportsSearch = model?.capabilities?.search === "supported"
+  const canSubmit = Boolean(
+    model &&
+      (value.trim() || images.length > 0) &&
+      (mode === "chat" || (agentReady && model.capabilities?.toolUse === "supported")),
+  )
+  const supportsSearch = mode === "chat" && model?.capabilities?.search === "supported"
   const supportsReasoning = model?.capabilities?.reasoning === "supported"
   const supportsImages = model?.capabilities?.imageInput === "supported"
   const submit = (event: FormEvent<HTMLFormElement>) => {
@@ -145,7 +159,7 @@ export function TaskComposer({
             onKeyDown={handleKeyDown}
           />
 
-          <div className="flex min-h-11 flex-wrap items-center gap-1 px-3 pb-2.5">
+          <div className="flex min-h-11 items-center gap-1 px-3 pb-2.5">
             <input
               ref={fileInputRef}
               type="file"
@@ -230,7 +244,47 @@ export function TaskComposer({
               </TooltipContent>
             </Tooltip>
 
-            <div className="ml-auto flex min-w-0 items-center gap-1.5">
+            <div className="min-w-0 flex-1 px-1.5">
+              {notice ? (
+                <p
+                  id="task-composer-notice"
+                  className="truncate text-xs text-destructive"
+                  title={notice}
+                  aria-live="polite"
+                >
+                  {notice}
+                </p>
+              ) : scope ? (
+                <p className="truncate text-[11px] text-muted-foreground" title={scope}>
+                  {scope}
+                </p>
+              ) : null}
+            </div>
+
+            <div className="flex min-w-0 shrink-0 items-center gap-1.5">
+              <fieldset
+                className="flex shrink-0 rounded-md bg-muted/70 p-0.5"
+                aria-label="任务模式"
+                disabled={modeLocked || running}
+              >
+                {(["chat", "agent"] as const).map((option) => (
+                  <label
+                    key={option}
+                    className="relative cursor-pointer rounded-[5px] px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors has-[:checked]:bg-background has-[:checked]:text-foreground has-[:checked]:shadow-xs has-[:disabled]:cursor-default has-[:disabled]:opacity-70 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring"
+                  >
+                    <input
+                      type="radio"
+                      name={`task-mode-${compact ? "compact" : "empty"}`}
+                      value={option}
+                      checked={mode === option}
+                      className="sr-only"
+                      onChange={() => onModeChange(option)}
+                    />
+                    {option === "chat" ? "Chat" : "Agent"}
+                  </label>
+                ))}
+              </fieldset>
+
               <ModelPicker
                 model={model}
                 models={models}
@@ -252,15 +306,6 @@ export function TaskComposer({
             </div>
           </div>
         </div>
-        {notice ? (
-          <p
-            id="task-composer-notice"
-            className={`${compact ? "mt-2" : "mt-3"} text-center text-xs text-muted-foreground`}
-            aria-live="polite"
-          >
-            {notice}
-          </p>
-        ) : null}
       </form>
     </TooltipProvider>
   )

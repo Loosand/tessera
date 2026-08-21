@@ -7,10 +7,12 @@
   "exports": {
     ".": "./index.ts",
     "./ai-provider-config-repository": "./ai-provider-config-repository.ts",
+    "./agent-change-repository": "./agent-change-repository.ts",
     "./client": "./client.ts",
     "./migrations": "./migrations/index.ts",
     "./schema": "./schema.ts",
     "./task-session-repository": "./task-session-repository.ts",
+    "./task-run-repository": "./task-run-repository.ts",
     "./workspace-repository": "./workspace-repository.ts"
   },
   "scripts": {

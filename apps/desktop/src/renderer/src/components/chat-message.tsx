@@ -1,8 +1,8 @@
 /**
- * [INPUT]: AI SDK UIMessage、当前回复状态与重新生成回调
- * [OUTPUT]: 用户消息与按原始 Part 顺序组合的助手回复及轻量消息操作
- * [POS]: task-page 的普通对话消息协调层
- * [DOC]: design.md、docs/architecture/ai-chat-agent-todo.md
+ * [INPUT]: AI SDK UIMessage、当前回复状态、变更预览/审批、文件跳转与重新生成回调
+ * [OUTPUT]: 用户消息与按原始 Part 顺序、稳定唯一键组合的助手回复、工具审查及轻量消息操作
+ * [POS]: task-page 的 Chat/Agent 消息协调层
+ * [DOC]: design.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -11,9 +11,12 @@
  */
 
 import type { UIMessage } from "@tessera/ai/react"
-import { BrainCircuitIcon, Copy01Icon, Refresh01Icon } from "@tessera/design-system/components/icons"
+import type { AgentChangePreview } from "@tessera/contracts"
+import { Copy01Icon, Refresh01Icon } from "@tessera/design-system/components/icons"
+import { LoadingState } from "@tessera/design-system/components/loading-state"
 import { Button } from "@tessera/design-system/components/ui/button"
 import { Icon } from "@tessera/design-system/components/ui/icon"
+import { ReasoningPart } from "./chat-parts/reasoning-part"
 import { SourcePart } from "./chat-parts/source-part"
 import { TextPart } from "./chat-parts/text-part"
 import { ToolPart, isToolPart } from "./chat-parts/tool-part"
@@ -21,7 +24,10 @@ import { ToolPart, isToolPart } from "./chat-parts/tool-part"
 interface ChatMessageProps {
   isLast: boolean
   message: UIMessage
+  loadAgentChangePreview?: ((approvalId: string) => Promise<AgentChangePreview>) | undefined
+  onOpenDocument?: ((path: string, line?: number) => void) | undefined
   onRegenerate: () => void
+  onToolApproval?: ((approvalId: string, approved: boolean) => void) | undefined
   running: boolean
 }
 
@@ -32,20 +38,34 @@ function messageText(message: UIMessage) {
     .join("")
 }
 
-export function ChatMessage({ isLast, message, onRegenerate, running }: ChatMessageProps) {
+export function chatMessagePartKey(messageId: string, index: number) {
+  return `${messageId}-part-${index}`
+}
+
+export function ChatMessage({
+  isLast,
+  loadAgentChangePreview,
+  message,
+  onOpenDocument,
+  onRegenerate,
+  onToolApproval,
+  running,
+}: ChatMessageProps) {
   const text = messageText(message)
   const files = message.parts.filter((part) => part.type === "file")
-  const reasoning = message.parts
-    .filter((part) => part.type === "reasoning")
-    .map((part) => part.text)
-    .join("")
+  const hasReasoning = message.parts.some((part) => part.type === "reasoning")
   const assistantStreaming = running && isLast
   let lastTextPartIndex = -1
+  let lastReasoningPartIndex = -1
   for (let index = message.parts.length - 1; index >= 0; index -= 1) {
-    if (message.parts[index]?.type === "text") {
+    const part = message.parts[index]
+    if (lastTextPartIndex === -1 && part?.type === "text") {
       lastTextPartIndex = index
-      break
     }
+    if (lastReasoningPartIndex === -1 && part?.type === "reasoning") {
+      lastReasoningPartIndex = index
+    }
+    if (lastTextPartIndex !== -1 && lastReasoningPartIndex !== -1) break
   }
 
   if (message.role === "user") {
@@ -74,33 +94,42 @@ export function ChatMessage({ isLast, message, onRegenerate, running }: ChatMess
 
   return (
     <article className="group max-w-none" aria-label="AI 回复">
-      {reasoning ? (
-        <div
-          className="mb-3 flex items-center gap-1.5 text-xs text-muted-foreground"
-          aria-label={assistantStreaming ? "模型正在思考" : "模型已完成思考"}
-        >
-          <Icon icon={BrainCircuitIcon} size={13} />
-          {assistantStreaming ? "正在思考…" : "已完成思考"}
-        </div>
-      ) : null}
       {message.parts.map((part, index) => {
-        if (part.type === "text") {
+        const partKey = chatMessagePartKey(message.id, index)
+        if (part.type === "reasoning") {
           return (
-            <TextPart
-              key={`${message.id}-text-${index}`}
+            <ReasoningPart
+              key={partKey}
               part={part}
-              streaming={assistantStreaming && index === lastTextPartIndex && part.state !== "done"}
+              streaming={assistantStreaming && index === lastReasoningPartIndex && part.state !== "done"}
             />
           )
         }
-        if (isToolPart(part)) return <ToolPart key={part.toolCallId} part={part} />
+        if (part.type === "text") {
+          return (
+            <TextPart
+              key={partKey}
+              part={part}
+              streaming={assistantStreaming && index === lastTextPartIndex && part.state !== "done"}
+              onOpenWorkspaceReference={onOpenDocument}
+            />
+          )
+        }
+        if (isToolPart(part)) {
+          return (
+            <ToolPart
+              key={partKey}
+              part={part}
+              loadAgentChangePreview={loadAgentChangePreview}
+              onOpenDocument={onOpenDocument}
+              onToolApproval={onToolApproval}
+            />
+          )
+        }
         return null
       })}
-      {!text && assistantStreaming ? (
-        <output className="flex items-center gap-1.5 py-2 text-xs text-muted-foreground">
-          <span className="size-1.5 animate-pulse rounded-full bg-current" />
-          正在思考…
-        </output>
+      {!text && !hasReasoning && assistantStreaming ? (
+        <LoadingState className="py-2" label="正在思考" />
       ) : null}
       <SourcePart parts={message.parts} streaming={assistantStreaming} />
 

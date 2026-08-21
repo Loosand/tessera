@@ -6,7 +6,7 @@
 > `packages/database/ai-provider-config-repository.ts`、`packages/contracts/src/index.ts`、
 > `apps/desktop/src/main/ai-service.ts`、`apps/desktop/src/main/index.ts`、
 > `packages/ai/src/react/ai-settings.tsx`、
-> `packages/ai/src/react/ai-provider-settings.tsx`
+> `packages/ai/src/react/ai-provider-settings.tsx`、`packages/ai/src/react/use-electron-chat.ts`
 >
 > 状态：部分实现。
 
@@ -48,7 +48,7 @@
   -> 任务页重新筛选可用模型
 ```
 
-模型发现不用 `generateText`，因此测试连接和刷新目录不会产生推理费用。生成运行时通过另一个边界 `createAiSdkLanguageModel` 建立：OpenAI 兼容与 OpenRouter 使用 `@ai-sdk/openai-compatible`，Anthropic、DeepSeek 和 Grok 分别使用 `@ai-sdk/anthropic`、`@ai-sdk/deepseek` 与 `@ai-sdk/xai`。
+模型发现不用 `generateText`，因此测试连接和刷新目录不会产生推理费用。生成运行时通过另一个边界 `createAiSdkLanguageModel` 建立：OpenAI 兼容与 OpenRouter 使用 `@ai-sdk/openai-compatible`，Anthropic、DeepSeek 和 Grok 分别使用 `@ai-sdk/anthropic`、`@ai-sdk/deepseek` 与 `@ai-sdk/xai`。DeepSeek 普通对话仍走 OpenAI 格式适配器；V4 模型开启联网时切到官方 Anthropic 兼容端点，以使用服务端 Web Search tool。
 
 ## 模型能力事实
 
@@ -57,7 +57,7 @@
 - 能力使用 `supported`、`unsupported`、`unknown` 三态，未知不伪装成可用。
 - OpenRouter 返回的 `architecture.input_modalities` 与 `supported_parameters` 可补充图片、思考和工具能力；普通模型目录仅返回 ID 时，由保守的内建规则补足常见模型。
 - 能力携带 `builtin`、`remote`、`custom` 或 `unknown` 来源；内建规则升级后会重新计算，不让旧推断永久固化。
-- 目前只有 Anthropic 兼容模型与 Grok 的已验证原生搜索进入运行时；前者使用 Anthropic Web Search tool，后者切到 xAI Responses API 与 Web Search tool。OpenAI 兼容、DeepSeek 和 OpenRouter 不会仅凭模型名称伪装联网能力。
+- 目前 Anthropic 兼容模型、DeepSeek V4 与 Grok 的已验证原生搜索进入运行时：Anthropic 使用 Web Search tool；DeepSeek V4 仅在官方 `api.deepseek.com` 上切到 Anthropic 兼容协议及服务端 Web Search tool；Grok 切到 xAI Responses API 与 Web Search tool。OpenAI 兼容、旧版 DeepSeek、自定义 DeepSeek 代理和 OpenRouter 不会仅凭模型名称伪装联网能力。
 
 参考实现与类型事实来自 LobeHub 官方仓库的 [模型能力类型](https://github.com/lobehub/lobehub/blob/canary/packages/model-bank/src/types/aiModel.ts)、[搜索能力决策](https://github.com/lobehub/lobehub/blob/canary/packages/model-bank/src/utils.ts) 与 [Google 模型目录示例](https://github.com/lobehub/lobehub/blob/canary/packages/model-bank/src/aiModels/google.ts)。
 
@@ -65,15 +65,18 @@
 
 ```text
 useChat + Electron ChatTransport
-  -> preload start/cancel/event 窄接口
+  -> preload start/resume/cancel/event 窄接口
   -> 主进程确认供应商已启用、模型已启用且能力匹配
   -> safeStorage 按需解密 Key
   -> AI SDK streamText
-  -> 文本、完成原因、来源与思考状态增量
+  -> 主进程记录带 task/request/sequence 的有序事件
+  -> renderer 实时消费，或返回页面时重放后续接实时增量
   -> Markdown 消息界面
 ```
 
-普通对话只发送用户显式输入、上传图片与当前对话历史，不读取工作区。主进程只转发“已完成思考”状态，不把供应商原始 reasoning 文本送入 renderer。窗口销毁、用户停止或应用退出都会中止对应 `AbortController`。
+普通对话只发送用户显式输入、上传图片与当前对话历史，不读取工作区。主进程会把供应商明确返回的 reasoning 增量按 AI SDK Part 原始顺序送入 renderer，界面以默认展开、可折叠的紧凑 Markdown 过程块展示；正文与 reasoning 共享禁用原始 HTML 的语义渲染器。reasoning 不作为下一轮对话历史回传，也不把供应商未返回的内部思维链补写成可见内容。
+
+路由切换和组件卸载只断开 renderer 订阅，不中止主进程 `AbortController`；返回任务页时 AI SDK 的 resumable stream 入口读取主进程事件快照并按 sequence 去重重放。只有用户显式停止、任务删除、窗口销毁或应用退出会取消运行。该机制当前使用主进程内存日志，保证页面级续流，但不保证 Electron 进程退出后的恢复。
 
 任务页启动时先轻量读取本地配置；首次显示及每次从其他视图返回新任务视图时执行后台模型目录同步。配置变更事件只执行轻量配置重读。多个供应商并行同步时会分别保存成功结果并汇总错误，配置事件与同步请求并发时只采用最后一次有效结果。
 
@@ -83,7 +86,7 @@ useChat + Electron ChatTransport
 | --- | --- | --- |
 | OpenAI 兼容 | `https://api.openai.com/v1` | 推导 `/models`，Bearer |
 | Anthropic 兼容 | `https://api.anthropic.com/v1` | `/models?limit=1000`，官方地址使用 `x-api-key`；兼容地址可从 Bearer 回退到原生头 |
-| DeepSeek | `https://api.deepseek.com` | 官方根地址推导 `/models`，Bearer |
+| DeepSeek | `https://api.deepseek.com` | 官方根地址推导 `/models`，Bearer；V4 开启联网时生成端点切到 `/anthropic`，使用 `x-api-key` |
 | Grok | `https://api.x.ai/v1` | 推导 `/models`，Bearer |
 | OpenRouter | `https://openrouter.ai/api/v1` | 推导 `/models`；公共目录可匿名读取，存在 Key 时附加 Bearer |
 
@@ -102,5 +105,5 @@ useChat + Electron ChatTransport
 
 ## 后续能力
 
-- **部分实现**：普通对话已接入流式生成、取消、Markdown、来源、图片和模型能力控件；会话数据库、重启恢复、用量与耗时记录仍未实现。
+- **部分实现**：普通对话已接入流式生成、显式取消、页面断线恢复、Markdown、来源、图片和模型能力控件；任务消息数据库已实现，运行日志仍仅保存在主进程内存，应用重启恢复、用量与耗时记录尚未实现。
 - **规划**：为出站 AI 请求记录不含密钥和正文的目标、目的与数据范围审计事件。

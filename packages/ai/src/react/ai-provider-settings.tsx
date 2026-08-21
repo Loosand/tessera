@@ -546,6 +546,7 @@ function ProviderDetail({
       setNotice(null)
       try {
         const models = await onListModels({
+          configId: draft.configId,
           providerId: provider.id,
           apiKey: apiKey.trim(),
           baseUrl: draft.baseUrl.trim(),
@@ -904,7 +905,7 @@ function ProviderDetail({
 }
 
 export interface AiProviderSettingsProps {
-  deleteConfig: (providerId: AiProviderId) => Promise<void>
+  deleteConfig: (configId: string) => Promise<void>
   listConfigs: () => Promise<AiProviderConfig[]>
   listModels: (input: AiProviderConnectionInput) => Promise<AiProviderModel[]>
   saveConfig: (input: AiProviderSaveInput) => Promise<AiProviderConfig>
@@ -912,7 +913,15 @@ export interface AiProviderSettingsProps {
 }
 
 function draftFromConfig(config: AiProviderConfig): AiProviderDraft {
-  return createInitialAiProviderDrafts([config])[config.providerId]
+  return {
+    apiKeyConfigured: config.apiKeyConfigured,
+    baseUrl: config.baseUrl,
+    configId: config.configId,
+    displayName: config.displayName,
+    enabled: config.enabled,
+    models: config.models.map((model) => ({ ...model })),
+    providerId: config.providerId,
+  }
 }
 
 function saveInputFromDraft(
@@ -921,6 +930,8 @@ function saveInputFromDraft(
   apiKey = "",
 ): AiProviderSaveInput {
   return {
+    configId: draft.configId,
+    displayName: draft.displayName,
     providerId,
     enabled: draft.enabled,
     baseUrl: draft.baseUrl,
@@ -1041,7 +1052,7 @@ export function AiProviderSettings({
               setApiKeys((current) => ({ ...current, [selectedProviderId]: "" }))
             }}
             onDelete={async () => {
-              await deleteConfig(selectedProviderId)
+              await deleteConfig(drafts[selectedProviderId].configId)
               const defaults = createInitialAiProviderDrafts()
               updateProvider(selectedProviderId, defaults[selectedProviderId])
               setApiKeys((current) => ({ ...current, [selectedProviderId]: "" }))

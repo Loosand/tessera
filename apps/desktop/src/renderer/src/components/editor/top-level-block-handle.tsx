@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 当前 TipTap Editor、编辑表面激活状态、设计系统原语与共享 Motion 参数
- * [OUTPUT]: 单一浮动块手柄、顶层拖动指示与可检索块操作菜单
+ * [OUTPUT]: 支持连续多选、Markdown 剪贴板与键盘导航的单一浮动块手柄、拖动指示和操作菜单
  * [POS]: 富文本编辑器的动态区块 chrome，不创建第二套内容状态
  * [DOC]: design.md、docs/architecture/editor.md
  *
@@ -14,10 +14,12 @@ import {
   ArrowDown01Icon,
   ArrowRight01Icon,
   ArrowUp01Icon,
-  Copy01Icon,
+  ClipboardCopyIcon,
+  CopyPlusIcon,
   Delete02Icon,
   Drag01Icon,
   ParagraphIcon,
+  ScissorIcon,
   Search01Icon,
 } from "@tessera/design-system/components/icons"
 import { Icon } from "@tessera/design-system/components/ui/icon"
@@ -28,14 +30,17 @@ import { m, useReducedMotion } from "motion/react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { motionSprings } from "../../motion"
+import { resolveMarkdownClipboardShortcut, writeTopLevelBlockRangeToClipboard } from "./markdown-clipboard"
 import {
   type TextBlockKind,
-  deleteTopLevelBlock,
-  duplicateTopLevelBlock,
+  deleteTopLevelBlockRange,
+  duplicateTopLevelBlockRange,
+  findAdjacentTopLevelBlock,
   findTopLevelBlock,
   findTopLevelBlockAtStart,
-  moveTopLevelBlock,
-  moveTopLevelBlockTo,
+  findTopLevelBlockRange,
+  moveTopLevelBlockRange,
+  moveTopLevelBlockRangeTo,
   selectTopLevelBlock,
   transformTextTopLevelBlock,
 } from "./top-level-block-operations"
@@ -60,10 +65,21 @@ interface DropTarget {
   width: number
 }
 
+interface BlockSelection {
+  anchorPos: number
+  headPos: number
+}
+
+type ClipboardNotice = "copied" | "cut-stale" | "failed"
+
 interface DragGesture {
   dragging: boolean
+  extendSelection: boolean
   pointerId: number
-  sourcePos: number
+  sourceAnchorPos: number
+  sourceFrom: number
+  sourceHeadPos: number
+  sourceTo: number
   startX: number
   startY: number
 }
@@ -90,6 +106,8 @@ const TEXT_BLOCK_KINDS: Array<{ kind: TextBlockKind; label: string }> = [
 export function TopLevelBlockHandle({ active: editorActive, editor }: TopLevelBlockHandleProps) {
   const shouldReduceMotion = useReducedMotion()
   const [anchor, setAnchor] = useState<BlockAnchor | null>(null)
+  const [blockSelection, setBlockSelection] = useState<BlockSelection | null>(null)
+  const [clipboardNotice, setClipboardNotice] = useState<ClipboardNotice | null>(null)
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null)
   const [dragging, setDragging] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -125,6 +143,7 @@ export function TopLevelBlockHandle({ active: editorActive, editor }: TopLevelBl
   useEffect(() => {
     if (!editorActive) {
       setAnchor(null)
+      setBlockSelection(null)
       setMenuOpen(false)
       return
     }
@@ -185,18 +204,53 @@ export function TopLevelBlockHandle({ active: editorActive, editor }: TopLevelBl
       setAnchor((current) => (current ? readAnchor(current.pos) : null))
     }
 
+    const clearBlockSelection = () => setBlockSelection(null)
+
     editorDom.addEventListener("pointermove", handlePointerMove)
     editorDom.addEventListener("pointerleave", handlePointerLeave)
+    editorDom.addEventListener("pointerdown", clearBlockSelection)
     window.addEventListener("resize", refreshAnchor)
     window.addEventListener("scroll", refreshAnchor, true)
     return () => {
       editorDom.removeEventListener("pointermove", handlePointerMove)
       editorDom.removeEventListener("pointerleave", handlePointerLeave)
+      editorDom.removeEventListener("pointerdown", clearBlockSelection)
       window.removeEventListener("resize", refreshAnchor)
       window.removeEventListener("scroll", refreshAnchor, true)
       if (pointerFrame) cancelAnimationFrame(pointerFrame)
     }
   }, [editor, editorActive, readAnchor])
+
+  useEffect(() => {
+    if (!blockSelection) return
+    const range = findTopLevelBlockRange(editor.state.doc, blockSelection.anchorPos, blockSelection.headPos)
+    if (!range || range.blockCount < 2) return
+
+    const selectedElements: HTMLElement[] = []
+    let position = range.from
+    for (let index = range.fromIndex; index <= range.toIndex; index += 1) {
+      const nodeDom = editor.view.nodeDOM(position)
+      if (nodeDom instanceof HTMLElement) {
+        nodeDom.dataset.blockRangeSelected = "true"
+        selectedElements.push(nodeDom)
+      }
+      position += editor.state.doc.child(index).nodeSize
+    }
+
+    return () => {
+      for (const element of selectedElements) delete element.dataset.blockRangeSelected
+    }
+  }, [blockSelection, editor])
+
+  useEffect(() => {
+    const clearOnDocumentChange = ({ transaction }: { transaction: { docChanged: boolean } }) => {
+      if (transaction.docChanged) setBlockSelection(null)
+    }
+    editor.on("transaction", clearOnDocumentChange)
+    return () => {
+      editor.off("transaction", clearOnDocumentChange)
+    }
+  }, [editor])
 
   useEffect(() => {
     if (!menuOpen) return
@@ -230,6 +284,7 @@ export function TopLevelBlockHandle({ active: editorActive, editor }: TopLevelBl
     if (menuOpen) return
     setMenuQuery("")
     setTransformOpen(false)
+    setClipboardNotice(null)
   }, [menuOpen])
 
   const dispatchAtAnchor = useCallback(
@@ -245,14 +300,142 @@ export function TopLevelBlockHandle({ active: editorActive, editor }: TopLevelBl
     [anchor, editor],
   )
 
-  const selectAnchor = useCallback(() => {
-    if (!anchor) return
-    const transaction = selectTopLevelBlock(editor.state, anchor.pos)
-    if (transaction) editor.view.dispatch(transaction)
-  }, [anchor, editor])
+  const dispatchAtSelection = useCallback(
+    (
+      createTransaction: (
+        anchorPosition: number,
+        headPosition: number,
+      ) => ReturnType<typeof selectTopLevelBlock>,
+    ) => {
+      if (!anchor) return
+      const selection = blockSelection ?? { anchorPos: anchor.pos, headPos: anchor.pos }
+      const transaction = createTransaction(selection.anchorPos, selection.headPos)
+      if (!transaction) return
+      editor.view.dispatch(transaction)
+      setBlockSelection(null)
+      setMenuOpen(false)
+      setAnchor(null)
+      requestAnimationFrame(() => editor.view.focus())
+    },
+    [anchor, blockSelection, editor],
+  )
+
+  const applyBlockSelection = useCallback(
+    (selection: BlockSelection) => {
+      setBlockSelection(selection)
+      const transaction = selectTopLevelBlock(editor.state, selection.headPos)
+      if (transaction) editor.view.dispatch(transaction)
+    },
+    [editor],
+  )
+
+  const writeSelectionToClipboard = useCallback(
+    async (operation: "copy" | "cut") => {
+      if (!anchor && !blockSelection) return
+      if (!editor.markdown) {
+        setClipboardNotice("failed")
+        setMenuOpen(true)
+        return
+      }
+      const selection = blockSelection ?? (anchor ? { anchorPos: anchor.pos, headPos: anchor.pos } : null)
+      if (!selection) return
+      const sourceDoc = editor.state.doc
+      const result = await writeTopLevelBlockRangeToClipboard(
+        editor.markdown,
+        sourceDoc,
+        selection.anchorPos,
+        selection.headPos,
+        (markdown) => navigator.clipboard.writeText(markdown),
+      )
+
+      if (result !== "copied") {
+        setClipboardNotice("failed")
+        setMenuOpen(true)
+        return
+      }
+      if (operation === "copy") {
+        setClipboardNotice(menuOpen ? "copied" : null)
+        return
+      }
+      if (editor.state.doc !== sourceDoc) {
+        setClipboardNotice("cut-stale")
+        setMenuOpen(true)
+        return
+      }
+
+      const transaction = deleteTopLevelBlockRange(editor.state, selection.anchorPos, selection.headPos)
+      if (!transaction) {
+        setClipboardNotice("cut-stale")
+        setMenuOpen(true)
+        return
+      }
+      editor.view.dispatch(transaction)
+      setBlockSelection(null)
+      setClipboardNotice(null)
+      setMenuOpen(false)
+      setAnchor(null)
+      requestAnimationFrame(() => editor.view.focus())
+    },
+    [anchor, blockSelection, editor, menuOpen],
+  )
+
+  useEffect(() => {
+    if (!blockSelection) return
+
+    const handleDocumentClipboardShortcut = (event: KeyboardEvent) => {
+      const target = event.target
+      if (
+        target instanceof Node &&
+        (handleRef.current?.contains(target) || menuRef.current?.contains(target))
+      )
+        return
+      const clipboardShortcut = resolveMarkdownClipboardShortcut(event)
+      if (!clipboardShortcut) return
+      event.preventDefault()
+      void writeSelectionToClipboard(clipboardShortcut)
+    }
+
+    document.addEventListener("keydown", handleDocumentClipboardShortcut, true)
+    return () => {
+      document.removeEventListener("keydown", handleDocumentClipboardShortcut, true)
+    }
+  }, [blockSelection, writeSelectionToClipboard])
+
+  const selectAnchor = useCallback(
+    (extendSelection = false) => {
+      if (!anchor) return
+      applyBlockSelection({
+        anchorPos: extendSelection && blockSelection ? blockSelection.anchorPos : anchor.pos,
+        headPos: anchor.pos,
+      })
+    },
+    [anchor, applyBlockSelection, blockSelection],
+  )
+
+  const navigateAnchor = useCallback(
+    (direction: "down" | "up", extendSelection: boolean) => {
+      if (!anchor) return
+      const nextBlock = findAdjacentTopLevelBlock(editor.state.doc, anchor.pos, direction)
+      if (!nextBlock) return
+      const nextAnchor = readAnchor(nextBlock.pos)
+      if (!nextAnchor) return
+      setAnchor(nextAnchor)
+      setMenuOpen(false)
+      applyBlockSelection({
+        anchorPos: extendSelection && blockSelection ? blockSelection.anchorPos : nextBlock.pos,
+        headPos: nextBlock.pos,
+      })
+      requestAnimationFrame(() => handleRef.current?.focus())
+    },
+    [anchor, applyBlockSelection, blockSelection, editor, readAnchor],
+  )
+
+  const selectedRange = blockSelection
+    ? findTopLevelBlockRange(editor.state.doc, blockSelection.anchorPos, blockSelection.headPos)
+    : null
 
   const updateDropTarget = useCallback(
-    (clientX: number, clientY: number, sourcePos: number) => {
+    (clientX: number, clientY: number, sourceFrom: number, sourceTo: number) => {
       const hit = editor.view.posAtCoords({ left: clientX, top: clientY })
       if (!hit) {
         dropTargetRef.current = null
@@ -266,8 +449,7 @@ export function TopLevelBlockHandle({ active: editorActive, editor }: TopLevelBl
 
       const rect = nodeDom.getBoundingClientRect()
       const targetPos = clientY < rect.top + rect.height / 2 ? block.pos : block.pos + block.node.nodeSize
-      const source = findTopLevelBlockAtStart(editor.state.doc, sourcePos)
-      if (!source || (targetPos >= source.pos && targetPos <= source.pos + source.node.nodeSize)) {
+      if (targetPos >= sourceFrom && targetPos <= sourceTo) {
         dropTargetRef.current = null
         setDropTarget(null)
         return
@@ -290,10 +472,15 @@ export function TopLevelBlockHandle({ active: editorActive, editor }: TopLevelBl
       const gesture = dragGestureRef.current
       if (!gesture || gesture.pointerId !== pointerId) return
       if (gesture.dragging && dropTargetRef.current) {
-        const transaction = moveTopLevelBlockTo(editor.state, gesture.sourcePos, dropTargetRef.current.pos)
+        const transaction = moveTopLevelBlockRangeTo(
+          editor.state,
+          gesture.sourceAnchorPos,
+          gesture.sourceHeadPos,
+          dropTargetRef.current.pos,
+        )
         if (transaction) editor.view.dispatch(transaction)
       } else if (!gesture.dragging) {
-        selectAnchor()
+        selectAnchor(gesture.extendSelection)
         setMenuOpen((open) => !open)
       }
 
@@ -302,6 +489,7 @@ export function TopLevelBlockHandle({ active: editorActive, editor }: TopLevelBl
       setDragging(false)
       setDropTarget(null)
       if (gesture.dragging) {
+        setBlockSelection(null)
         setAnchor(null)
         requestAnimationFrame(() => editor.view.focus())
       }
@@ -320,10 +508,17 @@ export function TopLevelBlockHandle({ active: editorActive, editor }: TopLevelBl
 
   if (!editorActive || !anchor) return null
 
-  const canTransform = anchor.node.type.name === "heading" || anchor.node.type.name === "paragraph"
-  const blockLabel = BLOCK_LABELS[anchor.node.type.name] ?? "区块"
-  const canMoveUp = anchor.index > 0
-  const canMoveDown = anchor.index < editor.state.doc.childCount - 1
+  const selectedBlockCount = selectedRange?.blockCount ?? 1
+  const canTransform =
+    selectedBlockCount === 1 && (anchor.node.type.name === "heading" || anchor.node.type.name === "paragraph")
+  const blockLabel =
+    selectedBlockCount > 1 ? `${selectedBlockCount} 个区块` : (BLOCK_LABELS[anchor.node.type.name] ?? "区块")
+  const canMoveUp = (selectedRange?.fromIndex ?? anchor.index) > 0
+  const canMoveDown = (selectedRange?.toIndex ?? anchor.index) < editor.state.doc.childCount - 1
+  const copyMarkdownLabel = selectedBlockCount > 1 ? "复制所选区块的 Markdown" : "复制 Markdown"
+  const cutLabel = selectedBlockCount > 1 ? `剪切 ${selectedBlockCount} 个区块` : "剪切区块"
+  const duplicateLabel = selectedBlockCount > 1 ? "创建所选区块的副本" : "创建副本"
+  const deleteLabel = selectedBlockCount > 1 ? `删除 ${selectedBlockCount} 个区块` : "删除区块"
   const normalizedQuery = menuQuery.trim().toLocaleLowerCase()
   const matchesQuery = (label: string) =>
     !normalizedQuery || label.toLocaleLowerCase().includes(normalizedQuery)
@@ -331,9 +526,11 @@ export function TopLevelBlockHandle({ active: editorActive, editor }: TopLevelBl
     ? TEXT_BLOCK_KINDS.filter(({ label }) => matchesQuery(`转换为${label}`))
     : []
   const menuLeft = Math.max(8, Math.min(anchor.left + 30, window.innerWidth - 264))
-  const menuTop = Math.max(8, Math.min(anchor.top, window.innerHeight - 326))
+  const menuTop = Math.max(8, Math.min(anchor.top, window.innerHeight - 406))
   const transformPanelLeft = menuLeft + 252 + 198 > window.innerWidth ? -198 : 258
-  const hasMatchingAction = ["复制区块", "上移", "下移", "删除区块"].some(matchesQuery)
+  const hasMatchingAction = [copyMarkdownLabel, cutLabel, duplicateLabel, "上移", "下移", deleteLabel].some(
+    matchesQuery,
+  )
 
   return createPortal(
     <>
@@ -347,25 +544,75 @@ export function TopLevelBlockHandle({ active: editorActive, editor }: TopLevelBl
       <button
         ref={handleRef}
         type="button"
-        aria-label={`${blockLabel}区块操作`}
+        aria-label={`${blockLabel}操作；方向键导航，Shift 加方向键扩展选择`}
         aria-expanded={menuOpen}
         data-dragging={dragging || undefined}
         className="fixed z-50 flex size-6 touch-none items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[dragging=true]:cursor-grabbing data-[dragging=true]:bg-muted data-[dragging=true]:text-foreground"
         style={{ left: anchor.left, top: anchor.top }}
         onKeyDown={(event) => {
-          if (event.key !== "Enter" && event.key !== " ") return
-          event.preventDefault()
-          selectAnchor()
-          setMenuOpen((open) => !open)
+          const clipboardShortcut = resolveMarkdownClipboardShortcut(event)
+          if (clipboardShortcut) {
+            event.preventDefault()
+            void writeSelectionToClipboard(clipboardShortcut)
+            return
+          }
+          if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+            event.preventDefault()
+            navigateAnchor(event.key === "ArrowUp" ? "up" : "down", event.shiftKey)
+            return
+          }
+          if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === "d") {
+            event.preventDefault()
+            dispatchAtSelection((anchorPosition, headPosition) =>
+              duplicateTopLevelBlockRange(editor.state, anchorPosition, headPosition),
+            )
+            return
+          }
+          if (event.key === "Backspace" || event.key === "Delete") {
+            event.preventDefault()
+            dispatchAtSelection((anchorPosition, headPosition) =>
+              deleteTopLevelBlockRange(editor.state, anchorPosition, headPosition),
+            )
+            return
+          }
+          if (event.key === "Escape") {
+            setBlockSelection(null)
+            setMenuOpen(false)
+            return
+          }
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault()
+            selectAnchor(event.shiftKey)
+            setMenuOpen((open) => !open)
+          }
         }}
         onPointerDown={(event) => {
           if (event.button !== 0) return
           event.preventDefault()
           event.currentTarget.setPointerCapture(event.pointerId)
+          const sourceSelection =
+            event.shiftKey && blockSelection
+              ? { anchorPos: blockSelection.anchorPos, headPos: anchor.pos }
+              : selectedRange &&
+                  blockSelection &&
+                  anchor.index >= selectedRange.fromIndex &&
+                  anchor.index <= selectedRange.toIndex
+                ? blockSelection
+                : { anchorPos: anchor.pos, headPos: anchor.pos }
+          const sourceRange = findTopLevelBlockRange(
+            editor.state.doc,
+            sourceSelection.anchorPos,
+            sourceSelection.headPos,
+          )
+          if (!sourceRange) return
           dragGestureRef.current = {
             dragging: false,
+            extendSelection: event.shiftKey,
             pointerId: event.pointerId,
-            sourcePos: anchor.pos,
+            sourceAnchorPos: sourceSelection.anchorPos,
+            sourceFrom: sourceRange.from,
+            sourceHeadPos: sourceSelection.headPos,
+            sourceTo: sourceRange.to,
             startX: event.clientX,
             startY: event.clientY,
           }
@@ -382,9 +629,12 @@ export function TopLevelBlockHandle({ active: editorActive, editor }: TopLevelBl
             gesture.dragging = true
             setDragging(true)
             setMenuOpen(false)
-            selectAnchor()
+            applyBlockSelection({
+              anchorPos: gesture.sourceAnchorPos,
+              headPos: gesture.sourceHeadPos,
+            })
           }
-          updateDropTarget(event.clientX, event.clientY, gesture.sourcePos)
+          updateDropTarget(event.clientX, event.clientY, gesture.sourceFrom, gesture.sourceTo)
         }}
         onPointerUp={(event) => finishDrag(event.pointerId)}
         onPointerCancel={(event) => cancelDrag(event.pointerId)}
@@ -394,12 +644,18 @@ export function TopLevelBlockHandle({ active: editorActive, editor }: TopLevelBl
       {menuOpen ? (
         <m.section
           ref={menuRef}
-          aria-label={`${blockLabel}区块菜单`}
-          className="fixed z-50 w-[252px] rounded-[10px] bg-popover p-1 text-popover-foreground shadow-[0_14px_40px_rgb(0_0_0/0.14),0_2px_7px_rgb(0_0_0/0.07)] ring-1 ring-foreground/10"
+          aria-label={`${blockLabel}菜单`}
+          className="fixed z-50 max-h-[calc(100vh-16px)] w-[252px] overflow-y-auto rounded-[10px] bg-popover p-1 text-popover-foreground shadow-[0_14px_40px_rgb(0_0_0/0.14),0_2px_7px_rgb(0_0_0/0.07)] ring-1 ring-foreground/10"
           style={{ left: menuLeft, top: menuTop }}
           initial={shouldReduceMotion ? false : { opacity: 0, scale: 0.985, y: 4 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           transition={shouldReduceMotion ? { duration: 0 } : motionSprings.gentle}
+          onKeyDown={(event) => {
+            const clipboardShortcut = resolveMarkdownClipboardShortcut(event)
+            if (!clipboardShortcut) return
+            event.preventDefault()
+            void writeSelectionToClipboard(clipboardShortcut)
+          }}
         >
           <div className="relative m-1 mb-1.5">
             <Icon
@@ -413,13 +669,32 @@ export function TopLevelBlockHandle({ active: editorActive, editor }: TopLevelBl
                 setMenuQuery(event.currentTarget.value)
                 setTransformOpen(false)
               }}
-              onKeyDown={(event) => event.stopPropagation()}
+              onKeyDown={(event) => {
+                const clipboardShortcut = resolveMarkdownClipboardShortcut(event)
+                if (clipboardShortcut && event.currentTarget.value.length === 0) {
+                  event.preventDefault()
+                  void writeSelectionToClipboard(clipboardShortcut)
+                }
+                event.stopPropagation()
+              }}
               placeholder="搜索操作…"
               aria-label="搜索区块操作"
               autoFocus
               className="h-8 rounded-md pl-7 text-xs shadow-none focus-visible:ring-2"
             />
           </div>
+          {clipboardNotice ? (
+            <div
+              role={clipboardNotice === "failed" ? "alert" : "status"}
+              className={`mx-1 mb-1.5 rounded-md px-2 py-1.5 text-[11px] ${clipboardNotice === "failed" ? "bg-danger/10 text-danger" : "bg-muted text-muted-foreground"}`}
+            >
+              {clipboardNotice === "copied"
+                ? "已复制为 Markdown"
+                : clipboardNotice === "cut-stale"
+                  ? "已复制，但文档已变化，未执行剪切"
+                  : "无法写入系统剪贴板"}
+            </div>
+          ) : null}
           <div className="px-2 pt-1 pb-1 text-[11px] font-medium text-muted-foreground">{blockLabel}</div>
           {canTransform && !normalizedQuery ? (
             <div className="relative">
@@ -477,11 +752,32 @@ export function TopLevelBlockHandle({ active: editorActive, editor }: TopLevelBl
               ))}
             </div>
           ) : null}
-          {matchesQuery("复制区块") ? (
+          {matchesQuery(copyMarkdownLabel) ? (
             <BlockMenuButton
-              icon={Copy01Icon}
-              label="复制区块"
-              onClick={() => dispatchAtAnchor((position) => duplicateTopLevelBlock(editor.state, position))}
+              icon={ClipboardCopyIcon}
+              label={copyMarkdownLabel}
+              trailing="⌘C"
+              onClick={() => void writeSelectionToClipboard("copy")}
+            />
+          ) : null}
+          {matchesQuery(cutLabel) ? (
+            <BlockMenuButton
+              icon={ScissorIcon}
+              label={cutLabel}
+              trailing="⌘X"
+              onClick={() => void writeSelectionToClipboard("cut")}
+            />
+          ) : null}
+          {matchesQuery(duplicateLabel) ? (
+            <BlockMenuButton
+              icon={CopyPlusIcon}
+              label={duplicateLabel}
+              trailing="⌘D"
+              onClick={() =>
+                dispatchAtSelection((anchorPosition, headPosition) =>
+                  duplicateTopLevelBlockRange(editor.state, anchorPosition, headPosition),
+                )
+              }
             />
           ) : null}
           {matchesQuery("上移") ? (
@@ -489,7 +785,11 @@ export function TopLevelBlockHandle({ active: editorActive, editor }: TopLevelBl
               icon={ArrowUp01Icon}
               label="上移"
               disabled={!canMoveUp}
-              onClick={() => dispatchAtAnchor((position) => moveTopLevelBlock(editor.state, position, "up"))}
+              onClick={() =>
+                dispatchAtSelection((anchorPosition, headPosition) =>
+                  moveTopLevelBlockRange(editor.state, anchorPosition, headPosition, "up"),
+                )
+              }
             />
           ) : null}
           {matchesQuery("下移") ? (
@@ -498,18 +798,24 @@ export function TopLevelBlockHandle({ active: editorActive, editor }: TopLevelBl
               label="下移"
               disabled={!canMoveDown}
               onClick={() =>
-                dispatchAtAnchor((position) => moveTopLevelBlock(editor.state, position, "down"))
+                dispatchAtSelection((anchorPosition, headPosition) =>
+                  moveTopLevelBlockRange(editor.state, anchorPosition, headPosition, "down"),
+                )
               }
             />
           ) : null}
-          {matchesQuery("删除区块") ? (
+          {matchesQuery(deleteLabel) ? (
             <>
               <div className="my-1 border-t border-border" />
               <BlockMenuButton
                 destructive
                 icon={Delete02Icon}
-                label="删除区块"
-                onClick={() => dispatchAtAnchor((position) => deleteTopLevelBlock(editor.state, position))}
+                label={deleteLabel}
+                onClick={() =>
+                  dispatchAtSelection((anchorPosition, headPosition) =>
+                    deleteTopLevelBlockRange(editor.state, anchorPosition, headPosition),
+                  )
+                }
               />
             </>
           ) : null}

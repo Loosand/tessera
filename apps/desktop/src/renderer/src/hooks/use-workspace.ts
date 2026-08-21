@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 预加载层提供的工作区、文件监听、窗口关闭与文档读写 API
- * [OUTPUT]: 当前工作区、文件/目录索引、文档草稿、条目操作、冲突状态和串行保存操作
+ * [OUTPUT]: 当前/最近工作区、文件/目录索引、文档草稿、条目与最近列表操作、冲突状态和串行保存操作
  * [POS]: 渲染层工作区会话的单一状态入口
  * [DOC]: docs/architecture.md
  *
@@ -310,9 +310,9 @@ export function useWorkspace() {
     const desktopApi = window.tessera
     if (!desktopApi) {
       setError("桌面桥接尚未就绪。")
-      return
+      return null
     }
-    if (!(await saveDocument())) return
+    if (!(await saveDocument())) return null
 
     try {
       const nextWorkspace = await desktopApi.selectWorkspace()
@@ -320,23 +320,28 @@ export function useWorkspace() {
         await loadDocuments(nextWorkspace)
         setRecentWorkspaces(await desktopApi.listRecentWorkspaces())
       }
+      return nextWorkspace
     } catch (cause) {
       setStatus("error")
       setError(errorMessage(cause))
+      return null
     }
   }, [loadDocuments, saveDocument])
 
   const openRecentWorkspace = useCallback(
     async (workspaceId: string) => {
       const desktopApi = window.tessera
-      if (!desktopApi || workspaceId === workspaceRef.current?.id || !(await saveDocument())) return
+      if (!desktopApi || !(await saveDocument())) return null
+      if (workspaceId === workspaceRef.current?.id) return workspaceRef.current
 
       try {
         const nextWorkspace = await desktopApi.openRecentWorkspace(workspaceId)
         await loadDocuments(nextWorkspace)
         setRecentWorkspaces(await desktopApi.listRecentWorkspaces())
+        return nextWorkspace
       } catch (cause) {
         setError(errorMessage(cause))
+        return null
       }
     },
     [loadDocuments, saveDocument],
@@ -349,6 +354,44 @@ export function useWorkspace() {
       await desktopApi.revealCurrentWorkspace()
     } catch (cause) {
       setError(errorMessage(cause))
+    }
+  }, [])
+
+  const revealWorkspace = useCallback(async (workspaceId: string) => {
+    const desktopApi = window.tessera
+    if (!desktopApi) return
+    try {
+      await desktopApi.revealWorkspace(workspaceId)
+      setError(null)
+    } catch (cause) {
+      setError(errorMessage(cause))
+    }
+  }, [])
+
+  const copyWorkspacePath = useCallback(async (workspaceId: string) => {
+    const desktopApi = window.tessera
+    if (!desktopApi) return false
+    try {
+      await desktopApi.copyWorkspacePath(workspaceId)
+      setError(null)
+      return true
+    } catch (cause) {
+      setError(errorMessage(cause))
+      return false
+    }
+  }, [])
+
+  const removeRecentWorkspace = useCallback(async (workspaceId: string) => {
+    const desktopApi = window.tessera
+    if (!desktopApi) return false
+    try {
+      const removed = await desktopApi.removeRecentWorkspace(workspaceId)
+      if (removed) setRecentWorkspaces((current) => current.filter((item) => item.id !== workspaceId))
+      setError(null)
+      return removed
+    } catch (cause) {
+      setError(errorMessage(cause))
+      return false
     }
   }, [])
 
@@ -368,8 +411,9 @@ export function useWorkspace() {
   const openDocument = useCallback(
     async (relativePath: string) => {
       const desktopApi = window.tessera
-      if (!desktopApi || relativePath === activeDocumentRef.current?.relativePath) return
-      if (!(await saveDocument())) return
+      if (!desktopApi) return false
+      if (relativePath === activeDocumentRef.current?.relativePath) return true
+      if (!(await saveDocument())) return false
 
       const requestId = ++requestIdRef.current
       setError(null)
@@ -378,9 +422,12 @@ export function useWorkspace() {
         if (requestId === requestIdRef.current) {
           applyDocument(document)
           pushNavigation(document.relativePath)
+          return true
         }
+        return false
       } catch (cause) {
         if (requestId === requestIdRef.current) setError(errorMessage(cause))
+        return false
       }
     },
     [applyDocument, pushNavigation, saveDocument],
@@ -626,6 +673,9 @@ export function useWorkspace() {
     selectWorkspace,
     openRecentWorkspace,
     revealCurrentWorkspace,
+    revealWorkspace,
+    copyWorkspacePath,
+    removeRecentWorkspace,
     refreshDocuments,
     openDocument,
     goBack: () => navigateHistory(-1),

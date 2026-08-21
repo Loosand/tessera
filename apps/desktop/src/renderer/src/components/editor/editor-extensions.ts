@@ -1,6 +1,6 @@
 /**
- * [INPUT]: TipTap 基础扩展、任务列表、表格与官方 Markdown 扩展
- * [OUTPUT]: Tessera 富文本编辑器唯一的基础 schema
+ * [INPUT]: TipTap 基础扩展、任务列表、Tessera GFM 表格与官方 Markdown 扩展
+ * [OUTPUT]: Tessera 富文本编辑器唯一的基础 schema 与同配置 MarkdownManager 工厂
  * [POS]: 所有富文本编辑实例共享的扩展组合入口
  * [DOC]: docs/architecture/editor.md
  *
@@ -13,8 +13,14 @@
 import { TableKit } from "@tiptap/extension-table"
 import TaskItem from "@tiptap/extension-task-item"
 import TaskList from "@tiptap/extension-task-list"
-import { Markdown } from "@tiptap/markdown"
+import { Markdown, MarkdownManager } from "@tiptap/markdown"
 import StarterKit from "@tiptap/starter-kit"
+import { MarkdownTable } from "./markdown-table"
+
+const MARKED_OPTIONS = {
+  breaks: false,
+  gfm: true,
+} as const
 
 export const EDITOR_EXTENSIONS = [
   StarterKit.configure({
@@ -27,16 +33,19 @@ export const EDITOR_EXTENSIONS = [
   }),
   TaskList,
   TaskItem.configure({ nested: true }),
-  TableKit.configure({
-    table: {
-      renderWrapper: true,
-      resizable: false,
-    },
+  TableKit.configure({ table: false }),
+  MarkdownTable.configure({
+    renderWrapper: true,
+    resizable: false,
   }),
   Markdown.configure({
-    markedOptions: {
-      breaks: false,
-      gfm: true,
-    },
+    markedOptions: MARKED_OPTIONS,
   }),
 ]
+
+export function createEditorMarkdownManager() {
+  return new MarkdownManager({
+    extensions: EDITOR_EXTENSIONS,
+    markedOptions: MARKED_OPTIONS,
+  })
+}

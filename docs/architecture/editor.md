@@ -3,7 +3,7 @@
 > 代码源头：`apps/desktop/src/renderer/src/components/editor/`、
 > `apps/desktop/src/renderer/src/hooks/use-workspace.ts`、`apps/desktop/src/main/index.ts`
 >
-> 状态：基础人工写作与顶层区块操作已实现；嵌套/多块操作、CodeMirror 和 Agent Diff 处于规划阶段。
+> 状态：基础人工写作、兼容性保护与顶层区块连续多选已实现；嵌套操作、CodeMirror 和 Agent Diff 处于规划阶段。
 
 ## 目标
 
@@ -33,8 +33,10 @@ Agent 建议 -> 文本补丁 -> 接受 --/
 
 编辑器偏好状态：
 
-- **已实现**：默认编辑模式、拼写检查、正文字体、基础字号和正文宽度保存在渲染层轻量偏好中；它们只改变
-  编辑投影，不修改 Markdown 内容。
+- **已实现**：默认编辑模式、拼写检查，以及 Typeset 的标题/正文/等宽字体、基础字号、行高、区块流和版心保存在
+  渲染层 `v2` 轻量偏好中；它们只改变编辑投影，不修改 Markdown 内容，旧版 `v1` 正文字体、字号和宽度偏好会只读迁移到等价配置。
+- **已实现**：即时预览使用项目持有的 Typeset CSS，通过 `size`、`leading` 与 `flow` 三项节奏变量派生标题、正文、
+  列表、引用和代码关系；设置页使用同一 CSS 与本地字体实时预览，`measure` 以 `ch` 作用于编辑器布局，TipTap 选区、任务列表与表格滚动使用局部适配。
 - **规划**：浮动目录、Frontmatter 可视化开关、标题级别标记、彩色与可折叠标题、可折叠列表和标签美化。
   设置页先展示禁用入口并明确能力状态，不保存不会生效的伪偏好。
 
@@ -43,21 +45,34 @@ Agent 建议 -> 文本补丁 -> 接受 --/
 - 一至三级标题、段落、引用和分隔线；
 - 粗体、斜体、下划线、删除线、链接和行内代码；
 - 无序列表、有序列表和任务列表；
-- 代码块和 GFM 表格；
+- 代码块和 GFM 表格；表格单元格内的文本管道符、行内代码管道符与链接文字可以稳定往返；
 - 斜杠命令以紧凑分组菜单插入常用块，并显示对应 Markdown 语法提示；
 - YAML frontmatter 的拆分与无损拼回。
 
+当前 schema 会改写原始 HTML、脚注和定义式链接。编辑器在忽略 frontmatter、代码围栏、缩进代码与行内代码后检测
+这些语法，并默认保持源码模式，避免仅打开即时预览就静默改变原文。用户仍可从保护提示明确覆盖；这只是已知风险的
+内容安全边界，不等同于即时预览已支持这些语法。
+
 区块是 TipTap 文档中的运行时交互单位，不额外保存块 JSON。
 
-- **已实现**：顶层区块共用一个浮动手柄；点击选择整块，可检索菜单支持复制、删除、上下移动，以及正文和一至三级标题转换。
-- **已实现**：指针拖动显示目标线，并用一次 ProseMirror transaction 完成重排；删除唯一块时保留可编辑空段落。
+- **已实现**：顶层区块共用一个浮动手柄；点击选择整块，`Shift` 点击扩展连续范围。手柄获得焦点后可用方向键导航，
+  `Shift` 加方向键扩展或收缩范围。
+- **已实现**：可检索菜单支持复制 Markdown、剪切、创建副本、删除、上下移动，以及单块正文和一至三级标题转换；
+  `⌘/Ctrl+C` 与 `⌘/Ctrl+X` 使用当前编辑器序列化器向系统剪贴板写入 Markdown。剪切只在写入成功且文档未变化时删除范围。
+- **已实现**：粘贴不含网页 HTML 的安全 Markdown 时，标题、列表、引用、代码块、表格、多段正文和常用行内格式解析为
+  ProseMirror 结构；网页富内容优先走原生粘贴，原始 HTML、脚注和定义式链接不被强制解析。
+- **已实现**：创建副本、删除、移动和拖拽在多选时把整个连续范围作为一次 ProseMirror transaction。删除全部块时
+  保留可编辑空段落。
 - **实现边界**：手柄使用单一浮层、事件委托和逐帧 hover 定位，不为每个块创建 React NodeView。当前操作直接使用
-  TipTap/ProseMirror transaction，未引入会连带 Collaboration、Yjs 与 NodeRange 的 Drag Handle 依赖链。
-- **规划**：嵌套区块、多块连续选择、跨块剪贴板和键盘区块导航；需要真实多块语义时再评估 NodeRange。
+  TipTap/ProseMirror transaction；连续范围只包含文档直接子节点，列表项和引用内部不会被误当成独立顶层块。选择外观是短生命周期
+  交互状态，不保存第二份正文，也未引入会连带 Collaboration、Yjs 与 NodeRange 的 Drag Handle 依赖链。
+- **规划**：嵌套区块与真实 renderer 键盘、指针和系统剪贴板集成测试；需要跨层级范围语义时再评估 NodeRange。
 
 ## 同步与保存
 
 - 连续输入停止 300ms 后生成 Markdown 草稿，避免每次按键都执行全文序列化和顶层 React 更新。
+- 中文 IME composition 期间暂停静默期计时，不读取拼音等中间态；composition 结束后只提交最终文本。显式保存、
+  切换模式和关闭窗口仍可强制 flush 当前内容。
 - 保存、切换文档、切换模式和关闭窗口会先 flush 待处理编辑。
 - flush 记录调度时的文档路径，旧文档结果不能写入新文档。
 - 父级回传相同草稿时不重复调用 `setContent`，避免光标跳动和更新循环。
@@ -69,8 +84,9 @@ Agent 建议 -> 文本补丁 -> 接受 --/
 
 ## 长文档保护
 
-达到 100,000 字符的文档默认使用源码模式，不挂载 TipTap。用户可以明确覆盖保护。源码模式后续替换为
-CodeMirror 6 时，仍需延迟物化完整字符串，并复用当前 flush、保存和冲突协议。
+正文达到 100,000 字符或估算达到 750 个 Markdown 块的文档默认使用源码模式，不挂载 TipTap。字符与块数保护均先排除 frontmatter，
+再扫描正文行结构，把段落边界、标题、列表项、引用、表格行和围栏代码视为压力信号，但不解析围栏代码内部内容。用户可以明确覆盖保护。
+源码模式后续替换为 CodeMirror 6 时，仍需延迟物化完整字符串，并复用当前 flush、保存和冲突协议。
 
 性能评测至少区分文本长度、块数量和复杂节点数量，重点记录输入到下一帧、Markdown 序列化、文档切换、滚动和
 内存峰值。块手柄使用单一浮层和事件委托，避免为每个段落常驻 React root、observer 和拖放监听器。
@@ -103,11 +119,16 @@ CodeMirror 6 时，仍需延迟物化完整字符串，并复用当前 flush、�
 ```bash
 bun run benchmark:editor
 bun run benchmark:editor:check
+bun run benchmark:editor:parser
+bun run benchmark:editor:parser:cpu
 ```
 
 前者始终生成报告，后者在 `apps/desktop/benchmarks/editor-budget.json` 的绝对体验预算超限时返回非零状态。
 JSON、Markdown 和带时间戳的历史报告写入被 Git 忽略的 `artifacts/benchmarks/editor/`。预算表达产品目标，不能为
 迎合单次机器结果而放宽；当前已知超限未解决前，不把 check 命令并入默认 `bun run check`。
+
+parser 命令不挂载 DOM，按 100–1500 个固定短块生成 `MarkdownManager.parse` 增长曲线；`:cpu` 聚焦 1000 块并输出
+Bun CPU profile。报告写入 `artifacts/benchmarks/editor-parser/`，用于定位解析热区，不能替代真实 renderer 指标。
 
 ### 首轮基线与结论
 
@@ -123,8 +144,12 @@ JSON、Markdown 和带时间戳的历史报告写入被 Git 忽略的 `artifacts
 
 结论是编辑器挂载后的输入与滚动暂时健康，主要风险发生在打开阶段。`MarkdownManager.parse` 占据几乎全部解析
 时间，ProseMirror document 建树不是当前瓶颈；相近字符量从 1000 块增加到 2000 块时，解析与打开成本出现明显
-超线性增长。因此 100,000 字符保护仍有必要，但只看字符数不够，后续应加入无需完整解析的近似块数保护，并为
-Markdown 解析器建立独立 profile 后再决定缓存、worker 预解析或替换解析路径。
+超线性增长。因此 100,000 字符保护仍有必要，但只看字符数不够。
+
+独立 profile 已验证这一退化：在 Apple M1 Pro / Bun 1.3.13 上，约 31.5k 字符、750 个短块的解析 median 为
+640.6ms，约 42k 字符、1000 块为 1212.5ms，约 63k 字符、1500 块为 2858.6ms。CPU 采样显示时间主要消耗在
+Marked block lexer 的 Setext 标题、HTML、表格、引用和分隔线正则反复扫描，节点转换与块数估算本身不是热点。
+当前已增加 750 块近似保护；后续根据真实语料决定缓存、worker 预解析、分段解析或替换解析路径。
 
 ## Agent 修改协议
 
@@ -139,18 +164,23 @@ Markdown 解析器建立独立 profile 后再决定缓存、worker 预解析或�
 ## 自动化保障
 
 - `markdown-document.test.ts`：frontmatter、换行规范和常用 Markdown 往返。
-- `editor-content-sync.test.ts`：输入合并、文档身份和强制提交。
-- `editor-mode-policy.test.ts`：大文档保护阈值。
-- `top-level-block-operations.test.ts`：顶层区块定位、复制、删除、移动、转换和真实 Markdown schema 序列化。
+- `markdown-compatibility.test.ts`：嵌套列表、复杂表格、HTML、脚注、定义式链接以及代码样例排除语料。
+- `markdown-clipboard.test.ts`：连续范围 Markdown 序列化、快捷键仲裁和剪贴板失败安全。
+- `markdown-paste.test.ts`：安全 Markdown 识别、网页富内容优先和结构化块粘贴 transaction。
+- `typeset-preferences.test.ts`：Markdown 主题参考预设、自定义值、旧设置迁移和 CSS 变量映射。
+- `editor-content-sync.test.ts`：输入合并、中文 IME 暂停/恢复、文档身份和强制提交。
+- `editor-interactions.test.ts`：保存/模式快捷键仲裁，以及中文 transaction 的单步撤销与重做。
+- `editor-mode-policy.test.ts`：字符数、近似块密度、围栏代码排除和源码优先语法保护。
+- `top-level-block-operations.test.ts`：顶层相邻导航、连续范围定位、复制、删除、移动、转换和真实 Markdown schema 序列化。
 - `workspace-sidebar-model.test.ts`：侧栏排序、文件树和大纲提取。
 
-新增 schema 前需要补充对应往返用例。未知 HTML、脚注、定义式链接、嵌套列表、复杂表格、图片附件和数学公式
-仍缺少兼容性覆盖。
+新增 schema 前需要补充对应往返用例。未知 HTML、脚注和定义式链接已有检测与源码保护但尚不能在即时预览中编辑；
+图片附件和数学公式仍缺少兼容性覆盖。现有 IME、键盘和撤销测试位于无 DOM 协议层，真实 Electron renderer 的
+composition、selection 与系统快捷键集成仍需端到端覆盖。
 
 ## 后续顺序
 
-1. 补充 Markdown 兼容性语料和中文 IME、键盘、撤销测试。
-2. 在已实现的顶层选择、转换和拖动上，继续补充嵌套区块与多块操作协议。
-3. 使用 CodeMirror 6 替换当前源码输入表面。
-4. 建立 Agent 文本补丁、引用和 Diff 审查流程。
-5. 以真实长文档评测序列化、滚动和复杂节点性能，再决定是否引入按块源码保留。
+1. 在已实现的顶层连续选择、Markdown 剪贴板和拖动上，继续补充嵌套区块协议与真实 renderer 集成测试。
+2. 使用 CodeMirror 6 替换当前源码输入表面，并补充真实 renderer 的 IME、selection 与系统快捷键集成测试。
+3. 建立 Agent 文本补丁、引用和 Diff 审查流程。
+4. 扩展图片附件、数学公式等兼容性语料；以真实长文档继续评测复杂节点性能，再决定是否引入按块源码保留。

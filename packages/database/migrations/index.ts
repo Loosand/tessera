@@ -13,6 +13,10 @@
 import type BetterSqlite3 from "better-sqlite3"
 import { foundationMigration } from "./0000-foundation"
 import { aiProviderConfigsMigration } from "./0001-ai-provider-configs"
+import { taskSessionsMigration } from "./0002-task-sessions"
+import { workspaceRecentsMigration } from "./0003-workspace-recents"
+import { agentRunsAndChangesMigration } from "./0004-agent-runs-and-changes"
+import { aiProviderConnectionsMigration } from "./0005-ai-provider-connections"
 import type { DatabaseMigration } from "./types"
 
 export type { DatabaseMigration } from "./types"
@@ -20,6 +24,10 @@ export type { DatabaseMigration } from "./types"
 export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
   foundationMigration,
   aiProviderConfigsMigration,
+  taskSessionsMigration,
+  workspaceRecentsMigration,
+  agentRunsAndChangesMigration,
+  aiProviderConnectionsMigration,
 ]
 
 export function applyDatabaseMigrations(database: BetterSqlite3.Database) {

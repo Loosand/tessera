@@ -1,6 +1,6 @@
 /**
- * [INPUT]: Agent 会话请求、取消信号与工作区边界
- * [OUTPUT]: 可替换 Agent 运行时及其事件、权限类型契约
+ * [INPUT]: 具体 Agent 适配器定义的可序列化请求、取消信号与运行事件
+ * [OUTPUT]: 支持具体运行时保留类型化请求/事件的可替换 AgentRuntime 泛型端口，以及基础权限事件契约
  * [POS]: Tessera 核心与具体 Agent 适配器之间的稳定端口
  * [DOC]: docs/architecture.md
  *
@@ -26,7 +26,7 @@ export type AgentEvent =
   | { type: "session.completed" }
   | { type: "session.failed"; message: string }
 
-export interface AgentRuntime {
+export interface AgentRuntime<REQUEST = AgentRequest, EVENT = AgentEvent> {
   readonly id: string
-  run(request: AgentRequest, signal: AbortSignal): AsyncIterable<AgentEvent>
+  run(request: REQUEST, signal: AbortSignal): AsyncIterable<EVENT>
 }

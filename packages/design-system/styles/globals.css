@@ -1,6 +1,13 @@
 @import "tailwindcss";
 @import "@fontsource-variable/geist";
+@import "@fontsource-variable/jetbrains-mono";
+@import "@fontsource-variable/lora";
+@import "@fontsource-variable/montserrat";
+@import "@fontsource-variable/nunito-sans";
 @import "@fontsource-variable/open-sans";
+@import "@fontsource-variable/outfit";
+@import "@fontsource-variable/oxanium";
+@import "@fontsource-variable/space-grotesk";
 @source "../**/*.{ts,tsx}";
 
 @custom-variant dark (&:where(.dark, .dark *));
@@ -140,5 +147,86 @@
   :focus-visible {
     outline: 2px solid var(--ring);
     outline-offset: 2px;
+  }
+}
+
+@keyframes tessera-loading-pixel {
+  0%,
+  55%,
+  100% {
+    opacity: 0.15;
+    transform: scale(0.8);
+  }
+
+  25% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes tessera-loading-shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes tessera-loading-surface {
+  from {
+    opacity: 0;
+    transform: translateY(-2px) scale(0.97);
+  }
+}
+
+@layer components {
+  .tessera-loading-pixel {
+    opacity: 0.15;
+    animation-name: tessera-loading-pixel;
+    animation-duration: var(--loading-duration);
+    animation-timing-function: ease-in-out;
+    animation-delay: var(--loading-delay);
+    animation-iteration-count: infinite;
+  }
+
+  .tessera-loading-pixel[data-inactive] {
+    opacity: 0.07;
+    animation: none;
+  }
+
+  .tessera-loading-label {
+    background-image: linear-gradient(
+      90deg,
+      var(--muted-foreground) 35%,
+      var(--foreground) 50%,
+      var(--muted-foreground) 65%
+    );
+    background-size: 200% 100%;
+    animation: tessera-loading-shimmer 1.4s linear infinite;
+  }
+
+  .tessera-loading-surface {
+    transform-origin: top left;
+    animation: tessera-loading-surface 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tessera-loading-pixel {
+    opacity: 0.15;
+    transform: none;
+    animation: none;
+  }
+
+  .tessera-loading-pixel[data-inactive] {
+    opacity: 0.07;
+  }
+
+  .tessera-loading-label {
+    color: var(--muted-foreground);
+    background-image: none;
+    animation: none;
+  }
+
+  .tessera-loading-surface {
+    animation: none;
   }
 }

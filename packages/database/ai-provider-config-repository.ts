@@ -15,12 +15,16 @@ import type { DatabaseClient } from "./client"
 import { type NewAiProviderConfigRecord, aiProviderConfigs } from "./schema"
 
 export function listAiProviderConfigRecords(client: DatabaseClient) {
-  return client.db.select().from(aiProviderConfigs).orderBy(asc(aiProviderConfigs.providerId)).all()
+  return client.db
+    .select()
+    .from(aiProviderConfigs)
+    .orderBy(asc(aiProviderConfigs.providerId), asc(aiProviderConfigs.displayName))
+    .all()
 }
 
-export function findAiProviderConfigRecord(client: DatabaseClient, providerId: string) {
+export function findAiProviderConfigRecord(client: DatabaseClient, configId: string) {
   return (
-    client.db.select().from(aiProviderConfigs).where(eq(aiProviderConfigs.providerId, providerId)).get() ??
+    client.db.select().from(aiProviderConfigs).where(eq(aiProviderConfigs.configId, configId)).get() ??
     null
   )
 }
@@ -30,8 +34,10 @@ export function upsertAiProviderConfigRecord(client: DatabaseClient, config: New
     .insert(aiProviderConfigs)
     .values(config)
     .onConflictDoUpdate({
-      target: aiProviderConfigs.providerId,
+      target: aiProviderConfigs.configId,
       set: {
+        providerId: config.providerId,
+        displayName: config.displayName,
         enabled: config.enabled,
         baseUrl: config.baseUrl,
         modelsJson: config.modelsJson,
@@ -42,6 +48,6 @@ export function upsertAiProviderConfigRecord(client: DatabaseClient, config: New
     .run()
 }
 
-export function deleteAiProviderConfigRecord(client: DatabaseClient, providerId: string) {
-  client.db.delete(aiProviderConfigs).where(eq(aiProviderConfigs.providerId, providerId)).run()
+export function deleteAiProviderConfigRecord(client: DatabaseClient, configId: string) {
+  client.db.delete(aiProviderConfigs).where(eq(aiProviderConfigs.configId, configId)).run()
 }

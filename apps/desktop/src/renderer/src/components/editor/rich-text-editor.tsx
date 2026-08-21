@@ -1,6 +1,6 @@
 /**
  * [INPUT]: Markdown 草稿、文档身份、激活状态与草稿同步注册回调
- * [OUTPUT]: TipTap 富文本表面、顶层区块交互、延迟 Markdown 草稿和同步 flush 能力
+ * [OUTPUT]: Typeset 排版的 TipTap 表面、结构化 Markdown 粘贴、区块交互与 IME 安全的草稿同步能力
  * [POS]: 编辑器本地交易、区块 chrome 与 React 草稿状态之间的性能边界
  * [DOC]: docs/architecture/editor.md
  *
@@ -13,9 +13,9 @@
 import { EditorContent, useEditor } from "@tiptap/react"
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { type EditorContentSyncController, createEditorContentSyncController } from "./editor-content-sync"
-import { EDITOR_EXTENSIONS } from "./editor-extensions"
-import { EditorToolbar } from "./editor-toolbar"
+import { EDITOR_EXTENSIONS, createEditorMarkdownManager } from "./editor-extensions"
 import { joinMarkdownDocument, splitMarkdownDocument } from "./markdown-document"
+import { handleStructuredMarkdownPaste } from "./markdown-paste"
 import { SlashCommandMenu } from "./slash-command-menu"
 import { TopLevelBlockHandle } from "./top-level-block-handle"
 
@@ -28,6 +28,8 @@ interface RichTextEditorProps {
   onContentChange: (documentPath: string, content: string) => void
   onFlushPendingEditsReady: (flush: (() => void) | null) => void
 }
+
+const MARKDOWN_PASTE_MANAGER = createEditorMarkdownManager()
 
 export function RichTextEditor({
   active,
@@ -61,9 +63,20 @@ export function RichTextEditor({
       attributes: {
         "aria-label": `编辑 ${documentName}`,
         autocapitalize: "sentences",
-        class: "rich-text-content",
+        class: "typeset typeset-editor rich-text-content",
         spellcheck: String(spellCheck),
       },
+      handleDOMEvents: {
+        compositionstart: () => {
+          syncController.pause()
+          return false
+        },
+        compositionend: () => {
+          syncController.resume()
+          return false
+        },
+      },
+      handlePaste: (view, event) => handleStructuredMarkdownPaste(view, event, MARKDOWN_PASTE_MANAGER),
     },
     onUpdate: ({ editor: currentEditor }) => {
       const scheduledDocumentPath = editorDocumentPathRef.current
@@ -123,7 +136,6 @@ export function RichTextEditor({
       {editor ? (
         <>
           <SlashCommandMenu editor={editor} />
-          <EditorToolbar editor={editor} />
           <TopLevelBlockHandle active={active} editor={editor} />
         </>
       ) : null}

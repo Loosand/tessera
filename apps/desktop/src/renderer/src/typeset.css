@@ -1,0 +1,273 @@
+@layer components {
+  .typeset {
+    --typeset-font-body: inherit;
+    --typeset-font-heading: inherit;
+    --typeset-font-mono: var(--font-mono);
+    --typeset-size: 1em;
+    --typeset-leading: 1.75;
+    --typeset-flow: 1.25em;
+
+    color: var(--foreground);
+    font-family: var(--typeset-font-body);
+    font-size: var(--typeset-size);
+    font-optical-sizing: auto;
+    line-height: var(--typeset-leading);
+    overflow-wrap: anywhere;
+    text-wrap: pretty;
+  }
+
+  .typeset-editor {
+    --typeset-font-body: var(--editor-typeset-font-body, var(--font-content, var(--font-sans)));
+    --typeset-font-heading: var(--editor-typeset-font-heading, var(--font-content, var(--font-sans)));
+    --typeset-font-mono: var(--editor-typeset-font-mono, var(--font-mono));
+    --typeset-size: var(--editor-typeset-size, var(--editor-font-size, 16px));
+    --typeset-leading: var(--editor-typeset-leading, 1.75);
+    --typeset-flow: var(--editor-typeset-flow, 1.25em);
+  }
+
+  .typeset :where(h1, h2, h3, h4, h5, h6, p, ul, ol, blockquote, pre, table, figure, hr) {
+    margin-block: 0;
+  }
+
+  .typeset > :where(*) + :where(*) {
+    margin-block-start: var(--typeset-flow);
+  }
+
+  .typeset > :where(*) + :where(h1, h2) {
+    margin-block-start: calc(var(--typeset-flow) + 1em);
+  }
+
+  .typeset > :where(*) + :where(h3, h4) {
+    margin-block-start: calc(var(--typeset-flow) + 0.5em);
+  }
+
+  .typeset :where(h1, h2, h3, h4, h5, h6) {
+    color: var(--foreground);
+    font-family: var(--typeset-font-heading);
+    font-weight: 700;
+    letter-spacing: -0.028em;
+    line-height: 1.2;
+    text-wrap: balance;
+  }
+
+  .typeset :where(h1) {
+    font-size: 2.25em;
+    letter-spacing: -0.04em;
+    line-height: 1.1;
+  }
+
+  .typeset :where(h2) {
+    font-size: 1.75em;
+    letter-spacing: -0.035em;
+    line-height: 1.15;
+  }
+
+  .typeset :where(h3) {
+    font-size: 1.375em;
+    line-height: 1.25;
+  }
+
+  .typeset :where(h4) {
+    font-size: 1.125em;
+    line-height: 1.35;
+  }
+
+  .typeset :where(h5) {
+    font-size: 1em;
+    line-height: 1.45;
+  }
+
+  .typeset :where(h6) {
+    color: var(--muted-foreground);
+    font-size: 0.875em;
+    line-height: 1.45;
+  }
+
+  .typeset :where(strong) {
+    color: var(--foreground);
+    font-weight: 650;
+  }
+
+  .typeset :where(a) {
+    color: var(--link);
+    font-weight: 500;
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 0.2em;
+  }
+
+  .typeset :where(a:hover) {
+    text-decoration-color: currentColor;
+  }
+
+  .typeset :where(ul, ol) {
+    padding-inline-start: 1.65em;
+  }
+
+  .typeset :where(ul) {
+    list-style: disc;
+  }
+
+  .typeset :where(ol) {
+    list-style: decimal;
+  }
+
+  .typeset :where(li) {
+    padding-inline-start: 0.25em;
+  }
+
+  .typeset :where(li)::marker {
+    color: var(--muted-foreground);
+  }
+
+  .typeset :where(li + li) {
+    margin-block-start: 0.35em;
+  }
+
+  .typeset :where(li > p) {
+    margin: 0;
+  }
+
+  .typeset :where(li > p + p, li > :where(ul, ol)) {
+    margin-block-start: 0.5em;
+  }
+
+  .typeset :where(blockquote) {
+    border-inline-start: 2px solid var(--border);
+    padding-inline-start: 1em;
+    color: var(--muted-foreground);
+  }
+
+  .typeset :where(blockquote > * + *) {
+    margin-block-start: 0.75em;
+  }
+
+  .typeset :where(code) {
+    border-radius: var(--radius-xs);
+    background: var(--code-background);
+    padding: 0.14em 0.36em;
+    font-family: var(--typeset-font-mono);
+    font-size: 0.875em;
+    font-weight: 500;
+  }
+
+  .typeset :where(pre) {
+    overflow-x: auto;
+    border-radius: var(--radius-md);
+    background: var(--code-background);
+    padding: 1em 1.125em;
+    font-family: var(--typeset-font-mono);
+    font-size: 0.875em;
+    line-height: 1.7;
+    tab-size: 2;
+  }
+
+  .typeset :where(pre code) {
+    border-radius: 0;
+    background: transparent;
+    padding: 0;
+    font-size: inherit;
+    font-weight: inherit;
+  }
+
+  .typeset :where(table) {
+    width: 100%;
+    min-width: 26rem;
+    border-collapse: collapse;
+    font-size: 0.925em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .typeset :where(th, td) {
+    position: relative;
+    min-width: 6rem;
+    border-block-end: 1px solid var(--border);
+    padding: 0.6em 0.75em;
+    text-align: start;
+    vertical-align: top;
+  }
+
+  .typeset :where(th) {
+    border-block-end-color: color-mix(in srgb, var(--foreground) 28%, var(--border));
+    color: var(--foreground);
+    font-weight: 650;
+  }
+
+  .typeset :where(th, td) > p {
+    margin: 0;
+  }
+
+  .typeset :where(hr) {
+    height: 1px;
+    border: 0;
+    background: var(--border);
+  }
+
+  .typeset :where(img) {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    border-radius: var(--radius-md);
+  }
+
+  .typeset :where(mark) {
+    border-radius: var(--radius-xs);
+    background: var(--accent);
+    padding: 0.05em 0.16em;
+    color: inherit;
+  }
+
+  .typeset.rich-text-content .tableWrapper {
+    overflow-x: auto;
+  }
+
+  .typeset.rich-text-content table {
+    table-layout: fixed;
+  }
+
+  .typeset.rich-text-content ul[data-type="taskList"] {
+    padding-inline-start: 0;
+    list-style: none;
+  }
+
+  .typeset.rich-text-content ul[data-type="taskList"] li {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.65em;
+    padding-inline-start: 0;
+  }
+
+  .typeset.rich-text-content ul[data-type="taskList"] li > label {
+    margin-block-start: 0.3em;
+  }
+
+  .typeset.rich-text-content ul[data-type="taskList"] li > label input {
+    accent-color: var(--primary);
+  }
+
+  .typeset.rich-text-content ul[data-type="taskList"] li > div {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .typeset.rich-text-content ul[data-type="taskList"] li > div > p {
+    margin: 0;
+  }
+
+  .typeset.rich-text-content .selectedCell::after {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    background: var(--selection);
+    content: "";
+  }
+
+  .typeset.rich-text-content .ProseMirror-selectednode:not(.selectedCell),
+  .typeset.rich-text-content [data-block-range-selected="true"] {
+    border-radius: var(--radius-sm);
+    outline: 2px solid color-mix(in srgb, var(--primary) 52%, transparent);
+    outline-offset: 3px;
+  }
+}

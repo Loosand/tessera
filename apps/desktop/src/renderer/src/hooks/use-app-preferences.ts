@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 渲染层本地偏好、系统主题变化与偏好更新操作
- * [OUTPUT]: 已校验的应用偏好、外观与编辑器样式副作用和类型安全的更新函数
+ * [OUTPUT]: 已校验的应用偏好、Typeset/外观样式副作用和类型安全的更新函数
  * [POS]: 不包含文档正文的轻量界面偏好持久化边界
  * [DOC]: design.md
  *
@@ -11,20 +11,21 @@
  */
 
 import { useCallback, useEffect, useState } from "react"
+import {
+  TYPESET_REFERENCE_PRESET,
+  type TypesetPreferences,
+  createTypesetCssVariables,
+  readTypesetPreferences,
+} from "./typeset-preferences"
 
 export type ThemePreference = "system" | "light" | "dark"
 export type InterfaceFontPreference = "system" | "geist" | "open-sans"
 export type DefaultEditorMode = "rich" | "source"
 export type CornerRadiusPreference = "sharp" | "default" | "soft"
-export type EditorFontPreference = "sans" | "serif"
-export type EditorWidthPreference = "compact" | "comfortable" | "wide"
 
-export interface AppPreferences {
+export interface AppPreferences extends TypesetPreferences {
   cornerRadius: CornerRadiusPreference
   defaultEditorMode: DefaultEditorMode
-  editorFont: EditorFontPreference
-  editorFontSize: number
-  editorWidth: EditorWidthPreference
   interfaceFont: InterfaceFontPreference
   spellCheck: boolean
   theme: ThemePreference
@@ -35,13 +36,12 @@ export type UpdateAppPreference = <Key extends keyof AppPreferences>(
   value: AppPreferences[Key],
 ) => void
 
-const PREFERENCES_STORAGE_KEY = "tessera.preferences.v1"
+const PREFERENCES_STORAGE_KEY = "tessera.preferences.v2"
+const LEGACY_PREFERENCES_STORAGE_KEY = "tessera.preferences.v1"
 const THEME_VALUES = new Set<ThemePreference>(["system", "light", "dark"])
 const INTERFACE_FONT_VALUES = new Set<InterfaceFontPreference>(["system", "geist", "open-sans"])
 const EDITOR_MODE_VALUES = new Set<DefaultEditorMode>(["rich", "source"])
 const CORNER_RADIUS_VALUES = new Set<CornerRadiusPreference>(["sharp", "default", "soft"])
-const EDITOR_FONT_VALUES = new Set<EditorFontPreference>(["sans", "serif"])
-const EDITOR_WIDTH_VALUES = new Set<EditorWidthPreference>(["compact", "comfortable", "wide"])
 
 const CORNER_RADIUS_CSS: Record<CornerRadiusPreference, string> = {
   sharp: "0rem",
@@ -58,61 +58,49 @@ const INTERFACE_FONT_CSS: Record<InterfaceFontPreference, string> = {
     "'Open Sans Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', ui-sans-serif, system-ui, sans-serif",
 }
 
-const EDITOR_FONT_CSS: Record<EditorFontPreference, string> = {
-  sans: "var(--font-sans)",
-  serif: "ui-serif, 'Songti SC', 'STSong', 'Noto Serif CJK SC', Georgia, serif",
-}
-
-const EDITOR_WIDTH_CSS: Record<EditorWidthPreference, string> = {
-  compact: "760px",
-  comfortable: "900px",
-  wide: "1200px",
-}
-
 const DEFAULT_PREFERENCES: AppPreferences = {
+  ...TYPESET_REFERENCE_PRESET,
   cornerRadius: "default",
   defaultEditorMode: "rich",
-  editorFont: "sans",
-  editorFontSize: 16,
-  editorWidth: "comfortable",
   interfaceFont: "system",
   spellCheck: true,
   theme: "system",
 }
 
-function readEditorFontSize(value: unknown) {
-  return typeof value === "number" && Number.isFinite(value) && value >= 12 && value <= 24
-    ? Math.round(value)
-    : DEFAULT_PREFERENCES.editorFontSize
+function isPreferenceRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
 function readPreferences(): AppPreferences {
   try {
-    const value = JSON.parse(localStorage.getItem(PREFERENCES_STORAGE_KEY) ?? "{}") as Partial<AppPreferences>
+    const serializedPreferences =
+      localStorage.getItem(PREFERENCES_STORAGE_KEY) ??
+      localStorage.getItem(LEGACY_PREFERENCES_STORAGE_KEY) ??
+      "{}"
+    const storedValue: unknown = JSON.parse(serializedPreferences)
+    const value = isPreferenceRecord(storedValue) ? storedValue : {}
     return {
+      ...readTypesetPreferences(value),
       cornerRadius:
-        value.cornerRadius && CORNER_RADIUS_VALUES.has(value.cornerRadius)
-          ? value.cornerRadius
+        typeof value.cornerRadius === "string" &&
+        CORNER_RADIUS_VALUES.has(value.cornerRadius as CornerRadiusPreference)
+          ? (value.cornerRadius as CornerRadiusPreference)
           : DEFAULT_PREFERENCES.cornerRadius,
       defaultEditorMode:
-        value.defaultEditorMode && EDITOR_MODE_VALUES.has(value.defaultEditorMode)
-          ? value.defaultEditorMode
+        typeof value.defaultEditorMode === "string" &&
+        EDITOR_MODE_VALUES.has(value.defaultEditorMode as DefaultEditorMode)
+          ? (value.defaultEditorMode as DefaultEditorMode)
           : DEFAULT_PREFERENCES.defaultEditorMode,
-      editorFont:
-        value.editorFont && EDITOR_FONT_VALUES.has(value.editorFont)
-          ? value.editorFont
-          : DEFAULT_PREFERENCES.editorFont,
-      editorFontSize: readEditorFontSize(value.editorFontSize),
-      editorWidth:
-        value.editorWidth && EDITOR_WIDTH_VALUES.has(value.editorWidth)
-          ? value.editorWidth
-          : DEFAULT_PREFERENCES.editorWidth,
       interfaceFont:
-        value.interfaceFont && INTERFACE_FONT_VALUES.has(value.interfaceFont)
-          ? value.interfaceFont
+        typeof value.interfaceFont === "string" &&
+        INTERFACE_FONT_VALUES.has(value.interfaceFont as InterfaceFontPreference)
+          ? (value.interfaceFont as InterfaceFontPreference)
           : DEFAULT_PREFERENCES.interfaceFont,
       spellCheck: typeof value.spellCheck === "boolean" ? value.spellCheck : DEFAULT_PREFERENCES.spellCheck,
-      theme: value.theme && THEME_VALUES.has(value.theme) ? value.theme : DEFAULT_PREFERENCES.theme,
+      theme:
+        typeof value.theme === "string" && THEME_VALUES.has(value.theme as ThemePreference)
+          ? (value.theme as ThemePreference)
+          : DEFAULT_PREFERENCES.theme,
     }
   } catch {
     return DEFAULT_PREFERENCES
@@ -121,6 +109,17 @@ function readPreferences(): AppPreferences {
 
 export function useAppPreferences() {
   const [preferences, setPreferences] = useState(readPreferences)
+  const {
+    cornerRadius,
+    interfaceFont,
+    typesetBodyFont,
+    typesetFlow,
+    typesetHeadingFont,
+    typesetLeading,
+    typesetMeasure,
+    typesetMonoFont,
+    typesetSize,
+  } = preferences
 
   useEffect(() => {
     localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(preferences))
@@ -141,17 +140,30 @@ export function useAppPreferences() {
 
   useEffect(() => {
     const rootStyle = document.documentElement.style
-    rootStyle.setProperty("--radius", CORNER_RADIUS_CSS[preferences.cornerRadius])
-    rootStyle.setProperty("--font-interface", INTERFACE_FONT_CSS[preferences.interfaceFont])
-    rootStyle.setProperty("--font-content", EDITOR_FONT_CSS[preferences.editorFont])
-    rootStyle.setProperty("--editor-font-size", `${preferences.editorFontSize}px`)
-    rootStyle.setProperty("--editor-max-width", EDITOR_WIDTH_CSS[preferences.editorWidth])
+    rootStyle.setProperty("--radius", CORNER_RADIUS_CSS[cornerRadius])
+    rootStyle.setProperty("--font-interface", INTERFACE_FONT_CSS[interfaceFont])
+    const typesetPreferences: TypesetPreferences = {
+      typesetBodyFont,
+      typesetFlow,
+      typesetHeadingFont,
+      typesetLeading,
+      typesetMeasure,
+      typesetMonoFont,
+      typesetSize,
+    }
+    for (const [property, value] of Object.entries(createTypesetCssVariables(typesetPreferences))) {
+      rootStyle.setProperty(property, value)
+    }
   }, [
-    preferences.cornerRadius,
-    preferences.editorFont,
-    preferences.editorFontSize,
-    preferences.editorWidth,
-    preferences.interfaceFont,
+    cornerRadius,
+    interfaceFont,
+    typesetBodyFont,
+    typesetFlow,
+    typesetHeadingFont,
+    typesetLeading,
+    typesetMeasure,
+    typesetMonoFont,
+    typesetSize,
   ])
 
   const updatePreference = useCallback<UpdateAppPreference>((key, value) => {

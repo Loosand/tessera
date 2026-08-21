@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 内存/临时磁盘 SQLite 客户端与前向迁移
- * [OUTPUT]: 迁移幂等性、表结构、AI 配置重启恢复和级联删除的回归验证
+ * [OUTPUT]: 迁移幂等性、表结构、工作区最近项、通用任务会话、AI 配置重启恢复和级联删除的回归验证
  * [POS]: 数据库包不依赖磁盘状态的基础集成测试
  * [DOC]: docs/architecture/database.md
  *
@@ -13,6 +13,7 @@
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import BetterSqlite3 from "better-sqlite3"
 import { describe, expect, test } from "vitest"
 import {
   deleteAiProviderConfigRecord,
@@ -22,9 +23,26 @@ import {
 } from "./ai-provider-config-repository"
 import { openDatabase } from "./client"
 import { DATABASE_MIGRATIONS, applyDatabaseMigrations } from "./migrations"
+import { foundationMigration } from "./migrations/0000-foundation"
+import { taskSessionsMigration } from "./migrations/0002-task-sessions"
+import {
+  deleteTaskSession,
+  findTaskSession,
+  listRecentTaskSessions,
+  listWorkspaceTaskSessions,
+  renameTaskSession,
+  saveTaskSession,
+} from "./task-session-repository"
+import {
+  appendTaskRunEvent,
+  findLatestTaskRun,
+  finishTaskRun,
+  startTaskRun,
+} from "./task-run-repository"
 import {
   findMostRecentWorkspace,
   findWorkspaceById,
+  hideRecentWorkspace,
   listRecentWorkspaces,
   saveWorkspace,
 } from "./workspace-repository"
@@ -38,11 +56,16 @@ describe("本地数据库基建", () => {
 
     expect(tables.map((table) => table.name)).toEqual([
       "__tessera_migrations",
+      "agent_change_proposals",
       "agent_events",
       "agent_sessions",
       "ai_provider_configs",
       "document_index",
       "permission_decisions",
+      "task_messages",
+      "task_run_events",
+      "task_runs",
+      "task_sessions",
       "workspaces",
     ])
     client.close()
@@ -57,6 +80,44 @@ describe("本地数据库基建", () => {
 
     expect(result.count).toBe(DATABASE_MIGRATIONS.length)
     client.close()
+  })
+
+  test("前向迁移会保留旧 agent_events 中的 Chat 快照", () => {
+    const database = new BetterSqlite3(":memory:")
+    database.pragma("foreign_keys = ON")
+    for (const statement of foundationMigration.statements) database.exec(statement)
+    database
+      .prepare("INSERT INTO workspaces (id, root_path, display_name, last_opened_at) VALUES (?, ?, ?, ?)")
+      .run("legacy-workspace", "/tmp/legacy", "旧工作区", 100)
+    database
+      .prepare(
+        "INSERT INTO agent_sessions (id, workspace_id, title, status, updated_at) VALUES (?, ?, ?, ?, ?)",
+      )
+      .run("legacy-chat", "legacy-workspace", "旧对话", "completed", 200)
+    database
+      .prepare("INSERT INTO agent_events (id, session_id, sequence, kind, payload) VALUES (?, ?, ?, ?, ?)")
+      .run(
+        "legacy-snapshot",
+        "legacy-chat",
+        0,
+        "chat.snapshot",
+        JSON.stringify([{ id: "legacy-message", role: "user", parts: [{ type: "text", text: "旧消息" }] }]),
+      )
+
+    for (const statement of taskSessionsMigration.statements) database.exec(statement)
+
+    expect(database.prepare("SELECT id, mode FROM task_sessions").get()).toEqual({
+      id: "legacy-chat",
+      mode: "chat",
+    })
+    expect(database.prepare("SELECT payload_json FROM task_messages").get()).toEqual({
+      payload_json: JSON.stringify({
+        id: "legacy-message",
+        role: "user",
+        parts: [{ type: "text", text: "旧消息" }],
+      }),
+    })
+    database.close()
   })
 
   test("删除工作区会级联清理可重建索引", () => {
@@ -131,9 +192,175 @@ describe("本地数据库基建", () => {
     client.close()
   })
 
+  test("从最近列表移除工作区不会删除数据，重新打开会恢复显示", () => {
+    const client = openDatabase({ path: ":memory:" })
+    saveWorkspace(client, {
+      id: "workspace-hidden",
+      rootPath: "/tmp/hidden",
+      displayName: "暂时隐藏的空间",
+      lastOpenedAt: new Date(100),
+    })
+    saveTaskSession(client, {
+      id: "workspace-task",
+      mode: "chat",
+      workspaceId: "workspace-hidden",
+      title: "保留的对话",
+      status: "completed",
+      updatedAt: new Date(200),
+      messagePayloads: [],
+    })
+
+    expect(hideRecentWorkspace(client, "workspace-hidden")).toBe(true)
+    expect(listRecentWorkspaces(client)).toEqual([])
+    expect(findMostRecentWorkspace(client)).toBeNull()
+    expect(findWorkspaceById(client, "workspace-hidden")?.displayName).toBe("暂时隐藏的空间")
+    expect(listWorkspaceTaskSessions(client, "workspace-hidden")).toHaveLength(1)
+
+    saveWorkspace(client, {
+      id: "ignored-reopen-id",
+      rootPath: "/tmp/hidden",
+      displayName: "重新打开的空间",
+      lastOpenedAt: new Date(300),
+    })
+    expect(listRecentWorkspaces(client)).toMatchObject([
+      { id: "workspace-hidden", displayName: "重新打开的空间" },
+    ])
+    client.close()
+  })
+
+  test("普通对话可以不绑定工作区并恢复版本化消息", () => {
+    const client = openDatabase({ path: ":memory:" })
+    saveTaskSession(client, {
+      id: "chat-task",
+      mode: "chat",
+      workspaceId: null,
+      title: "无工作区对话",
+      status: "completed",
+      updatedAt: new Date(200),
+      messagePayloads: [
+        JSON.stringify({ id: "message-1", role: "user", parts: [{ type: "text", text: "你好" }] }),
+        JSON.stringify({
+          id: "message-2",
+          role: "assistant",
+          metadata: { providerId: "deepseek", modelId: "deepseek-chat" },
+          parts: [{ type: "text", text: "你好，有什么可以帮你？", state: "done" }],
+        }),
+      ],
+    })
+
+    expect(listRecentTaskSessions(client)).toMatchObject([
+      { id: "chat-task", mode: "chat", workspaceId: null, workspaceName: null },
+    ])
+    expect(findTaskSession(client, "chat-task")?.messagePayloads).toHaveLength(2)
+    client.close()
+  })
+
+  test("对话可以重命名并在删除时级联清理消息", () => {
+    const client = openDatabase({ path: ":memory:" })
+    saveTaskSession(client, {
+      id: "mutable-task",
+      mode: "chat",
+      workspaceId: null,
+      title: "原名称",
+      status: "completed",
+      updatedAt: new Date(100),
+      messagePayloads: [
+        JSON.stringify({ id: "message-1", role: "user", parts: [{ type: "text", text: "你好" }] }),
+      ],
+    })
+
+    expect(renameTaskSession(client, "mutable-task", "新名称")?.title).toBe("新名称")
+    expect(findTaskSession(client, "mutable-task")?.title).toBe("新名称")
+    expect(deleteTaskSession(client, "mutable-task")).toBe(true)
+    expect(findTaskSession(client, "mutable-task")).toBeNull()
+    expect(
+      client.connection
+        .prepare("SELECT count(*) AS count FROM task_messages WHERE task_id = ?")
+        .get("mutable-task"),
+    ).toEqual({ count: 0 })
+    client.close()
+  })
+
+  test("Agent 任务必须绑定工作区并按工作区列出", () => {
+    const client = openDatabase({ path: ":memory:" })
+    saveWorkspace(client, {
+      id: "workspace-agent",
+      rootPath: "/tmp/agent",
+      displayName: "Agent 空间",
+      lastOpenedAt: new Date(100),
+    })
+    expect(() =>
+      saveTaskSession(client, {
+        id: "invalid-agent-task",
+        mode: "agent",
+        workspaceId: null,
+        title: "无效 Agent",
+        status: "idle",
+        updatedAt: new Date(100),
+        messagePayloads: [],
+      }),
+    ).toThrow()
+
+    saveTaskSession(client, {
+      id: "agent-task",
+      mode: "agent",
+      workspaceId: "workspace-agent",
+      title: "只读研究",
+      status: "idle",
+      updatedAt: new Date(200),
+      messagePayloads: [],
+    })
+    expect(listWorkspaceTaskSessions(client, "workspace-agent")).toMatchObject([
+      { id: "agent-task", mode: "agent", workspaceName: "Agent 空间" },
+    ])
+    client.close()
+  })
+
+  test("任务运行事件按 request 和 sequence 持久化并可恢复", () => {
+    const client = openDatabase({ path: ":memory:" })
+    saveTaskSession(client, {
+      id: "run-task",
+      mode: "chat",
+      workspaceId: null,
+      title: "恢复运行",
+      status: "running",
+      updatedAt: new Date(100),
+      messagePayloads: [],
+    })
+    startTaskRun(client, {
+      configId: "deepseek",
+      requestId: "run-request",
+      taskId: "run-task",
+      providerId: "deepseek",
+      modelId: "deepseek-chat",
+      startedAt: new Date(200),
+    })
+    appendTaskRunEvent(client, {
+      requestId: "run-request",
+      sequence: 1,
+      payloadJson: JSON.stringify({ sequence: 1, chunk: { type: "start" } }),
+    })
+    appendTaskRunEvent(client, {
+      requestId: "run-request",
+      sequence: 2,
+      payloadJson: JSON.stringify({ sequence: 2, chunk: { type: "text-delta", delta: "恢复" } }),
+    })
+    finishTaskRun(client, "run-request", "completed")
+
+    expect(findLatestTaskRun(client, "run-task")).toMatchObject({
+      requestId: "run-request",
+      status: "completed",
+      lastSequence: 2,
+      events: [{ sequence: 1 }, { sequence: 2 }],
+    })
+    client.close()
+  })
+
   test("AI 供应商普通配置与 safeStorage 密文可以幂等保存并删除", () => {
     const client = openDatabase({ path: ":memory:" })
     upsertAiProviderConfigRecord(client, {
+      configId: "openrouter",
+      displayName: "OpenRouter",
       providerId: "openrouter",
       enabled: true,
       baseUrl: "https://openrouter.ai/api/v1",
@@ -142,6 +369,8 @@ describe("本地数据库基建", () => {
       updatedAt: new Date(100),
     })
     upsertAiProviderConfigRecord(client, {
+      configId: "openrouter",
+      displayName: "OpenRouter",
       providerId: "openrouter",
       enabled: false,
       baseUrl: "https://relay.example.com/v1",
@@ -169,6 +398,8 @@ describe("本地数据库基建", () => {
     try {
       const first = openDatabase({ path: databasePath })
       upsertAiProviderConfigRecord(first, {
+        configId: "deepseek",
+        displayName: "DeepSeek",
         providerId: "deepseek",
         enabled: true,
         baseUrl: "https://api.deepseek.com",

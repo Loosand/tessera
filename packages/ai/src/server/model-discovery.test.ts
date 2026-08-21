@@ -15,6 +15,7 @@ import { describe, expect, it, vi } from "vitest"
 import { createAiModelCatalogUrl, listAiProviderModels } from "./model-discovery"
 
 const OPENAI_CONNECTION: AiProviderConnectionInput = {
+  configId: "openai-compatible",
   providerId: "openai-compatible",
   apiKey: "secret-key",
   baseUrl: "https://api.openai.com/v1",
@@ -76,6 +77,7 @@ describe("AI 模型目录发现", () => {
     await expect(
       listAiProviderModels(
         {
+          configId: "openrouter",
           providerId: "openrouter",
           apiKey: "",
           baseUrl: "https://openrouter.ai/api/v1",
@@ -106,7 +108,12 @@ describe("AI 模型目录发现", () => {
 
     await expect(
       listAiProviderModels(
-        { providerId: "openrouter", apiKey: "", baseUrl: "https://openrouter.ai/api/v1" },
+        {
+          configId: "openrouter",
+          providerId: "openrouter",
+          apiKey: "",
+          baseUrl: "https://openrouter.ai/api/v1",
+        },
         { fetch: fetcher },
       ),
     ).resolves.toEqual([
@@ -138,6 +145,7 @@ describe("AI 模型目录发现", () => {
     await expect(
       listAiProviderModels(
         {
+          configId: "anthropic-compatible",
           providerId: "anthropic-compatible",
           apiKey: "anthropic-secret",
           baseUrl: "https://api.anthropic.com/v1",
@@ -166,7 +174,12 @@ describe("AI 模型目录发现", () => {
     )
     await expect(
       listAiProviderModels(
-        { providerId: "grok", apiKey: "xai-key", baseUrl: "https://api.x.ai/v1" },
+        {
+          configId: "grok",
+          providerId: "grok",
+          apiKey: "xai-key",
+          baseUrl: "https://api.x.ai/v1",
+        },
         { fetch: fetcher },
       ),
     ).resolves.toEqual([
@@ -208,6 +221,7 @@ describe("AI 模型目录发现", () => {
     await expect(
       listAiProviderModels(
         {
+          configId: "anthropic-compatible",
           providerId: "anthropic-compatible",
           apiKey: "relay-key",
           baseUrl: "https://relay.example.com/anthropic/v1",

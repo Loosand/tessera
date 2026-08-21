@@ -1,6 +1,6 @@
 /**
- * [INPUT]: Electron safeStorage、SQLite 数据库客户端和跨进程 AI 配置/对话输入
- * [OUTPUT]: 不暴露密钥的配置读写、模型目录连接解析与已授权对话运行时输入
+ * [INPUT]: Electron safeStorage、SQLite 数据库客户端和跨进程 AI 配置/Chat/Agent 输入
+ * [OUTPUT]: 不暴露密钥的配置读写、模型目录连接解析与按模式校验的运行时输入
  * [POS]: 桌面主进程内的平台安全存储、数据库仓储和 @tessera/ai 领域层适配器
  * [DOC]: docs/architecture/ai-providers.md、docs/architecture/ai-chat-agent-todo.md
  *
@@ -21,7 +21,6 @@ import type {
   AiChatStartInput,
   AiProviderConfig,
   AiProviderConnectionInput,
-  AiProviderId,
   AiProviderSaveInput,
 } from "@tessera/contracts"
 import {
@@ -34,7 +33,7 @@ import {
 import { safeStorage } from "electron"
 
 export interface DesktopAiService {
-  deleteConfig(providerId: AiProviderId): void
+  deleteConfig(configId: string): void
   listConfigs(): AiProviderConfig[]
   resolveChatInput(input: AiChatStartInput): AiChatRuntimeInput
   resolveDiscoveryConnection(input: AiProviderConnectionInput): AiProviderConnectionInput
@@ -46,7 +45,7 @@ function databaseStore(client: DatabaseClient): AiProviderConfigStore {
     record ? { ...record, updatedAt: record.updatedAt.getTime() } : null
 
   return {
-    find: (providerId) => toStoreRecord(findAiProviderConfigRecord(client, providerId)),
+    find: (configId) => toStoreRecord(findAiProviderConfigRecord(client, configId)),
     list: () =>
       listAiProviderConfigRecords(client).map((record) => ({
         ...record,
@@ -54,7 +53,7 @@ function databaseStore(client: DatabaseClient): AiProviderConfigStore {
       })),
     save: (record) =>
       upsertAiProviderConfigRecord(client, { ...record, updatedAt: new Date(record.updatedAt) }),
-    delete: (providerId) => deleteAiProviderConfigRecord(client, providerId),
+    delete: (configId) => deleteAiProviderConfigRecord(client, configId),
   }
 }
 
@@ -75,14 +74,23 @@ export function createDesktopAiService(client: DatabaseClient): DesktopAiService
   return {
     listConfigs: () => configs.listConfigs(),
     saveConfig: (input) => configs.saveConfig(input),
-    deleteConfig: (providerId) => configs.deleteConfig(providerId),
+    deleteConfig: (configId) => configs.deleteConfig(configId),
     resolveDiscoveryConnection: (input) => configs.resolveConnection(input),
     resolveChatInput: (input) => {
-      const config = configs.listConfigs().find((candidate) => candidate.providerId === input.providerId)
+      const config = configs.listConfigs().find((candidate) => candidate.configId === input.configId)
+      if (config?.providerId !== input.providerId) {
+        throw new AiProviderConfigError("所选连接与供应商协议不匹配。")
+      }
       if (!config?.enabled) throw new AiProviderConfigError("请先在设置中启用这个 AI 供应商。")
       if (!config.apiKeyConfigured) throw new AiProviderConfigError("请先为这个供应商保存 API Key。")
       const model = config.models.find((candidate) => candidate.id === input.modelId)
       if (!model?.enabled) throw new AiProviderConfigError("所选模型未启用，请在供应商设置中检查模型列表。")
+      if (input.mode === "agent" && model.capabilities?.toolUse !== "supported") {
+        throw new AiProviderConfigError("所选模型没有已验证的工具调用能力，不能用于 Agent 模式。")
+      }
+      if (input.mode === "agent" && input.webSearch) {
+        throw new AiProviderConfigError("工作区 Agent 当前不开放联网搜索，请使用已授权的工作区工具。")
+      }
       if (input.webSearch && model.capabilities?.search !== "supported") {
         throw new AiProviderConfigError("所选模型没有已验证的联网搜索能力。")
       }
@@ -101,6 +109,7 @@ export function createDesktopAiService(client: DatabaseClient): DesktopAiService
       }
 
       const connection = configs.resolveConnection({
+        configId: config.configId,
         providerId: config.providerId,
         baseUrl: config.baseUrl,
         apiKey: "",

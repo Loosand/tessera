@@ -1,0 +1,162 @@
+/**
+ * [INPUT]: 内存 SQLite、通用任务会话输入与模拟工作区
+ * [OUTPUT]: Chat 空工作区、Agent 工作区约束、任务 mode 不可变和重命名/删除的回归验证
+ * [POS]: task-service 主进程权限边界的单元测试
+ * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
+ *
+ * [PROTOCOL]:
+ * 1. 文件契约变化时更新本 Header。
+ * 2. 成员或职责变化时同步最近的 .folder.md。
+ * 3. 行为变化时同步 [DOC] 指向的文档。
+ */
+
+import type { WorkspaceInfo } from "@tessera/contracts"
+import { openDatabase, saveWorkspace } from "@tessera/database"
+import { describe, expect, test } from "vitest"
+import { createDesktopTaskService } from "./task-service"
+
+const WORKSPACE = {
+  id: "workspace-test",
+  name: "测试工作区",
+  rootPath: "/tmp/tessera-task-service",
+} satisfies WorkspaceInfo
+
+describe("DesktopTaskService", () => {
+  test("Chat 可以在没有工作区时保存和授权运行", () => {
+    const client = openDatabase({ path: ":memory:" })
+    const service = createDesktopTaskService(client)
+    const snapshot = service.save(
+      {
+        id: "chat-task",
+        mode: "chat",
+        status: "completed",
+        title: "普通对话",
+        workspaceId: null,
+        messages: [
+          {
+            id: "assistant-message",
+            role: "assistant",
+            metadata: { providerId: "openrouter", modelId: "example/model" },
+            parts: [
+              { type: "reasoning", text: "核对资料", state: "done" },
+              { type: "text", text: "结论", state: "done" },
+            ],
+          },
+        ],
+      },
+      null,
+    )
+
+    expect(snapshot).toMatchObject({ mode: "chat", workspaceId: null })
+    expect(() => service.authorizeTurn("chat-task", "chat", null)).not.toThrow()
+    expect(service.read("chat-task").messages[0]).toMatchObject({
+      metadata: { modelId: "example/model" },
+      parts: [
+        { type: "reasoning", text: "核对资料" },
+        { type: "text", text: "结论" },
+      ],
+    })
+    client.close()
+  })
+
+  test("Agent 必须绑定匹配工作区且任务创建后不能切换 mode", () => {
+    const client = openDatabase({ path: ":memory:" })
+    saveWorkspace(client, {
+      id: WORKSPACE.id,
+      rootPath: WORKSPACE.rootPath,
+      displayName: WORKSPACE.name,
+      lastOpenedAt: new Date(),
+    })
+    const service = createDesktopTaskService(client)
+
+    expect(() =>
+      service.save(
+        {
+          id: "agent-task",
+          mode: "agent",
+          status: "idle",
+          title: "Agent",
+          messages: [],
+          workspaceId: null,
+        },
+        null,
+      ),
+    ).toThrow("Agent 任务必须绑定工作区")
+
+    service.save(
+      {
+        id: "agent-task",
+        mode: "agent",
+        status: "idle",
+        title: "Agent",
+        messages: [],
+        workspaceId: WORKSPACE.id,
+      },
+      WORKSPACE,
+    )
+    expect(() => service.authorizeTurn("agent-task", "agent", null)).toThrow("绑定的工作区")
+    expect(() =>
+      service.save(
+        {
+          id: "agent-task",
+          mode: "chat",
+          status: "idle",
+          title: "Agent",
+          messages: [],
+          workspaceId: WORKSPACE.id,
+        },
+        WORKSPACE,
+      ),
+    ).toThrow("不能切换模式")
+    client.close()
+  })
+
+  test("主页草稿在窗口已打开工作区时仍保持未绑定", () => {
+    const client = openDatabase({ path: ":memory:" })
+    saveWorkspace(client, {
+      id: WORKSPACE.id,
+      rootPath: WORKSPACE.rootPath,
+      displayName: WORKSPACE.name,
+      lastOpenedAt: new Date(),
+    })
+    const service = createDesktopTaskService(client)
+
+    const snapshot = service.save(
+      {
+        id: "standalone-chat",
+        mode: "chat",
+        status: "idle",
+        title: "独立对话",
+        messages: [],
+        workspaceId: null,
+      },
+      WORKSPACE,
+    )
+
+    expect(snapshot.workspaceId).toBeNull()
+    expect(snapshot.workspaceName).toBeNull()
+    client.close()
+  })
+
+  test("可以重命名和删除已保存的对话", () => {
+    const client = openDatabase({ path: ":memory:" })
+    const service = createDesktopTaskService(client)
+    service.save(
+      {
+        id: "managed-chat",
+        mode: "chat",
+        status: "completed",
+        title: "旧标题",
+        workspaceId: null,
+        messages: [{ id: "message-1", role: "user", parts: [{ type: "text", text: "你好" }] }],
+      },
+      null,
+    )
+
+    expect(service.rename("managed-chat", "新标题").title).toBe("新标题")
+    expect(service.read("managed-chat").title).toBe("新标题")
+    expect(service.delete("managed-chat")).toBe(true)
+    expect(() => service.read("managed-chat")).toThrow("找不到这个任务")
+    client.close()
+  })
+})

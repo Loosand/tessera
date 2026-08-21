@@ -1,8 +1,8 @@
 /**
- * [INPUT]: 合成 Electron IPC 增量事件与 AI SDK React Chat 状态机
- * [OUTPUT]: Transport 按顺序把 start 到 finish 的正文增量提交给消息消费者的回归验证
+ * [INPUT]: 合成 Electron IPC 正文/工具增量事件与 AI SDK React Chat 状态机
+ * [OUTPUT]: Transport 按顺序消费与恢复 reasoning、正文和工具 Part，并保留任务消息的回归验证
  * [POS]: use-electron-chat Transport 的流式集成测试
- * [DOC]: docs/architecture/ai-chat-agent-todo.md
+ * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -12,9 +12,15 @@
 
 import { Chat } from "@ai-sdk/react"
 import type { AiChatStartInput, AiChatStreamChunk, AiChatStreamEvent } from "@tessera/contracts"
-import type { UIMessage } from "ai"
+import type { UIMessage, UIMessageChunk } from "ai"
 import { describe, expect, it, vi } from "vitest"
-import { type ElectronChatBridge, ElectronChatTransport } from "./use-electron-chat"
+import {
+  type ElectronChatBridge,
+  ElectronChatTransport,
+  toAiChatMessages,
+  toTaskMessages,
+  toUiMessages,
+} from "./use-electron-chat"
 
 function assistantText(messages: readonly UIMessage[]) {
   let message: UIMessage | undefined
@@ -30,8 +36,22 @@ function assistantText(messages: readonly UIMessage[]) {
     .join("")
 }
 
+function assistantReasoning(messages: readonly UIMessage[]) {
+  let message: UIMessage | undefined
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === "assistant") {
+      message = messages[index]
+      break
+    }
+  }
+  return message?.parts
+    .filter((part) => part.type === "reasoning")
+    .map((part) => part.text)
+    .join("")
+}
+
 describe("ElectronChatTransport", () => {
-  it("让 AI SDK React 状态机逐段观察正文增量", async () => {
+  it("让 AI SDK React 状态机逐段观察 reasoning 与正文增量", async () => {
     let listener: ((event: AiChatStreamEvent) => void) | undefined
     let request: AiChatStartInput | undefined
     let sequence = 0
@@ -43,6 +63,7 @@ describe("ElectronChatTransport", () => {
           listener = undefined
         }
       },
+      resumeAiChat: async () => ({ ok: true, run: null }),
       startAiChat: async (input) => {
         request = input
         return { ok: true }
@@ -51,6 +72,8 @@ describe("ElectronChatTransport", () => {
     const transport = new ElectronChatTransport(() => ({
       bridge,
       chatId: "chat-test",
+      configId: "openai-compatible",
+      mode: "chat",
       providerId: "openai-compatible",
       modelId: "test-model",
       reasoning: "auto",
@@ -63,9 +86,12 @@ describe("ElectronChatTransport", () => {
       transport,
     })
     const observedText: string[] = []
+    const observedReasoning: string[] = []
     const unregister = chat["~registerMessagesCallback"](() => {
       const text = assistantText(chat.messages)
       if (text !== undefined) observedText.push(text)
+      const reasoning = assistantReasoning(chat.messages)
+      if (reasoning !== undefined) observedReasoning.push(reasoning)
     })
     const sendPromise = chat.sendMessage({ text: "请回答" })
 
@@ -73,13 +99,39 @@ describe("ElectronChatTransport", () => {
       expect(request).toBeDefined()
       expect(listener).toBeTypeOf("function")
     })
+    expect(request).toMatchObject({ taskId: "chat-test", mode: "chat" })
 
     const emit = (chunk: AiChatStreamChunk) => {
       if (!request || !listener) throw new Error("测试流尚未建立。")
-      listener({ requestId: request.requestId, sequence: ++sequence, chunk })
+      listener({ taskId: request.taskId, requestId: request.requestId, sequence: ++sequence, chunk })
     }
 
     emit({ type: "start", messageId: "assistant-1" })
+    emit({ type: "reasoning-start", id: "reasoning-1" })
+    emit({ type: "reasoning-delta", id: "reasoning-1", delta: "先检索资料" })
+    await vi.waitFor(() => expect(observedReasoning).toContain("先检索资料"))
+    emit({ type: "reasoning-end", id: "reasoning-1" })
+    emit({
+      type: "tool-input-start",
+      toolCallId: "tool-call-1",
+      toolName: "read-workspace-file",
+    })
+    emit({
+      type: "tool-input-delta",
+      toolCallId: "tool-call-1",
+      inputTextDelta: '{"path":"README.md"}',
+    })
+    emit({
+      type: "tool-input-available",
+      toolCallId: "tool-call-1",
+      toolName: "read-workspace-file",
+      input: { path: "README.md" },
+    })
+    emit({
+      type: "tool-output-available",
+      toolCallId: "tool-call-1",
+      output: { path: "README.md", content: "# Tessera" },
+    })
     emit({ type: "text-start", id: "text-1" })
     emit({ type: "text-delta", id: "text-1", delta: "你" })
     await vi.waitFor(() => expect(observedText).toContain("你"))
@@ -97,7 +149,219 @@ describe("ElectronChatTransport", () => {
     expect(chat.messages.at(-1)).toMatchObject({
       id: "assistant-1",
       role: "assistant",
-      parts: [{ type: "text", text: "你好", state: "done" }],
+      metadata: {
+        modelId: "test-model",
+        providerId: "openai-compatible",
+      },
+      parts: [
+        { type: "reasoning", text: "先检索资料", state: "done" },
+        {
+          type: "tool-read-workspace-file",
+          toolCallId: "tool-call-1",
+          state: "output-available",
+          input: { path: "README.md" },
+          output: { path: "README.md", content: "# Tessera" },
+        },
+        { type: "text", text: "你好", state: "done" },
+      ],
+    })
+    expect(toTaskMessages(chat.messages).at(-1)?.parts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "tool-read-workspace-file",
+          toolCallId: "tool-call-1",
+          state: "output-available",
+        }),
+      ]),
+    )
+  })
+
+  it("在持久化边界保留 reasoning、来源和模型元数据", () => {
+    const messages: UIMessage[] = [
+      {
+        id: "assistant-history",
+        role: "assistant",
+        parts: [
+          { type: "reasoning", id: "reasoning-history", text: "核对来源", state: "done" },
+          { type: "text", text: "结论", state: "done" },
+          {
+            type: "source-url",
+            sourceId: "source-history",
+            url: "https://example.com/source",
+            title: "来源",
+          },
+        ],
+      },
+    ]
+
+    const persisted = toTaskMessages(messages, {
+      providerId: "openrouter",
+      modelId: "example/model",
+    })
+
+    expect(persisted[0]).toMatchObject({
+      metadata: { providerId: "openrouter", modelId: "example/model" },
+      parts: [
+        { type: "reasoning", text: "核对来源" },
+        { type: "text", text: "结论" },
+        { type: "source-url", url: "https://example.com/source" },
+      ],
+    })
+    expect(toUiMessages(persisted)).toMatchObject(messages)
+  })
+
+  it("把工具结果和审批响应作为完整 UIMessage 历史发送到下一轮", () => {
+    const messages: UIMessage[] = [
+      {
+        id: "assistant-approval",
+        role: "assistant",
+        parts: [
+          {
+            type: "tool-write-workspace-document",
+            toolCallId: "tool-write",
+            state: "approval-responded",
+            input: { operation: "create", path: "notes.md", content: "# Notes\n", reason: "创建" },
+            approval: { id: "approval-write", approved: true },
+          },
+        ],
+      },
+    ]
+
+    expect(toAiChatMessages(messages)[0]?.parts[0]).toMatchObject({
+      type: "tool-write-workspace-document",
+      state: "approval-responded",
+      approval: { id: "approval-write", approved: true },
+    })
+  })
+
+  it("页面断开时只移除订阅，显式停止才取消后台请求", async () => {
+    let request: AiChatStartInput | undefined
+    const cancelAiChat = vi.fn()
+    const bridge: ElectronChatBridge = {
+      cancelAiChat,
+      onAiChatEvent: () => () => {},
+      resumeAiChat: async () => ({ ok: true, run: null }),
+      startAiChat: async (input) => {
+        request = input
+        return { ok: true }
+      },
+    }
+    const transport = new ElectronChatTransport(() => ({
+      bridge,
+      chatId: "chat-detach",
+      configId: "deepseek",
+      mode: "chat",
+      providerId: "deepseek",
+      modelId: "deepseek-v4-flash",
+      reasoning: "auto",
+      webSearch: false,
+    }))
+    const abortController = new AbortController()
+    const stream = await transport.sendMessages({
+      chatId: "chat-detach",
+      messageId: undefined,
+      messages: [],
+      trigger: "submit-message",
+      abortSignal: abortController.signal,
+    })
+    const reader = stream.getReader()
+
+    await vi.waitFor(() => expect(request).toBeDefined())
+    abortController.abort()
+    await expect(reader.read()).resolves.toEqual({ done: true, value: undefined })
+    expect(cancelAiChat).not.toHaveBeenCalled()
+
+    transport.cancelActive("chat-detach")
+    expect(cancelAiChat).toHaveBeenCalledOnce()
+    expect(cancelAiChat).toHaveBeenCalledWith(request?.requestId)
+  })
+
+  it("按序重放后台事件并去除订阅与快照之间的重复增量", async () => {
+    const events: AiChatStreamEvent[] = [
+      {
+        taskId: "chat-resume",
+        requestId: "request-resume",
+        sequence: 1,
+        chunk: { type: "start", messageId: "assistant-resume" },
+      },
+      {
+        taskId: "chat-resume",
+        requestId: "request-resume",
+        sequence: 2,
+        chunk: { type: "text-start", id: "text-resume" },
+      },
+      {
+        taskId: "chat-resume",
+        requestId: "request-resume",
+        sequence: 3,
+        chunk: { type: "text-delta", id: "text-resume", delta: "后台完成" },
+      },
+      {
+        taskId: "chat-resume",
+        requestId: "request-resume",
+        sequence: 4,
+        chunk: { type: "text-end", id: "text-resume" },
+      },
+      {
+        taskId: "chat-resume",
+        requestId: "request-resume",
+        sequence: 5,
+        chunk: { type: "finish", finishReason: "stop" },
+      },
+    ]
+    let listener: ((event: AiChatStreamEvent) => void) | undefined
+    const bridge: ElectronChatBridge = {
+      cancelAiChat: vi.fn(),
+      onAiChatEvent: (nextListener) => {
+        listener = nextListener
+        return () => {
+          listener = undefined
+        }
+      },
+      resumeAiChat: async () => {
+        listener?.(events[2] as AiChatStreamEvent)
+        return {
+          ok: true,
+          run: {
+            active: false,
+            configId: "deepseek",
+            events,
+            modelId: "deepseek-v4-flash",
+            providerId: "deepseek",
+            requestId: "request-resume",
+          },
+        }
+      },
+      startAiChat: async () => ({ ok: true }),
+    }
+    const transport = new ElectronChatTransport(() => ({
+      bridge,
+      chatId: "chat-resume",
+      configId: "deepseek",
+      mode: "chat",
+      providerId: "deepseek",
+      modelId: "deepseek-v4-flash",
+      reasoning: "auto",
+      webSearch: false,
+    }))
+
+    const stream = await transport.reconnectToStream({ chatId: "chat-resume" })
+    expect(stream).not.toBeNull()
+    const chunks: UIMessageChunk[] = []
+    if (!stream) throw new Error("恢复流未建立。")
+    const reader = stream.getReader()
+    while (true) {
+      const result = await reader.read()
+      if (result.done) break
+      chunks.push(result.value)
+    }
+
+    expect(chunks.filter((chunk) => chunk.type === "text-delta")).toEqual([
+      { type: "text-delta", id: "text-resume", delta: "后台完成" },
+    ])
+    expect(chunks[0]).toMatchObject({
+      type: "start",
+      messageMetadata: { modelId: "deepseek-v4-flash", providerId: "deepseek" },
     })
   })
 })

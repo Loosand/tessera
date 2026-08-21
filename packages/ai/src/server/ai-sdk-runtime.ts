@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 类型化供应商连接、模型 ID 与 AI SDK 官方供应商适配器
- * [OUTPUT]: 可交给 AI SDK generateText/streamText 的统一 LanguageModel 与原生联网工具
+ * [INPUT]: 类型化供应商连接、模型 ID、联网开关与 AI SDK 官方供应商适配器
+ * [OUTPUT]: 可交给 AI SDK generateText/streamText 的统一 LanguageModel、协议切换与原生联网工具
  * [POS]: @tessera/ai/server 的真实生成模型适配边界
  * [DOC]: docs/architecture/ai-providers.md
  *
@@ -57,6 +57,14 @@ function normalizedRuntimeInput(input: AiLanguageModelInput) {
   return { apiKey, baseURL, modelId }
 }
 
+function deepSeekAnthropicBaseUrl(baseURL: string) {
+  const url = new URL(baseURL)
+  if (url.hostname !== "api.deepseek.com") {
+    throw new Error("DeepSeek 联网搜索目前只支持官方 API 地址 https://api.deepseek.com。")
+  }
+  return "https://api.deepseek.com/anthropic"
+}
+
 export function createAiSdkChatRuntime(
   input: AiLanguageModelInput,
   { webSearch = false }: AiChatRuntimeOptions = {},
@@ -81,9 +89,20 @@ export function createAiSdkChatRuntime(
         ...(webSearch ? { tools: { web_search: anthropic.tools.webSearch_20260209({ maxUses: 5 }) } } : {}),
       }
     }
-    case "deepseek":
-      if (webSearch) throw new Error("DeepSeek API 当前未提供 Tessera 可调用的原生联网搜索。")
-      return { model: createDeepSeek({ apiKey, baseURL })(modelId) }
+    case "deepseek": {
+      if (!webSearch) return { model: createDeepSeek({ apiKey, baseURL })(modelId) }
+
+      const deepSeekAnthropic = createAnthropic({
+        apiKey,
+        baseURL: deepSeekAnthropicBaseUrl(baseURL),
+      })
+      return {
+        model: deepSeekAnthropic(modelId),
+        tools: {
+          web_search: deepSeekAnthropic.tools.webSearch_20250305({ maxUses: 5 }),
+        },
+      }
+    }
     case "grok": {
       const xai = createXai({ apiKey, baseURL })
       return {
