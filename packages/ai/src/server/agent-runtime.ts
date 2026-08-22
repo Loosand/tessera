@@ -131,6 +131,13 @@ export type AiSdkAgentRuntimeRequest = Readonly<{
   workspaceName?: string
 }>
 
+export function shouldHideResearchDraftText(chunkType: string, outcome: "complete" | "partial" | null) {
+  return (
+    !outcome &&
+    (chunkType === "text-start" || chunkType === "text-delta" || chunkType === "text-end")
+  )
+}
+
 export function createExternalAgentToolSet(
   externalTools: readonly ExternalAgentTool[],
   abortSignal: AbortSignal,
@@ -332,6 +339,9 @@ async function* runAiSdkAgent(
             output: publicResearchToolOutput(toolNames.get(chunk.toolCallId) ?? "", chunk.output),
           }
         : chunk
+    if (researchWorkflow && shouldHideResearchDraftText(publicInput.type, researchWorkflow.getProgress().outcome)) {
+      continue
+    }
     const sanitized = publicChunk(publicInput)
     if (sanitized) yield sanitized
   }

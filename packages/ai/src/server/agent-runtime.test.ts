@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 工作区文档写入输入 Schema、外部 MCP 工具与 AI SDK Schema/审批适配
- * [OUTPUT]: DeepSeek 等供应商可接受的根对象 Schema、create/update 条件校验和 MCP 强制审批回归
+ * [INPUT]: 工作区文档写入输入 Schema、外部 MCP 工具、研究阶段文本与 AI SDK Schema/审批适配
+ * [OUTPUT]: DeepSeek 等供应商可接受的根对象 Schema、create/update 条件校验、研究草稿隐藏和 MCP 强制审批回归
  * [POS]: @tessera/ai/server 工作区 Agent 工具协议单元测试
  * [DOC]: docs/architecture/mcp.md、docs/architecture/task-navigation.md
  *
@@ -12,7 +12,11 @@
 
 import { zodSchema } from "ai"
 import { describe, expect, it } from "vitest"
-import { createExternalAgentToolSet, workspaceDocumentChangeInputSchema } from "./agent-runtime"
+import {
+  createExternalAgentToolSet,
+  shouldHideResearchDraftText,
+  workspaceDocumentChangeInputSchema,
+} from "./agent-runtime"
 
 const validBaseContentHash = "a".repeat(64)
 
@@ -76,5 +80,14 @@ describe("外部 MCP Agent 工具", () => {
     )
 
     expect(tools.mcp__test__search?.needsApproval).toBe(true)
+  })
+})
+
+describe("研究最终答复边界", () => {
+  it("完成检查前隐藏模型进度旁白，通过后才公开最终正文", () => {
+    expect(shouldHideResearchDraftText("text-delta", null)).toBe(true)
+    expect(shouldHideResearchDraftText("reasoning-delta", null)).toBe(false)
+    expect(shouldHideResearchDraftText("text-delta", "complete")).toBe(false)
+    expect(shouldHideResearchDraftText("text-delta", "partial")).toBe(false)
   })
 })

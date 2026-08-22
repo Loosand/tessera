@@ -71,6 +71,7 @@ import { AgentChangeError, type AgentChangeService, createAgentChangeService } f
 import { parseAiChatStreamEvent } from "./ai-chat-event"
 import { registerAiSdkDevtools, startAiSdkDevtoolsViewer, stopAiSdkDevtoolsViewer } from "./ai-devtools"
 import { type DesktopAiService, createDesktopAiService } from "./ai-service"
+import { createElectronResearchReader } from "./browser-research-reader"
 import {
   ContentLibraryError,
   type ContentLibraryService,
@@ -79,7 +80,11 @@ import {
 import { handleDesktopInvoke, onDesktopSend } from "./ipc-contract"
 import { McpConfigError, type McpService, createMcpService } from "./mcp-service"
 import { createReadonlyWorkspaceAgentTools } from "./read-only-agent-tools"
-import { type DesktopResearchService, createDesktopResearchService } from "./research-service"
+import {
+  type DesktopResearchService,
+  createDesktopResearchService,
+  researchFinishIssue,
+} from "./research-service"
 import { type DesktopTaskService, createDesktopTaskService } from "./task-service"
 import { UserSkillError, type UserSkillService, createUserSkillService } from "./user-skill-service"
 
@@ -1016,27 +1021,36 @@ function registerIpcHandlers() {
           taskId: input.taskId,
           startedAt: runStartedAt,
         })
-        researchService = createDesktopResearchService(runDatabase, { requestId: input.requestId })
+        researchService = createDesktopResearchService(runDatabase, {
+          requestId: input.requestId,
+          reader: createElectronResearchReader(),
+        })
       }
       recordTaskRunResourceBindings(runDatabase, input, workspace)
 
       const pendingToolInputs = new Map<string, { input: unknown; toolName: string }>()
       let latestSearchQuery: string | undefined
+      let researchFinalTextCharacters = 0
 
       const emit = async (incomingChunk: AiChatStreamChunk) => {
         const awaitingUserInput = [...pendingToolInputs.values()].some(
           (pending) => pending.toolName === "request-user-input",
         )
-        const chunk: AiChatStreamChunk =
-          incomingChunk.type === "finish" &&
-          researchService &&
-          !researchService.getProgress().outcome &&
-          !awaitingUserInput
-            ? {
-                type: "error",
-                errorText: "研究运行在通过证据与覆盖检查前结束，已保留当前计划和来源进度，请重试继续。",
-              }
-            : incomingChunk
+        const researchOutcome = researchService?.getProgress().outcome ?? null
+        if (incomingChunk.type === "text-delta" && researchOutcome) {
+          researchFinalTextCharacters += incomingChunk.delta.trim().length
+        }
+        const researchIssue =
+          incomingChunk.type === "finish" && researchService
+            ? researchFinishIssue({
+                awaitingUserInput,
+                finalTextCharacters: researchFinalTextCharacters,
+                outcome: researchOutcome,
+              })
+            : null
+        const chunk: AiChatStreamChunk = researchIssue
+          ? { type: "error", errorText: researchIssue }
+          : incomingChunk
         if (chunk.type === "tool-input-available") {
           pendingToolInputs.set(chunk.toolCallId, { input: chunk.input, toolName: chunk.toolName })
           if (chunk.toolName.includes("web_search") || chunk.toolName.includes("web-search")) {

@@ -743,7 +743,6 @@ describe("本地数据库基建", () => {
         limits: {
           maxOutputTokens: 4_096,
           maxSteps: 8,
-          maxTotalTokens: 40_000,
           timeoutMs: 120_000,
         },
         mode: "chat",

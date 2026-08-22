@@ -195,7 +195,7 @@
 
 - [x] 在编码前针对锁定的 AI SDK 版本完成能力矩阵，至少核对 `ToolLoopAgent`、call options / `prepareCall`、`prepareStep`、`stopWhen`、`toolApproval`、typed UI messages、ChatTransport、生命周期和子 Agent；能力矩阵记录在[统一创作 Agent 与内容存储探索](unified-creation-agent.md)，依据 `ai@7.0.73` 随包 docs/source。
 - [x] 让无工作区任务也通过 AI SDK `ToolLoopAgent` 运行；无资源且无需搜索时允许零工具直接生成文本。
-- [x] 定义第一版受信任 `RunPolicy`：主进程按本轮显式创作方式、内部作用域和持久化模型事实解析实际端点、Skill、联网、推理、工具作用域及 step/token/time 上限；renderer 只做同源预检，IPC 不接受 `reasoning` / `webSearch` 命令。无工作区与工作区路径共用 `task-agent.ts` 的 `callOptionsSchema` / `prepareCall`，不复制 Agent loop。
+- [x] 定义第一版受信任 `RunPolicy`：主进程按本轮显式创作方式、内部作用域和持久化模型事实解析实际端点、Skill、联网、推理、工具作用域及安全护栏；renderer 只做同源预检，IPC 不接受 `reasoning` / `webSearch` 命令。研究不设置累计 Token 或应用侧单步输出额度，只按模型上下文设置宽松循环保险丝。无工作区与工作区路径共用 `task-agent.ts` 的 `callOptionsSchema` / `prepareCall`，不复制 Agent loop。
 - [x] 在第一版 RunPolicy 上增加保守的用户 turn 自动研究/写作识别、规范化动态资源和领域工具审批；自动化只收窄主进程已经确认的资源授权。更强语义路由与细粒度策略仍继续演进。
 - [x] 把实际 Skill、完整 RunPolicy 和资源摘要固化到 `task_runs`：`0009-task-run-policy` 保存兼容查询列，`0010-task-run-context` 保存 `policy_json` / `resource_summary_json`，旧运行保持未知值；后续以关系表替代仅有摘要的动态资源表达。
 - [x] 允许自动/研究/写作/问答在每轮发送前切换；同一任务可以从普通问答进入研究和写作，旧 run 不被回写。
@@ -209,10 +209,10 @@
 ### 研究工作流
 
 - [x] 按[研究工作流与证据链](research-workflow.md)定义并实现研究计划、问题、来源、读取、证据、覆盖和完成汇总的最小契约。
-- [ ] 让显式研究进入可恢复的领域阶段，首次搜索前必须有计划；自动方式的原子事实问答继续允许零计划直接回答。
-- [ ] 实现受限 `read-web-source`，将候选 URL 明确归一化为已阅读或不可用，不能把搜索摘要计为页面阅读。
-- [ ] 增加声明到来源片段的证据关系和领域完成检查；达到预算上限时保留部分完成、未覆盖问题和限制。
-- [ ] 用真实事件分别呈现搜索、发现、阅读、引用、推荐与保存数量，并为 FKJ 类人物研究建立端到端回归样本。
+- [x] 让显式研究进入可恢复的领域阶段，首次搜索前必须有计划；自动方式的原子事实问答继续允许零计划直接回答。
+- [x] 实现受限 `read-web-source`，将候选 URL 明确归一化为已阅读或不可用，不能把搜索摘要计为页面阅读；桌面端复用系统代理，静态读取失败时回退到无登录态沙箱浏览器。
+- [x] 增加声明到来源片段的证据关系和领域完成检查；实际材料不可访问、冲突或合理尝试仍不足时保留部分完成、未覆盖问题和限制。
+- [ ] 用真实事件分别呈现搜索、发现、阅读、引用、推荐与保存数量；计划/来源/阅读/引用和失败原因已实现，推荐与保存留到材料沉淀阶段。
 
 ### 资源与领域工具
 

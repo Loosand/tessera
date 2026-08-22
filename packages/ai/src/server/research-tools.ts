@@ -63,6 +63,19 @@ export const researchReadSourceOutputSchema = z.strictObject({
   truncated: z.boolean(),
   content: z.string().optional(),
   error: z.string().optional(),
+  errorCode: z
+    .enum([
+      "blocked-address",
+      "browser-failed",
+      "content-invalid",
+      "content-too-large",
+      "http-error",
+      "network-timeout",
+      "redirect-invalid",
+      "unsupported-content",
+      "unknown",
+    ])
+    .optional(),
 })
 
 export const researchEvidenceInputSchema = z.strictObject({
@@ -111,10 +124,7 @@ export const researchFinalizeOutputSchema = z.discriminatedUnion("status", [
 type ResearchToolContext = Readonly<{ signal: AbortSignal; toolCallId: string }>
 
 export type ResearchAgentTools = Readonly<{
-  finalize: (
-    input: TaskResearchFinalizeInput,
-    context: ResearchToolContext & Readonly<{ allowPartial: boolean }>,
-  ) => Promise<TaskResearchFinalizeOutput>
+  finalize: (input: TaskResearchFinalizeInput, context: ResearchToolContext) => Promise<TaskResearchFinalizeOutput>
   getProgress: () => TaskResearchProgress
   publishPlan: (input: TaskResearchPlanInput, context: ResearchToolContext) => Promise<TaskResearchPlanOutput>
   readSource: (
@@ -128,7 +138,6 @@ export type ResearchAgentTools = Readonly<{
 }>
 
 export type ResearchWorkflowController = Readonly<{
-  allowPartialFinalization: () => void
   getProgress: () => TaskResearchProgress
   tools: ToolSet
 }>
@@ -137,7 +146,6 @@ export function createResearchToolSet(
   service: ResearchAgentTools,
   abortSignal: AbortSignal,
 ): ResearchWorkflowController {
-  let allowPartial = false
   const context = (options: Readonly<{ abortSignal?: AbortSignal; toolCallId: string }>) => ({
     signal: options.abortSignal ?? abortSignal,
     toolCallId: options.toolCallId,
@@ -186,18 +194,15 @@ export function createResearchToolSet(
     }),
     [FINALIZE_RESEARCH_TOOL_NAME]: tool({
       description:
-        "在写最终答复前执行研究完成检查。完整完成要求计划、已读来源、交叉核验、逐问题覆盖与证据；额度将耗尽时可提交带未覆盖问题和限制的部分完成。",
+        "在写最终答复前执行研究完成检查。完整完成要求计划、已读来源、交叉核验、逐问题覆盖与证据；资料不可访问、相互冲突或经过合理尝试仍不足时，应提交带未覆盖问题和限制的部分完成。",
       inputSchema: researchFinalizeInputSchema,
       outputSchema: researchFinalizeOutputSchema,
-      execute: (input, options) => service.finalize(input, { ...context(options), allowPartial }),
+      execute: (input, options) => service.finalize(input, context(options)),
     }),
   } satisfies ToolSet
   return {
     tools,
     getProgress: service.getProgress,
-    allowPartialFinalization: () => {
-      allowPartial = true
-    },
   }
 }
 

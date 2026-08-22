@@ -73,7 +73,7 @@ for (const [network, prefix] of [
 type HtmlNode = DefaultTreeAdapterMap["node"]
 type HtmlElement = DefaultTreeAdapterMap["element"]
 
-type RestrictedWebRead = Readonly<{
+export type RestrictedWebRead = Readonly<{
   author?: string
   charCount: number
   content: string
@@ -87,10 +87,37 @@ type RestrictedWebRead = Readonly<{
 
 export type RestrictedWebSourceReader = (url: string, signal: AbortSignal) => Promise<RestrictedWebRead>
 
+export type ResearchReadErrorCode = NonNullable<TaskResearchReadSourceOutput["errorCode"]>
+
+export class ResearchReadError extends Error {
+  readonly code: ResearchReadErrorCode
+
+  constructor(message: string, code: ResearchReadErrorCode, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "ResearchReadError"
+    this.code = code
+  }
+}
+
 export type DesktopResearchService = ResearchAgentTools &
   Readonly<{
     recordDiscoveredSource: (input: Readonly<{ query?: string; title?: string; url: string }>) => void
   }>
+
+export function researchFinishIssue(input: Readonly<{
+  awaitingUserInput: boolean
+  finalTextCharacters: number
+  outcome: "complete" | "partial" | null
+}>) {
+  if (input.awaitingUserInput) return null
+  if (!input.outcome) {
+    return "研究运行在通过证据与覆盖检查前结束，已保留当前计划和来源进度，请重试继续。"
+  }
+  if (input.finalTextCharacters < 40) {
+    return "研究完成检查已经通过，但模型没有交付最终报告；已保留证据与覆盖状态，请重试生成报告。"
+  }
+  return null
+}
 
 function headerValue(headers: IncomingHttpHeaders, name: string) {
   const value = headers[name]
@@ -135,6 +162,12 @@ async function resolvePublicAddresses(url: URL) {
     throw new Error("网页来源解析到本机、内网或保留地址。")
   }
   return addresses
+}
+
+export async function assertPublicWebUrl(value: string | URL) {
+  const url = parsePublicWebUrl(value.toString())
+  await resolvePublicAddresses(url)
+  return url
 }
 
 async function requestPinnedUrl(url: URL, signal: AbortSignal) {
@@ -341,6 +374,90 @@ function readableResult(
   }
 }
 
+const GENERIC_OR_ERROR_PAGE_PATTERNS = [
+  /access denied/iu,
+  /checking your browser/iu,
+  /enable javascript/iu,
+  /just a moment/iu,
+  /please sign in/iu,
+  /sign in to continue/iu,
+  /(?:需要)?启用\s*javascript/iu,
+  /请先登录/iu,
+  /验证码/iu,
+]
+const RELEVANCE_STOP_WORDS = new Set([
+  "about",
+  "album",
+  "apple",
+  "article",
+  "home",
+  "interview",
+  "latest",
+  "music",
+  "news",
+  "official",
+  "page",
+  "review",
+  "song",
+  "video",
+  "wikipedia",
+  "www",
+])
+
+function relevanceTerms(value: string) {
+  return (value.toLocaleLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}_-]{2,}/gu) ?? []).filter(
+    (term) => !RELEVANCE_STOP_WORDS.has(term) && !/^\d+$/u.test(term),
+  )
+}
+
+export function validateReadableWebSource(
+  result: RestrictedWebRead,
+  input: Readonly<{ expectedTitle?: string; requestedUrl: string }>,
+) {
+  const visible = `${result.title ?? ""}\n${result.content}`.toLocaleLowerCase()
+  if (visible.length < 12_000 && GENERIC_OR_ERROR_PAGE_PATTERNS.some((pattern) => pattern.test(visible))) {
+    throw new ResearchReadError("网页返回的是登录墙、验证页或 JavaScript 空壳，而不是可核查正文。", "content-invalid")
+  }
+
+  const requested = parsePublicWebUrl(input.requestedUrl)
+  let requestedPath = requested.pathname
+  try {
+    requestedPath = decodeURIComponent(requestedPath)
+  } catch {
+    // 非规范百分号编码仍可使用原始路径词做弱相关性检查。
+  }
+  const expectedTerms = [
+    ...relevanceTerms(input.expectedTitle ?? ""),
+    ...relevanceTerms(requestedPath),
+  ].slice(0, 12)
+  if (expectedTerms.length > 0 && !expectedTerms.some((term) => visible.includes(term))) {
+    throw new ResearchReadError("网页正文与搜索结果标题或目标地址不匹配，可能发生了无关跳转。", "content-invalid")
+  }
+  return result
+}
+
+export function researchReadErrorCode(error: unknown): ResearchReadErrorCode {
+  if (error instanceof ResearchReadError) return error.code
+  const message = error instanceof Error ? error.message.toLocaleLowerCase() : ""
+  if (message.includes("本机") || message.includes("内网") || message.includes("保留地址")) {
+    return "blocked-address"
+  }
+  if (message.includes("超时") || message.includes("timed out") || message.includes("timeout")) {
+    return "network-timeout"
+  }
+  if (message.includes("2 mib") || message.includes("读取上限")) return "content-too-large"
+  if (message.includes("重定向")) return "redirect-invalid"
+  if (message.includes("http ")) return "http-error"
+  if (message.includes("html") || message.includes("纯文本") || message.includes("压缩格式")) {
+    return "unsupported-content"
+  }
+  if (message.includes("正文") || message.includes("内容") || message.includes("登录")) {
+    return "content-invalid"
+  }
+  if (message.includes("浏览器")) return "browser-failed"
+  return "unknown"
+}
+
 export const readRestrictedWebSource: RestrictedWebSourceReader = async (value, signal) => {
   let url = parsePublicWebUrl(value)
   for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount += 1) {
@@ -459,6 +576,7 @@ export function createDesktopResearchService(
       validateQuestionIds(run, questionIds)
       const canonicalUrl = normalizedUrl(url)
       const sourceId = stableSourceId(input.requestId, canonicalUrl)
+      const discoveredSource = run.sources.find((source) => source.canonicalUrl === canonicalUrl)
       setResearchRunPhase(client, input.requestId, "reading")
       saveResearchSource(client, {
         id: sourceId,
@@ -466,10 +584,10 @@ export function createDesktopResearchService(
         url,
         canonicalUrl,
         finalUrl: null,
-        title: null,
+        title: discoveredSource?.title ?? null,
         author: null,
         publishedAt: null,
-        discoveredByQuery: null,
+        discoveredByQuery: discoveredSource?.discoveredByQuery ?? null,
         questionIds,
         status: "reading",
         contentType: null,
@@ -479,7 +597,10 @@ export function createDesktopResearchService(
         errorMessage: null,
       })
       try {
-        const result = await reader(url, context.signal)
+        const result = validateReadableWebSource(await reader(url, context.signal), {
+          requestedUrl: url,
+          ...(discoveredSource?.title ? { expectedTitle: discoveredSource.title } : {}),
+        })
         context.signal.throwIfAborted()
         sourceBodies.set(sourceId, result.content)
         saveResearchSource(client, {
@@ -491,7 +612,7 @@ export function createDesktopResearchService(
           title: result.title ?? null,
           author: result.author ?? null,
           publishedAt: result.publishedAt ?? null,
-          discoveredByQuery: null,
+          discoveredByQuery: discoveredSource?.discoveredByQuery ?? null,
           questionIds,
           status: "read",
           contentType: result.contentType,
@@ -516,16 +637,17 @@ export function createDesktopResearchService(
       } catch (error) {
         if (context.signal.aborted) throw error
         const message = error instanceof Error ? error.message : "网页读取失败。"
+        const errorCode = researchReadErrorCode(error)
         saveResearchSource(client, {
           id: sourceId,
           requestId: input.requestId,
           url,
           canonicalUrl,
           finalUrl: canonicalUrl,
-          title: null,
+          title: discoveredSource?.title ?? null,
           author: null,
           publishedAt: null,
-          discoveredByQuery: null,
+          discoveredByQuery: discoveredSource?.discoveredByQuery ?? null,
           questionIds,
           status: "unusable",
           contentType: null,
@@ -541,6 +663,7 @@ export function createDesktopResearchService(
           charCount: 0,
           truncated: false,
           error: message,
+          errorCode,
         }
       }
     },
@@ -602,8 +725,10 @@ export function createDesktopResearchService(
           issues.push("仍有来源处于读取中。")
         }
       } else {
-        if (!context.allowPartial) issues.push("只有运行预算接近上限时才能标记部分完成。")
         if (finalization.limitations.length === 0) issues.push("部分完成必须说明限制和未覆盖内容。")
+        if (readSources.length === 0 && !run.sources.some((source) => source.status === "unusable")) {
+          issues.push("部分完成前至少需要实际尝试读取一个来源。")
+        }
       }
       if (issues.length > 0) {
         return { status: "blocked", issues, progress: researchProgress(client, input.requestId) }

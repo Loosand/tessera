@@ -373,9 +373,9 @@ export type TaskToolScope = "conversation" | "workspace-read" | "workspace-write
 
 export type TaskRunPolicy = {
   limits: {
-    maxOutputTokens: number
+    /** null 表示研究运行不人为覆盖供应商/模型的单次输出上限。 */
+    maxOutputTokens: number | null
     maxSteps: number
-    maxTotalTokens: number
     timeoutMs: number
   }
   mode: TaskMode
@@ -482,6 +482,16 @@ export type TaskResearchReadSourceOutput = {
   contentHash?: string
   contentType?: string
   error?: string
+  errorCode?:
+    | "blocked-address"
+    | "browser-failed"
+    | "content-invalid"
+    | "content-too-large"
+    | "http-error"
+    | "network-timeout"
+    | "redirect-invalid"
+    | "unsupported-content"
+    | "unknown"
   finalUrl: string
   publishedAt?: string
   sourceId: string

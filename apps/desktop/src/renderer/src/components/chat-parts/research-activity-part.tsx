@@ -57,7 +57,11 @@ export type ResearchActivitySummary = Readonly<{
     shortlisted: number
     unusable: number
   }> | null
-  sources: readonly Readonly<{ label: string; status: "failed" | "read" | "reading" }>[]
+  sources: readonly Readonly<{
+    detail?: string
+    label: string
+    status: "failed" | "read" | "reading"
+  }>[]
   unusableCount: number
 }>
 
@@ -69,7 +73,10 @@ export function collectResearchActivity(parts: readonly MessagePart[]): Research
   let sourceCounts: ResearchActivitySummary["sourceCounts"] = null
   let readCount = 0
   let unusableCount = 0
-  const sources: Array<{ label: string; status: "failed" | "read" | "reading" }> = []
+  const sources = new Map<
+    string,
+    { detail?: string; label: string; status: "failed" | "read" | "reading" }
+  >()
 
   for (const part of parts.filter(isResearchActivityToolPart)) {
     const name = toolName(part)
@@ -81,6 +88,8 @@ export function collectResearchActivity(parts: readonly MessagePart[]): Research
       active = true
     }
     if (name === READ_WEB_SOURCE_TOOL_NAME) {
+      // SDK/供应商级工具错误不是已经尝试过的网页，不能伪装成一个“不可用来源”。
+      if (part.state === "output-error") continue
       let label = typeof output?.title === "string" ? output.title : ""
       const url =
         typeof output?.finalUrl === "string"
@@ -98,12 +107,14 @@ export function collectResearchActivity(parts: readonly MessagePart[]): Research
       const status =
         output?.status === "read"
           ? "read"
-          : output?.status === "unusable" || part.state === "output-error"
+          : output?.status === "unusable"
             ? "failed"
             : "reading"
       if (status === "read") readCount += 1
       if (status === "failed") unusableCount += 1
-      sources.push({ label: label || "网页来源", status })
+      const key = typeof output?.sourceId === "string" ? output.sourceId : url || part.toolCallId
+      const detail = status === "failed" && typeof output?.error === "string" ? output.error.slice(0, 160) : undefined
+      sources.set(key, { label: label || "网页来源", status, ...(detail ? { detail } : {}) })
     }
     if (name === RECORD_RESEARCH_EVIDENCE_TOOL_NAME && output?.status === "recorded") evidenceCount += 1
     if (name === FINALIZE_RESEARCH_TOOL_NAME) {
@@ -140,7 +151,7 @@ export function collectResearchActivity(parts: readonly MessagePart[]): Research
     questionCounts,
     readCount: sourceCounts?.read ?? readCount,
     sourceCounts,
-    sources,
+    sources: [...sources.values()],
     unusableCount: sourceCounts?.unusable ?? unusableCount,
   }
 }
@@ -189,8 +200,15 @@ export function ResearchActivityPart({
       {summary.sources.length > 0 ? (
         <ul className="mt-2 space-y-1.5">
           {summary.sources.map((source, index) => (
-            <li key={`${source.label}-${index}`} className="flex min-w-0 items-center justify-between gap-3">
-              <span className="truncate text-foreground/80">{source.label}</span>
+            <li key={`${source.label}-${index}`} className="flex min-w-0 items-start justify-between gap-3">
+              <span className="min-w-0">
+                <span className="block truncate text-foreground/80">{source.label}</span>
+                {source.detail ? (
+                  <span className="mt-0.5 block line-clamp-2 text-[10px] leading-4 text-muted-foreground">
+                    {source.detail}
+                  </span>
+                ) : null}
+              </span>
               <span className="shrink-0 text-[10px] text-muted-foreground">
                 {sourceStatusLabels[source.status]}
               </span>

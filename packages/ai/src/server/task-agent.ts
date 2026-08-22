@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 已解析 TaskRunPolicy、AI SDK LanguageModel、当前请求工具集合、领域 instructions、Telemetry、生命周期观测回调与工具分组
- * [OUTPUT]: 通过 callOptionsSchema/prepareCall 动态收窄推理、工具、预算和 Skill instructions，并以 AI SDK 原生生命周期产出统一运行指标的 ToolLoopAgent
+ * [OUTPUT]: 通过 callOptionsSchema/prepareCall 动态收窄推理、工具、安全护栏和 Skill instructions，并以 AI SDK 原生生命周期产出统一运行指标的 ToolLoopAgent
  * [POS]: 无工作区对话与工作区 Agent 共用的 AI SDK 标准动态配置工厂
  * [DOC]: docs/architecture/unified-creation-agent.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/ai-observability.md
  *
@@ -35,9 +35,8 @@ import type { ResearchWorkflowController } from "./research-tools"
 
 const taskRunPolicySchema = z.strictObject({
   limits: z.strictObject({
-    maxOutputTokens: z.number().int().positive(),
+    maxOutputTokens: z.number().int().positive().nullable(),
     maxSteps: z.number().int().positive(),
-    maxTotalTokens: z.number().int().positive(),
     timeoutMs: z.number().int().positive(),
   }),
   mode: z.enum(["chat", "agent"]),
@@ -173,7 +172,6 @@ export function researchStepPolicy(
     maxSteps: number
     progress: TaskResearchProgress
     stepNumber: number
-    tokenBudgetNearLimit: boolean
   }>,
 ): ResearchStepPolicy {
   if (input.progress.outcome) return { activeTools: [], mode: "final-answer", toolChoice: "none" }
@@ -194,7 +192,7 @@ export function researchStepPolicy(
   ) {
     return { activeTools: evidenceTools, mode: "evidence", toolChoice: "required" }
   }
-  if (input.stepNumber >= Math.max(1, input.maxSteps - 3) || input.tokenBudgetNearLimit) {
+  if (input.stepNumber >= Math.max(1, input.maxSteps - 2)) {
     return {
       activeTools: input.activeTools.filter((name) => name === FINALIZE_RESEARCH_TOOL_NAME),
       mode: "finalize-partial",
@@ -256,7 +254,9 @@ export function createTaskAgent({
         ...settings,
         activeTools,
         ...(instructions ? { instructions } : {}),
-        maxOutputTokens: options.policy.limits.maxOutputTokens,
+        ...(options.policy.limits.maxOutputTokens
+          ? { maxOutputTokens: options.policy.limits.maxOutputTokens }
+          : {}),
         reasoning: reasoningLevel(options.policy.reasoning),
         stopWhen: [
           researchWorkflow
@@ -267,28 +267,16 @@ export function createTaskAgent({
                   stepCount: steps.length,
                 })
             : isStepCount(options.policy.limits.maxSteps),
-          ({ steps }) =>
-            (!researchWorkflow || researchFinalAnswerStarted) &&
-            steps.reduce((total, step) => total + (step.usage.totalTokens ?? 0), 0) >=
-              options.policy.limits.maxTotalTokens,
         ],
         ...(researchWorkflow
           ? {
-              prepareStep: ({
-                stepNumber,
-                steps,
-              }: { stepNumber: number; steps: GenerateTextStepEndEvent<ToolSet>[] }) => {
-                const usedTokens = steps.reduce((total, step) => total + (step.usage.totalTokens ?? 0), 0)
+              prepareStep: ({ stepNumber }: { stepNumber: number }) => {
                 const policy = researchStepPolicy({
                   activeTools,
                   maxSteps: options.policy.limits.maxSteps,
                   progress: researchWorkflow.getProgress(),
                   stepNumber,
-                  tokenBudgetNearLimit:
-                    usedTokens + options.policy.limits.maxOutputTokens * 2 >=
-                    options.policy.limits.maxTotalTokens,
                 })
-                if (policy.mode === "finalize-partial") researchWorkflow.allowPartialFinalization()
                 if (policy.mode === "final-answer") researchFinalAnswerStarted = true
                 const phaseInstruction =
                   policy.mode === "plan"
@@ -296,7 +284,7 @@ export function createTaskAgent({
                     : policy.mode === "evidence"
                       ? "运行时要求：已经深读来源但尚未登记证据。现在只调用 record-research-evidence；可并行登记多个问题的短原文片段，不要继续搜索、阅读或输出最终答复。"
                       : policy.mode === "finalize-partial"
-                        ? "运行时要求：研究预算即将耗尽。现在必须调用 finalize-research；满足全部证据门槛时可标记 complete，否则必须以 partial 如实标记未覆盖问题与限制。"
+                        ? "运行时要求：研究循环已达到应急安全上限。现在必须调用 finalize-research；满足全部证据门槛时标记 complete，否则以 partial 如实保留未覆盖问题与限制。"
                         : policy.mode === "final-answer"
                           ? "运行时要求：领域完成检查已经通过。现在直接交付最终答复，引用已读来源，清楚说明覆盖与限制，不再调用工具。"
                           : "运行时要求：最终答复前必须调用 finalize-research；继续搜索、深读和登记证据，搜索摘要不能作为已读证据。"

@@ -27,7 +27,9 @@ export type TaskRunPolicyResolution = {
 }
 
 const TASK_TIMEOUT_MS = 120_000
-const MAX_OUTPUT_TOKENS = 4_096
+const RESEARCH_TIMEOUT_MS = 30 * 60_000
+const DEFAULT_MAX_OUTPUT_TOKENS = 4_096
+const DEFAULT_RESEARCH_EMERGENCY_MAX_STEPS = 32
 
 function resolveToolScope(mode: TaskMode, skillId: TaskSkillId): TaskRunPolicy["toolScope"] {
   if (mode === "chat") return "conversation"
@@ -35,12 +37,29 @@ function resolveToolScope(mode: TaskMode, skillId: TaskSkillId): TaskRunPolicy["
   return "workspace-write"
 }
 
-function resolveLimits(skillId: TaskSkillId): TaskRunPolicy["limits"] {
+function boundedOutputTokens(model: AiProviderModel, preferred: number) {
+  return model.maxOutputTokens ? Math.min(model.maxOutputTokens, preferred) : preferred
+}
+
+function researchEmergencyMaxSteps(model: AiProviderModel) {
+  if ((model.contextWindow ?? 0) >= 500_000) return 64
+  if ((model.contextWindow ?? 0) >= 128_000) return 48
+  return DEFAULT_RESEARCH_EMERGENCY_MAX_STEPS
+}
+
+function resolveLimits(skillId: TaskSkillId, model: AiProviderModel): TaskRunPolicy["limits"] {
+  if (skillId === "research") {
+    return {
+      // 研究轮次需要容纳长工具输入、证据登记与最终报告，不用应用侧抽象额度覆盖模型上限。
+      maxOutputTokens: null,
+      maxSteps: researchEmergencyMaxSteps(model),
+      timeoutMs: RESEARCH_TIMEOUT_MS,
+    }
+  }
   const maxSteps = skillId === "question-answering" ? 4 : skillId === "writing" ? 6 : 8
   return {
-    maxOutputTokens: MAX_OUTPUT_TOKENS,
+    maxOutputTokens: boundedOutputTokens(model, DEFAULT_MAX_OUTPUT_TOKENS),
     maxSteps,
-    maxTotalTokens: skillId === "question-answering" ? 40_000 : 80_000,
     timeoutMs: TASK_TIMEOUT_MS,
   }
 }
@@ -85,7 +104,7 @@ export function resolveTaskRunPolicy(input: {
     execution,
     issues,
     policy: {
-      limits: resolveLimits(input.skillId),
+      limits: resolveLimits(input.skillId, input.model),
       mode: input.mode,
       reasoning,
       skillId: input.skillId,

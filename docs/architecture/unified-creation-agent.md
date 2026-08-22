@@ -72,7 +72,7 @@
 ### 每轮策略解析
 
 每次用户提交都先由受信任的运行策略解析器生成 `RunPolicy`。当前第一版已经以主进程持久化的模型事实、显式创作
-方式、当前轮用户文本和眼下已授权工作区生成端点、联网、推理、工具作用域及预算；renderer 只做同源预检，
+方式、当前轮用户文本和眼下已授权工作区生成端点、联网、推理、工具作用域及安全护栏；renderer 只做同源预检，
 不再通过 IPC 决定联网或思考强度。自动方式只识别明确的研究/写作意图，项目整理保持自动并交给领域工具；
 显式模式始终优先，模型能力不足时自动研究回落为普通自动策略。完整输入边界为：
 
@@ -83,7 +83,8 @@
 - 当前供应商、模型和端点的已验证能力；
 - 全局权限设置、资源限额和待审批状态。
 
-输出至少包括实际模型路由、reasoning 策略、联网策略、Skill、可注册工具、步骤/时间/token 上限和审批策略。
+输出至少包括实际模型路由、reasoning 策略、联网策略、Skill、可注册工具、安全保险丝和审批策略。研究运行不使用
+固定累计 Token 或应用侧单步输出额度作为收尾条件；已知模型上下文只用于放宽异常循环保险丝。
 模型提示词、Skill 或历史消息不能自行扩大这些能力。
 
 ```text
@@ -112,7 +113,7 @@ Task、Run 和 AI SDK step 不能共用一个状态语义。
 | --- | --- | --- |
 | 多步 Agent 循环 | `ToolLoopAgent`、默认 `toolChoice = auto` | 领域 instructions、资源权限和产品工具 |
 | 每轮动态配置 | `callOptionsSchema` + `prepareCall` | 把已解析 `RunPolicy` 作为类型化 options 传入 |
-| 每步收窄工具/模型 | `prepareStep`、`activeTools`、`stopWhen` | 预算、权限上限和领域完成条件；不得在 step 中扩大授权 |
+| 每步收窄工具/模型 | `prepareStep`、`activeTools`、`stopWhen` | 安全保险丝、权限上限和领域完成条件；不得在 step 中扩大授权 |
 | 受限工具 | `tool()`、`inputSchema`、`contextSchema`、`toolsContext` | 主进程领域服务、路径/记录校验和稳定资源 ID |
 | 动态审批 | 工具 `needsApproval` / `toolApproval`，必要时由 `prepareCall` 返回本轮策略 | 审批 UI、SQLite 冻结、版本复核和本地审计 |
 | 对话消息 | `UIMessage`、`InferAgentUIMessage`、`convertToModelMessages` | 应用元数据 schema、持久化和旧版本迁移 |

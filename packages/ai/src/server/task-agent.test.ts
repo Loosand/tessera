@@ -34,9 +34,8 @@ describe("统一 Task Agent 动态配置", () => {
       taskAgentCallOptionsSchema.safeParse({
         policy: {
           limits: {
-            maxOutputTokens: 4_096,
+            maxOutputTokens: null,
             maxSteps: 8,
-            maxTotalTokens: 80_000,
             timeoutMs: 120_000,
           },
           mode: "agent",
@@ -56,7 +55,6 @@ describe("统一 Task Agent 动态配置", () => {
         limits: {
           maxOutputTokens: 4_096,
           maxSteps: 8,
-          maxTotalTokens: 80_000,
           timeoutMs: 120_000,
         },
         mode: "chat",
@@ -111,7 +109,6 @@ describe("统一 Task Agent 动态配置", () => {
           evidenceCount: 0,
         },
         stepNumber: 0,
-        tokenBudgetNearLimit: false,
       }),
     ).toEqual({
       activeTools: ["request-user-input", "publish-research-plan"],
@@ -120,7 +117,7 @@ describe("统一 Task Agent 动态配置", () => {
     })
   })
 
-  it("研究接近预算时只允许完成检查，通过后释放最终文本步骤", () => {
+  it("研究接近应急循环保险丝时只允许完成检查，通过后释放最终文本步骤", () => {
     const progress = {
       phase: "verifying" as const,
       planPublished: true,
@@ -135,7 +132,6 @@ describe("统一 Task Agent 动态配置", () => {
         maxSteps: 10,
         progress,
         stepNumber: 8,
-        tokenBudgetNearLimit: false,
       }),
     ).toEqual({ activeTools: ["finalize-research"], mode: "finalize-partial", toolChoice: "required" })
     expect(
@@ -144,7 +140,6 @@ describe("统一 Task Agent 动态配置", () => {
         maxSteps: 10,
         progress: { ...progress, phase: "completed", outcome: "partial" },
         stepNumber: 9,
-        tokenBudgetNearLimit: true,
       }),
     ).toEqual({ activeTools: [], mode: "final-answer", toolChoice: "none" })
   })
@@ -163,7 +158,6 @@ describe("统一 Task Agent 动态配置", () => {
           evidenceCount: 0,
         },
         stepNumber: 6,
-        tokenBudgetNearLimit: true,
       }),
     ).toEqual({
       activeTools: ["record-research-evidence"],
@@ -203,9 +197,8 @@ describe("统一 Task Agent 动态配置", () => {
       options: {
         policy: {
           limits: {
-            maxOutputTokens: 4_096,
+            maxOutputTokens: null,
             maxSteps: 8,
-            maxTotalTokens: 80_000,
             timeoutMs: 120_000,
           },
           mode: "agent",
@@ -221,6 +214,7 @@ describe("统一 Task Agent 动态配置", () => {
       providerOptions: { openai: { forceReasoning: true } },
       reasoning: "high",
     })
+    expect(model.doGenerateCalls[0]?.maxOutputTokens).toBeUndefined()
     const metrics = metricSnapshots.at(-1)
     expect(metrics).toMatchObject({
       cacheReadTokens: 0,

@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 自动、研究、写作、问答创作方式与官方/自定义模型连接
- * [OUTPUT]: 受信任 RunPolicy 对联网、推理、工具作用域、端点回落和预算的回归验证
+ * [OUTPUT]: 受信任 RunPolicy 对联网、推理、工具作用域、端点回落和安全护栏的回归验证
  * [POS]: 统一创作 Agent 每轮策略解析器的单元测试
  * [DOC]: docs/architecture/unified-creation-agent.md、docs/architecture/ai-providers.md
  *
@@ -41,9 +41,21 @@ describe("统一任务 RunPolicy", () => {
         reasoning: "high",
         toolScope: "workspace-write",
         webSearch: true,
-        limits: { maxSteps: 8, maxTotalTokens: 80_000 },
+        limits: { maxOutputTokens: null, maxSteps: 32, timeoutMs: 1_800_000 },
       },
     })
+  })
+
+  it("按模型上下文窗口放宽研究循环保险丝，而不设置应用侧输出额度", () => {
+    expect(
+      resolveTaskRunPolicy({
+        baseUrl: "https://api.deepseek.com",
+        mode: "chat",
+        model: { ...model("deepseek-v4-pro"), contextWindow: 1_048_576, maxOutputTokens: 393_216 },
+        providerId: "deepseek",
+        skillId: "research",
+      }).policy.limits,
+    ).toEqual({ maxOutputTokens: null, maxSteps: 64, timeoutMs: 1_800_000 })
   })
 
   it("问答模式关闭联网并收窄到工作区只读工具", () => {

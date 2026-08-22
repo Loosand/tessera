@@ -57,6 +57,13 @@ describe("研究领域进度", () => {
         output: { status: "recorded", evidenceId: "evidence-1" },
       },
       {
+        type: "tool-read-web-source",
+        toolCallId: "read-sdk-error",
+        state: "output-error",
+        input: { url: "https://example.com/not-a-real-attempt", questionIds: ["q2"] },
+        errorText: "AI_NoSuchToolError",
+      },
+      {
         type: "tool-finalize-research",
         toolCallId: "finalize-1",
         state: "output-available",
@@ -91,6 +98,8 @@ describe("研究领域进度", () => {
     )
     expect(markup).toContain("FKJ Interview")
     expect(markup).toContain("不可用")
+    expect(markup).toContain("页面需要登录")
+    expect(markup).not.toContain("not-a-real-attempt")
     expect(markup).not.toContain("source-1")
   })
 })
