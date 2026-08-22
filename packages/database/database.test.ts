@@ -339,6 +339,38 @@ describe("本地数据库基建", () => {
     client.close()
   })
 
+  test("重新打开托管项目时不会把内容库身份降级为外部工作区", () => {
+    const client = openDatabase({ path: ":memory:" })
+    saveContentLibrary(client, {
+      id: "library-managed",
+      rootPath: "/tmp/tessera-managed",
+      displayName: "Tessera 内容库",
+      updatedAt: new Date(100),
+    })
+    saveWorkspace(client, {
+      id: "workspace-managed",
+      rootPath: "/tmp/tessera-managed/project",
+      displayName: "托管项目",
+      lastOpenedAt: new Date(100),
+      contentLibraryId: "library-managed",
+      storageKind: "managed-project",
+    })
+
+    saveWorkspace(client, {
+      id: "ignored-reopen-id",
+      rootPath: "/tmp/tessera-managed/project",
+      displayName: "托管项目",
+      lastOpenedAt: new Date(200),
+    })
+
+    expect(findWorkspaceById(client, "workspace-managed")).toMatchObject({
+      contentLibraryId: "library-managed",
+      storageKind: "managed-project",
+      lastOpenedAt: new Date(200),
+    })
+    client.close()
+  })
+
   test("可以按最近使用时间列出并定位工作区", () => {
     const client = openDatabase({ path: ":memory:" })
     saveWorkspace(client, {

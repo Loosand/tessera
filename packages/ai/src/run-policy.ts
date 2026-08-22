@@ -35,12 +35,12 @@ function resolveToolScope(mode: TaskMode, skillId: TaskSkillId): TaskRunPolicy["
   return "workspace-write"
 }
 
-function resolveLimits(mode: TaskMode, skillId: TaskSkillId): TaskRunPolicy["limits"] {
-  const maxSteps = skillId === "research" ? 8 : skillId === "writing" ? 6 : mode === "agent" ? 8 : 4
+function resolveLimits(skillId: TaskSkillId): TaskRunPolicy["limits"] {
+  const maxSteps = skillId === "question-answering" ? 4 : skillId === "writing" ? 6 : 8
   return {
     maxOutputTokens: MAX_OUTPUT_TOKENS,
     maxSteps,
-    maxTotalTokens: mode === "agent" ? 80_000 : 40_000,
+    maxTotalTokens: skillId === "question-answering" ? 40_000 : 80_000,
     timeoutMs: TASK_TIMEOUT_MS,
   }
 }
@@ -85,7 +85,7 @@ export function resolveTaskRunPolicy(input: {
     execution,
     issues,
     policy: {
-      limits: resolveLimits(input.mode, input.skillId),
+      limits: resolveLimits(input.skillId),
       mode: input.mode,
       reasoning,
       skillId: input.skillId,
@@ -97,7 +97,7 @@ export function resolveTaskRunPolicy(input: {
 
 export function taskRunPolicyIssueMessage(issue: TaskRunPolicyIssue): string {
   if (issue === "research-reasoning-unavailable") {
-    return "研究模式需要支持深度思考的模型，请更换模型或改用自动模式。"
+    return "研究方式需要支持深度思考的模型，请更换模型或改用自动。"
   }
   return aiModelExecutionIssueMessage(issue)
 }

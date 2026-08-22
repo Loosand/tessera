@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 内存 SQLite、通用任务会话输入与模拟工作区
- * [OUTPUT]: 无工作区任务、可选读取、内置/用户 Skill 标记、Agent 工作区约束、任务 mode 不可变、创作模式逐轮切换和重命名/删除的回归验证
+ * [OUTPUT]: 无工作区任务、可选读取、内置/用户 Skill 标记、兼容工作区创建约束、动态逐轮资源、任务 mode 不可变、创作模式逐轮切换和重命名/删除的回归验证
  * [POS]: task-service 主进程权限边界的单元测试
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -106,7 +106,7 @@ describe("DesktopTaskService", () => {
     client.close()
   })
 
-  test("Agent 必须绑定匹配工作区且任务创建后不能切换 mode", () => {
+  test("旧 Agent 创建时必须绑定工作区，但后续可离开工作区继续同一任务", () => {
     const client = openDatabase({ path: ":memory:" })
     saveWorkspace(client, {
       id: WORKSPACE.id,
@@ -143,7 +143,21 @@ describe("DesktopTaskService", () => {
       },
       WORKSPACE,
     )
-    expect(() => service.authorizeTurn("agent-task", "agent", null, "writing")).toThrow("绑定的工作区")
+    expect(() => service.authorizeTurn("agent-task", "agent", null, "writing")).not.toThrow()
+    expect(
+      service.save(
+        {
+          id: "agent-task",
+          mode: "agent",
+          skillId: "writing",
+          status: "completed",
+          title: "Agent",
+          messages: [],
+          workspaceId: WORKSPACE.id,
+        },
+        null,
+      ),
+    ).toMatchObject({ mode: "agent", workspaceId: WORKSPACE.id })
     expect(() =>
       service.save(
         {

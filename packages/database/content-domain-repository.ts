@@ -187,7 +187,21 @@ export function saveArtifact(client: DatabaseClient, input: ArtifactRecordInput)
       set: { status: "active", updatedAt: input.updatedAt },
     })
     .run()
-  return client.db.select().from(artifacts).where(eq(artifacts.id, input.id)).get() ?? null
+  return (
+    client.db.select().from(artifacts).where(eq(artifacts.id, input.id)).get() ??
+    client.db
+      .select()
+      .from(artifacts)
+      .where(
+        and(
+          eq(artifacts.runId, input.runId),
+          eq(artifacts.documentId, input.documentId),
+          eq(artifacts.relation, input.relation),
+        ),
+      )
+      .get() ??
+    null
+  )
 }
 
 export function listTaskArtifacts(client: DatabaseClient, taskId: string) {

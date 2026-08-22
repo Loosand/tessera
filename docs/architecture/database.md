@@ -4,9 +4,11 @@
 > `packages/database/migrations/index.ts`、`packages/database/workspace-repository.ts`、
 > `packages/database/task-session-repository.ts`、`packages/database/task-run-repository.ts`、
 > `packages/database/agent-change-repository.ts`、`packages/database/ai-provider-config-repository.ts`、
-> `packages/database/mcp-server-config-repository.ts`、`packages/database/user-skill-config-repository.ts`
+> `packages/database/mcp-server-config-repository.ts`、`packages/database/user-skill-config-repository.ts`、
+> `packages/database/content-domain-repository.ts`、`packages/database/migrations/0013-unified-content-domain.ts`
 >
-> 状态：部分实现。当前任务、运行、工作区与审批仓储已实现，每轮完整 RunPolicy、不含正文/绝对路径的资源摘要和 AI SDK 生命周期运行汇总已写入运行记录；内容存储处于探索阶段，暂以托管内容库混合方案为实验基线；动态资源关联表、Artifact、内容库和项目操作审计仍为规划。
+> 状态：部分实现。任务、运行、工作区、审批、动态资源、Artifact、内容库和项目操作审计仓储已实现；每轮完整
+> RunPolicy、脱敏资源摘要与 AI SDK 生命周期汇总已写入运行记录。正文存储仍在探索，当前仅实现托管内容库混合原型。
 
 ## 边界
 
@@ -21,26 +23,28 @@ Markdown 文件是已批准正文的内容事实源。SQLite 保存工作区登�
 - **已实现**：磁盘数据库开启 WAL，并使用 `synchronous = NORMAL`。
 - **已实现**：只读连接要求文件已经存在，默认不执行迁移。
 - **已实现**：桌面主进程按 Electron `userData` 目录创建单例连接，并在退出时关闭。
-- **已实现**：工作区仓储幂等记录打开时间，可按最近使用顺序列出、定位并恢复仍然存在的工作区。
+- **已实现**：工作区仓储幂等记录打开时间，可按最近使用顺序列出、定位并恢复仍然存在的工作区；普通打开未显式携带存储元数据时保留原有 `managed-inbox` / `managed-project` 与内容库关系，避免把托管项目降级成外部工作区。
 - **已实现**：工作区可以通过 `hidden_at` 从最近列表隐藏；记录及关联任务保持不变，再次打开相同路径会清除隐藏状态。
 - **已实现**：供应商仓储保存 Base URL、启用状态、模型 JSON 和 `safeStorage` 密文；关闭并重新打开数据库后可恢复。
 - **已实现**：MCP 仓储保存传输配置、显式信任/启用状态、逐工具禁用清单和环境变量/请求头 `safeStorage` 密文；运行状态与发现能力不伪造成持久化事实。
 - **已实现**：用户 Skill 仓储保存稳定 `user:<name>` 标识、标准描述、启用状态、文件数量/总大小与安装时间；正文和托管绝对路径不进入 SQLite，磁盘可用性由主进程服务复核。
-- **已实现**：通用任务仓储保存内部 `chat` / `agent` mode、下一轮内置/用户 Skill 或 `question-answering` 行为标记、可选工作区绑定、可恢复等待用户输入状态和版本化消息；无工作区任务允许使用 `chat` 兼容 mode，带工作区工具的任务使用 `agent`，mode 与工作区绑定创建后不可切换，创作方式可逐轮更新。
+- **已实现**：通用任务仓储保存兼容 `chat` / `agent` mode、下一轮内置/用户 Skill 或 `question-answering` 标记、可选初始工作区、可恢复等待状态和版本化消息；mode 与初始归属创建后不可变，但不再决定当前轮权限，工作区工具只来自眼下打开且已授权的工作区。
 - **已实现**：任务可重命名或删除；删除 `task_sessions` 时由外键级联清理对应 `task_messages`。
 - **已实现**：`task_runs` / `task_run_events` 在模型调用前创建运行 ID，固化本轮完整 RunPolicy、兼容查询列与资源摘要，并按 task/request/sequence 保存公开流事件；结束时从 AI SDK `onStepEnd` / `onEnd` 写入 SDK call、完成原因、Token/缓存和性能汇总，启动时把未结束运行标记为中断供任务页重放。
 - **已实现**：`agent_change_proposals` 冻结 Markdown 基准与候选内容、模型、工具调用、人工决定和写入结果；它不是已批准正文事实源，任务删除时级联清理。
+- **已实现**：`0013-unified-content-domain` 增加内容库、托管工作区来源、逐轮资源关系、Artifact 与项目操作审计；
+  这些表只保存稳定 ID、相对位置和控制状态，不保存 Markdown 正文。
 
 ## 统一创作 Agent 数据探索
 
-除已注明的逐轮基础策略字段外，以下能力均为**规划**，详细行为见[统一创作 Agent 与内容存储探索](unified-creation-agent.md)：
+以下控制层能力已随混合原型实现，最终正文方案仍按[统一创作 Agent 与内容存储探索](unified-creation-agent.md)评审：
 
 - `task_sessions` 只承担会话身份、标题、状态和时间；已发布的 mode、`skill_id` 与单一 `workspace_id` 保留为旧任务兼容字段，不继续作为新任务的完整权限事实。
 - `task_runs` 已保存本轮实际内部 mode、显式 Skill、联网/思考兼容查询列、完整 `policy_json`、`resource_summary_json`，以及完成原因、输入/输出/推理与缓存读写 Token、步骤/工具计数、首输出/模型/工具/总耗时；后续增加规范化资源关系。同一会话不同 run 可以使用不同策略。
 - `task_resource_bindings` 记录 Task/Run 与 Workspace、Document、Attachment 的动态关系和角色；恢复历史时以 run 快照解释模型当时可见的资源。
 - `artifacts` 为 Agent 创建或修改的 Markdown 建立稳定逻辑 ID、当前工作区/相对路径、创建 run 和状态。移动文件改变路径关系，不改变会话或 Artifact 身份。
 - `workspace_operations` 记录创建项目、移动/重命名文档的授权依据、来源、目标、冲突、结果与恢复信息；正文候选继续使用现有 `agent_change_proposals`。
-- 当前混合实验中，内容库根目录与“未归档”Workspace 使用普通工作区登记和受保护设置保存，不把目录本身或正文复制进 SQLite。
+- 当前混合实验中，内容库根目录授权保存在主进程 SQLite 控制层，“未归档”和项目使用普通工作区登记；正文不复制进 SQLite。
 
 领域服务协调文件系统和数据库时先预检真实路径与冲突，再执行可恢复的磁盘操作，最后更新关系并刷新索引。数据库更新失败时重新扫描磁盘事实，不能通过回滚索引覆盖、移动或删除用户正文。
 
@@ -73,8 +77,9 @@ schema 变化必须追加迁移，并同步结构测试。
 | `ai_provider_configs` | 供应商连接、模型状态与 Electron safeStorage 密文 | 否 |
 | `mcp_server_configs` | MCP 传输、信任/启用状态、禁用工具与 Electron safeStorage 密文 | 否 |
 | `user_skill_configs` | 用户 Skill 稳定 ID、描述、启用状态与托管目录统计 | 否 |
-| `task_resource_bindings`（规划） | Task/Run 与工作区、文档和附件的动态资源关系 | 否 |
-| `artifacts`（规划） | Agent 产物的稳定身份、当前相对路径、工作区和创建 run | 否 |
-| `workspace_operations`（规划） | 项目创建、文档移动/重命名的授权、结果和恢复信息 | 否 |
+| `content_libraries` | 内容库授权、显示名与撤销状态；根路径只留在主进程控制层 | 否 |
+| `task_resource_bindings` | Task/Run 与工作区、文档和附件的动态资源关系 | 否 |
+| `artifacts` | Agent 产物的稳定身份、文档关系和创建 run | 否 |
+| `workspace_operations` | 文档/项目创建、移动和结构检查的结果、冲突与恢复信息 | 否 |
 
-全文搜索、订阅源、活动时间线、内容库设置和上述统一 Agent 表仍处于规划状态，等对应领域开始实现时再新增 schema 与迁移。
+全文搜索、订阅源和面向用户的完整 Operation 活动聚合仍处于规划；内容库设置和统一 Agent 控制表已实现。

@@ -1,8 +1,8 @@
 /**
  * [INPUT]: Electron safeStorage、SQLite 数据库客户端和不含客户端能力开关的跨进程任务输入
- * [OUTPUT]: 不暴露密钥的配置读写、模型目录连接解析与由受信任 RunPolicy 收窄的运行时输入
+ * [OUTPUT]: 不暴露密钥的配置读写、模型目录连接解析、自动研究/写作意图收窄与由受信任 RunPolicy 生成的运行时输入
  * [POS]: 桌面主进程内的平台安全存储、数据库仓储和 @tessera/ai 领域层适配器
- * [DOC]: docs/architecture/ai-providers.md、docs/architecture/ai-chat-agent-todo.md
+ * [DOC]: docs/architecture/unified-creation-agent.md、docs/architecture/ai-providers.md、docs/architecture/ai-chat-agent-todo.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -16,6 +16,7 @@ import {
   type AiProviderConfigService,
   type AiProviderConfigStore,
   createAiProviderConfigService,
+  inferAutomaticTaskSkill,
   resolveTaskRunPolicy,
   taskRunPolicyIssueMessage,
 } from "@tessera/ai/server"
@@ -87,13 +88,31 @@ export function createDesktopAiService(client: DatabaseClient): DesktopAiService
       if (!config.apiKeyConfigured) throw new AiProviderConfigError("请先为这个供应商保存 API Key。")
       const model = config.models.find((candidate) => candidate.id === input.modelId)
       if (!model?.enabled) throw new AiProviderConfigError("所选模型未启用，请在供应商设置中检查模型列表。")
-      const resolution = resolveTaskRunPolicy({
+      const latestUserText = [...input.messages]
+        .reverse()
+        .find((message) => message.role === "user")
+        ?.parts.filter((part) => part.type === "text")
+        .map((part) => part.text)
+        .join("\n")
+      const inferredSkillId = inferAutomaticTaskSkill(input.skillId, latestUserText ?? "")
+      let resolution = resolveTaskRunPolicy({
         baseUrl: config.baseUrl,
         mode: input.mode,
         model,
         providerId: config.providerId,
-        skillId: input.skillId,
+        skillId: inferredSkillId,
       })
+      let effectiveSkillId = inferredSkillId
+      if (input.skillId === null && inferredSkillId === "research" && resolution.issues.length > 0) {
+        effectiveSkillId = null
+        resolution = resolveTaskRunPolicy({
+          baseUrl: config.baseUrl,
+          mode: input.mode,
+          model,
+          providerId: config.providerId,
+          skillId: null,
+        })
+      }
       const issue = resolution.issues[0]
       if (issue) {
         throw new AiProviderConfigError(taskRunPolicyIssueMessage(issue))
@@ -118,6 +137,7 @@ export function createDesktopAiService(client: DatabaseClient): DesktopAiService
       }
       return {
         ...input,
+        skillId: effectiveSkillId,
         ...connection,
         endpointType: resolution.execution.endpointType,
         runPolicy: resolution.policy,

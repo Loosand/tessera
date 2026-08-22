@@ -1,7 +1,7 @@
 /**
- * [INPUT]: SQLite 任务仓储、可逐轮变化的显式可空 Skill、工作区归属、等待输入状态的跨进程任务输入与主进程当前工作区
- * [OUTPUT]: 任务列表/必需或可选读取/保存/重命名/删除、等待输入恢复、工作区归属校验、版本化消息校验与运行前 mode/逐轮 Skill/工作区授权
- * [POS]: Electron 主进程中的通用 Chat/Agent 任务会话领域服务
+ * [INPUT]: SQLite 任务仓储、可逐轮变化的显式可空 Skill、兼容工作区归属、等待输入状态的跨进程任务输入与主进程当前工作区
+ * [OUTPUT]: 任务列表/必需或可选读取/保存/重命名/删除、等待输入恢复、创建期工作区校验、版本化消息校验与运行前逐轮 Skill 校验
+ * [POS]: Electron 主进程中的统一任务会话领域服务；旧 mode/workspace 只保留兼容归属，不再决定逐轮资源授权
  * [DOC]: docs/architecture/database.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
@@ -264,14 +264,11 @@ export function createDesktopTaskService(client: DatabaseClient): DesktopTaskSer
       if (existing && existing.workspaceId !== requestedWorkspaceId) {
         throw new Error("任务创建后不能更改绑定的工作区。")
       }
-      if (existing?.mode === "agent" && existing.workspaceId !== workspace?.id) {
-        throw new Error("请先打开这个 Agent 任务绑定的工作区。")
-      }
-      if (requestedWorkspaceId && requestedWorkspaceId !== workspace?.id) {
+      if (!existing && requestedWorkspaceId && requestedWorkspaceId !== workspace?.id) {
         throw new Error("请先打开任务要绑定的工作区。")
       }
       const workspaceId = existing ? existing.workspaceId : requestedWorkspaceId
-      if (mode === "agent" && !workspaceId) throw new Error("Agent 任务必须绑定工作区。")
+      if (!existing && mode === "agent" && !workspaceId) throw new Error("Agent 任务必须绑定工作区。")
 
       const record = saveTaskSession(client, {
         id,
@@ -289,11 +286,9 @@ export function createDesktopTaskService(client: DatabaseClient): DesktopTaskSer
     authorizeTurn: (taskId, mode, workspace, skillId) => {
       const record = findTaskSession(client, validateTaskId(taskId))
       if (!record) throw new Error("请先创建任务再发送消息。")
-      if (record.mode !== validateTaskMode(mode)) throw new Error("任务运行模式与已保存会话不一致。")
+      validateTaskMode(mode)
       if (skillId !== undefined) validateTaskSkillId(skillId)
-      if (record.mode === "agent" && record.workspaceId !== workspace?.id) {
-        throw new Error("请先打开这个 Agent 任务绑定的工作区。")
-      }
+      void workspace
     },
   }
 }

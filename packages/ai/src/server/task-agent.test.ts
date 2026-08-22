@@ -74,18 +74,20 @@ describe("统一 Task Agent 动态配置", () => {
     ).toBe(false)
   })
 
-  it("会话作用域不暴露工作区或 MCP 工具", () => {
+  it("会话作用域不暴露工作区工具，但保留统一 Agent 的逐次审批 MCP", () => {
     expect(activeTaskAgentTools(toolNames, "conversation", groups)).toEqual([
       "web-search",
       "request-user-input",
+      "mcp-publish",
     ])
   })
 
-  it("工作区只读作用域保留读取但排除写入和未知外部动作", () => {
+  it("工作区只读作用域保留读取与逐次审批 MCP，但排除写入", () => {
     expect(activeTaskAgentTools(toolNames, "workspace-read", groups)).toEqual([
       "web-search",
       "request-user-input",
       "read-file",
+      "mcp-publish",
     ])
   })
 

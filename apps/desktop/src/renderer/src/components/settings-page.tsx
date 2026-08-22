@@ -1,8 +1,8 @@
 /**
- * [INPUT]: 应用信息、工作区摘要、界面偏好、AI/MCP/开发期日志安全桥、设置导航操作与共享 Motion 参数
- * [OUTPUT]: 带连续选中态的可搜索分类、统一宽度的常规设置内容、官方 AI SDK 日志入口和独立供应商/MCP 工作区
+ * [INPUT]: 应用信息、外部工作区/托管内容库摘要、界面偏好、AI/MCP/开发期日志安全桥、设置导航操作与共享 Motion 参数
+ * [OUTPUT]: 带连续选中态的可搜索分类、外部工作区与探索期托管内容库设置、官方 AI SDK 日志入口和独立供应商/MCP 工作区
  * [POS]: 桌面应用的产品级设置视图
- * [DOC]: design.md、docs/architecture/ai-providers.md、docs/architecture/ai-observability.md、docs/architecture/mcp.md
+ * [DOC]: design.md、docs/architecture/unified-creation-agent.md、docs/architecture/ai-providers.md、docs/architecture/ai-observability.md、docs/architecture/mcp.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -16,6 +16,7 @@ import type {
   AiProviderConnectionInput,
   AiProviderSaveInput,
   AppInfo,
+  ContentLibraryInfo,
   McpServerConfig,
   McpServerSaveInput,
   McpServerTestResult,
@@ -41,7 +42,7 @@ import { Icon } from "@tessera/design-system/components/ui/icon"
 import { Input } from "@tessera/design-system/components/ui/input"
 import { Switch } from "@tessera/design-system/components/ui/switch"
 import { m } from "motion/react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import type { AppPreferences, UpdateAppPreference } from "../hooks/use-app-preferences"
 import { motionSprings } from "../motion"
 import { AppearanceSettings } from "./appearance-settings"
@@ -205,6 +206,61 @@ function GeneralSettings({
   documentCount,
   onSelectWorkspace,
 }: Pick<SettingsPageProps, "workspace" | "documentCount" | "onSelectWorkspace">) {
+  const [library, setLibrary] = useState<ContentLibraryInfo | null>(null)
+  const [libraryStatus, setLibraryStatus] = useState("")
+  const [libraryBusy, setLibraryBusy] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    void window.tessera
+      ?.getCurrentContentLibrary()
+      .then((result) => {
+        if (cancelled) return
+        if (result.ok) setLibrary(result.library)
+        else setLibraryStatus(result.error)
+      })
+      .catch((error) => {
+        if (!cancelled) setLibraryStatus(error instanceof Error ? error.message : "读取内容库失败。")
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const selectContentLibrary = async () => {
+    const desktopApi = window.tessera
+    if (!desktopApi) return
+    setLibraryBusy(true)
+    setLibraryStatus("")
+    try {
+      const result = await desktopApi.selectContentLibrary()
+      if (!result.ok) throw new Error(result.error)
+      setLibrary(result.library)
+      setLibraryStatus(result.library ? "内容库已就绪。" : "未更改内容库。")
+    } catch (error) {
+      setLibraryStatus(error instanceof Error ? error.message : "设置内容库失败。")
+    } finally {
+      setLibraryBusy(false)
+    }
+  }
+
+  const revokeContentLibrary = async () => {
+    const desktopApi = window.tessera
+    if (!desktopApi) return
+    setLibraryBusy(true)
+    setLibraryStatus("")
+    try {
+      const result = await desktopApi.revokeContentLibrary()
+      if (!result.ok) throw new Error(result.error)
+      setLibrary(null)
+      setLibraryStatus("已移除授权，目录和 Markdown 文档均未删除。")
+    } catch (error) {
+      setLibraryStatus(error instanceof Error ? error.message : "移除内容库授权失败。")
+    } finally {
+      setLibraryBusy(false)
+    }
+  }
+
   return (
     <div className="space-y-8">
       <SettingSection title="工作区" description="管理当前读取和编辑 Markdown 文档的本地文件夹。">
@@ -222,6 +278,39 @@ function GeneralSettings({
           description="当前工作区内可读取的 Markdown 文件数量。"
           control={<span className="text-[13px] tabular-nums text-muted-foreground">{documentCount} 个</span>}
         />
+      </SettingSection>
+
+      <SettingSection
+        title="托管内容库（探索中）"
+        description="正式产物默认进入可见的“未归档”目录；正文仍是本地 Markdown，SQLite 只保存关系和运行状态。"
+      >
+        <SettingRow
+          title={library?.name ?? "尚未选择内容库"}
+          description={library?.rootPath ?? "选择一个目录承载未归档和由 Agent 创建的独立项目。"}
+          control={
+            <div className="flex items-center gap-2">
+              {library ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={libraryBusy}
+                  onClick={() => void revokeContentLibrary()}
+                >
+                  移除授权
+                </Button>
+              ) : null}
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={libraryBusy}
+                onClick={() => void selectContentLibrary()}
+              >
+                {library ? "更换目录" : "选择目录"}
+              </Button>
+            </div>
+          }
+        />
+        {libraryStatus ? <p className="text-xs leading-5 text-muted-foreground">{libraryStatus}</p> : null}
       </SettingSection>
 
       <SettingSection title="启动" description="当前版本会在应用启动时恢复最近打开的工作区。">

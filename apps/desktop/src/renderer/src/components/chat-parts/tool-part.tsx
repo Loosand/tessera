@@ -1,8 +1,8 @@
 /**
- * [INPUT]: AI SDK dynamic-tool 或 tool-* Part、Agent 变更预览与工具审批回调
- * [OUTPUT]: Tool Chips 工具状态、通用确认，以及 Markdown 写工具的高亮 Diff 审批
+ * [INPUT]: AI SDK dynamic-tool 或 tool-* Part、Agent 变更预览、内容领域操作与工具审批回调
+ * [OUTPUT]: Tool Chips 工具状态、内容库创建/移动的紧凑确认，以及 Markdown 写工具的高亮 Diff 审批
  * [POS]: ChatMessage 内可独立演进的工具呈现单元
- * [DOC]: design.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
+ * [DOC]: design.md、docs/architecture/unified-creation-agent.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -46,6 +46,12 @@ const toolLabels: Record<string, string> = {
   "read-current-document": "读取当前文档",
   "write-workspace-document": "修改工作区文档",
   "delegate-workspace-research": "委派工作区研究",
+  "list-projects": "查看内容库项目",
+  "list-task-artifacts": "查看当前任务产物",
+  "inspect-project": "检查项目结构",
+  "create-document": "创建正式文档",
+  "create-project": "创建独立项目",
+  "move-documents": "移动正式文档",
   web_search: "联网搜索",
 }
 
@@ -75,6 +81,40 @@ function toolInputText(part: ToolMessagePart) {
   } catch {
     return String(part.input)
   }
+}
+
+function approvalPresentation(toolName: string, input: unknown) {
+  if (!isUnknownRecord(input)) {
+    return {
+      title: "这个工具需要你的确认",
+      detail: input === undefined ? "" : typeof input === "string" ? input : JSON.stringify(input, null, 2),
+    }
+  }
+  if (toolName === "create-document") {
+    const title = typeof input.title === "string" ? input.title : "未命名文档"
+    const content = typeof input.content === "string" ? input.content : ""
+    return {
+      title: `创建正式文档「${title}」`,
+      meta: `${input.projectId ? "指定项目" : "未归档"} · ${content.length.toLocaleString("zh-CN")} 字符`,
+      detail: content.length > 1_000 ? `${content.slice(0, 1_000)}\n\n…正文预览已截断` : content,
+    }
+  }
+  if (toolName === "create-project") {
+    return {
+      title: `创建独立项目「${typeof input.name === "string" ? input.name : "未命名项目"}」`,
+      meta: "将在托管内容库内创建可见目录",
+      detail: "",
+    }
+  }
+  if (toolName === "move-documents") {
+    const count = Array.isArray(input.documentIds) ? input.documentIds.length : 0
+    return {
+      title: `移动 ${count} 篇正式文档`,
+      meta: "已预检目标项目与同名冲突；不会覆盖文件",
+      detail: "",
+    }
+  }
+  return { title: "这个工具需要你的确认", detail: JSON.stringify(input, null, 2) }
 }
 
 export function isToolPart(part: MessagePart): part is ToolMessagePart {
@@ -113,6 +153,9 @@ export function ToolPart({ loadAgentChangePreview, onOpenDocument, onToolApprova
     part.state === "approval-requested" && part.approval && !part.approval.isAutomatic && onToolApproval
       ? part.approval
       : null
+  const manualApprovalPresentation = manualApproval
+    ? approvalPresentation(toolName, "input" in part ? part.input : undefined)
+    : null
 
   return (
     <div className="my-3">
@@ -143,10 +186,15 @@ export function ToolPart({ loadAgentChangePreview, onOpenDocument, onToolApprova
         />
       ) : manualApproval && onToolApproval ? (
         <div className="mt-2 rounded-xl border border-border bg-background px-3.5 py-3 text-xs">
-          <p className="font-medium text-foreground">这个工具需要你的确认</p>
-          {part.input !== undefined ? (
-            <pre className="mt-2 max-h-48 overflow-auto rounded-lg bg-muted p-3 font-mono text-[11px] leading-5 text-muted-foreground">
-              {JSON.stringify(part.input, null, 2)}
+          <p className="font-medium text-foreground">{manualApprovalPresentation?.title}</p>
+          {manualApprovalPresentation?.meta ? (
+            <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+              {manualApprovalPresentation.meta}
+            </p>
+          ) : null}
+          {manualApprovalPresentation?.detail ? (
+            <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg bg-muted p-3 font-mono text-[11px] leading-5 text-muted-foreground">
+              {manualApprovalPresentation.detail}
             </pre>
           ) : null}
           <div className="mt-3 flex justify-end gap-2">

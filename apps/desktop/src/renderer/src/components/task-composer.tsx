@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 对话草稿、自动运行边界、创作模式、当前文档/图片附件、模型能力、生成状态与提交/停止回调
- * [OUTPUT]: 可按内容有限增高、只暴露创作模式、附件、模型与发送入口的紧凑任务输入框
+ * [INPUT]: 对话草稿、自动运行边界、逐轮创作方式、当前文档/图片附件、模型能力、生成状态与提交/停止回调
+ * [OUTPUT]: 可按内容有限增高、以浮层收纳上下文与权限范围，并只暴露创作方式、附件、模型与发送入口的紧凑任务输入框
  * [POS]: task-page 的可复用底部/空状态输入表面
  * [DOC]: design.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -17,6 +17,7 @@ import {
   Attachment01Icon,
   CancelCircleIcon,
   File02Icon,
+  Shield01Icon,
   StopIcon,
 } from "@tessera/design-system/components/icons"
 import { Button } from "@tessera/design-system/components/ui/button"
@@ -166,6 +167,19 @@ export function TaskComposer({
           onKeyDown={handleKeyDown}
         />
 
+        {compact && notice ? (
+          <div className="px-3 pb-1.5">
+            <p
+              id="task-composer-notice"
+              className="truncate text-[10px] text-destructive"
+              title={notice}
+              aria-live="polite"
+            >
+              {notice}
+            </p>
+          </div>
+        ) : null}
+
         <div className="flex min-h-11 items-center gap-1 px-3 pb-2.5">
           <input
             ref={fileInputRef}
@@ -223,10 +237,41 @@ export function TaskComposer({
             </PopoverContent>
           </Popover>
 
-          <TaskCapabilityPicker running={running} skillId={skillId} onSkillChange={onSkillChange} />
+          {scope ? (
+            <Popover>
+              <PopoverTrigger
+                render={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="text-muted-foreground"
+                    aria-label="查看上下文与权限"
+                    title="上下文与权限"
+                  >
+                    <Icon icon={Shield01Icon} size={15} />
+                  </Button>
+                }
+              />
+              <PopoverContent
+                side="top"
+                align="start"
+                sideOffset={6}
+                className="w-72 rounded-xl border border-border/70 p-3 ring-0"
+              >
+                <div className="flex items-center gap-2">
+                  <Icon icon={Shield01Icon} size={14} className="text-muted-foreground" />
+                  <p className="text-xs font-medium">上下文与权限</p>
+                </div>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">{scope}</p>
+              </PopoverContent>
+            </Popover>
+          ) : null}
+
+          <TaskCapabilityPicker skillId={skillId} onSkillChange={onSkillChange} />
 
           <div className="min-w-0 flex-1 px-1.5">
-            {notice ? (
+            {!compact && notice ? (
               <p
                 id="task-composer-notice"
                 className="truncate text-xs text-destructive"
@@ -234,10 +279,6 @@ export function TaskComposer({
                 aria-live="polite"
               >
                 {notice}
-              </p>
-            ) : scope ? (
-              <p className="truncate text-[11px] text-muted-foreground" title={scope}>
-                {scope}
               </p>
             ) : null}
           </div>

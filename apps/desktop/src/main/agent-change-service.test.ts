@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 临时 Markdown 工作区、内存 SQLite、冻结提案、人工批准/拒绝与外部磁盘变化
- * [OUTPUT]: Agent 变更预览、批准后原子写入、拒绝不写入和版本冲突保护的回归验证
+ * [OUTPUT]: Agent 变更预览、批准后原子写入、领域审批隔离、拒绝不写入和版本冲突保护的回归验证
  * [POS]: 可写 Agent 人工审批主进程边界的集成测试
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
  *
@@ -86,6 +86,29 @@ function approvedMessage(
 }
 
 describe("Agent Markdown 变更审批", () => {
+  test("忽略其他领域工具的标准审批结果", async () => {
+    const { client, service } = await fixture()
+    const contentApprovalMessage = {
+      id: "message-content-approval",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-create-document",
+          toolCallId: "tool-create-document",
+          state: "approval-responded",
+          input: {
+            title: "Madeline：与自己和解的攀登",
+            content: "# Madeline：与自己和解的攀登\n",
+          },
+          approval: { id: "approval-create-document", approved: true },
+        },
+      ],
+    } as TaskMessage
+
+    expect(() => service.reconcileDecisions("agent-change-task", [contentApprovalMessage])).not.toThrow()
+    client.close()
+  })
+
   test("冻结候选内容并在批准后复核版本和原子写入", async () => {
     const { base, client, rootPath, service } = await fixture()
     const change = {

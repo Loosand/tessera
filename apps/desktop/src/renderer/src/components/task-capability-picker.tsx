@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 当前逐轮创作模式、生成状态与用户 Skill 目录
- * [OUTPUT]: 只暴露自动、内置/用户 Skill 与问答意图的紧凑模式选择器
- * [POS]: task-composer 底部工具栏中的按需能力入口
+ * [INPUT]: 当前逐轮创作方式与用户 Skill 目录
+ * [OUTPUT]: 可随时切换自动编排、内置/用户 Skill 与问答预设的紧凑选择器
+ * [POS]: task-composer 底部工具栏中的创作方式快捷入口
  * [DOC]: design.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
@@ -28,7 +28,6 @@ import React, { useMemo, useState } from "react"
 import { useUserSkills } from "../hooks/use-user-skills"
 
 type TaskCapabilityPickerProps = Readonly<{
-  running: boolean
   skillId: TaskSkillId
   onSkillChange: (skillId: TaskSkillId) => void
 }>
@@ -37,18 +36,20 @@ const BASE_TASK_SKILL_OPTIONS = [
   {
     id: null,
     displayName: "自动",
-    shortDescription: "根据工作区和模型能力自动使用完整工具",
+    shortDescription: "自动编排 · 根据请求、上下文与可用能力决定",
   },
   ...listBuiltInSkills().map((skill) => ({
     id: skill.name,
     displayName: skill.displayName,
     shortDescription:
-      skill.name === "research" ? "深度推理、联网核验并形成研究计划" : "深度推理、阅读材料并产出可审查修改",
+      skill.name === "research"
+        ? "Skill · 深度推理、联网核验并形成研究计划"
+        : "Skill · 阅读材料并产出可审查修改",
   })),
   {
     id: "question-answering" as const,
     displayName: "问答",
-    shortDescription: "不联网，直接使用当前对话与附件回答",
+    shortDescription: "回答预设 · 不联网，使用当前对话与附件",
   },
 ] satisfies readonly {
   id: TaskSkillId
@@ -68,7 +69,7 @@ function skillIcon(skillId: TaskSkillId) {
   return SKILL_ICONS[skillId]
 }
 
-export function TaskCapabilityPicker({ running, skillId, onSkillChange }: TaskCapabilityPickerProps) {
+export function TaskCapabilityPicker({ skillId, onSkillChange }: TaskCapabilityPickerProps) {
   const [open, setOpen] = useState(false)
   const { skills: userSkills } = useUserSkills()
   const options = useMemo(
@@ -79,7 +80,7 @@ export function TaskCapabilityPicker({ running, skillId, onSkillChange }: TaskCa
         .map((skill) => ({
           id: skill.id as TaskSkillId,
           displayName: skill.displayName,
-          shortDescription: skill.shortDescription,
+          shortDescription: `Skill · ${skill.shortDescription}`,
         })),
     ],
     [userSkills],
@@ -98,8 +99,8 @@ export function TaskCapabilityPicker({ running, skillId, onSkillChange }: TaskCa
             variant={skillId !== null ? "secondary" : "ghost"}
             size="sm"
             className="h-7 max-w-24 gap-1 rounded-full px-2 font-normal data-[popup-open]:bg-muted"
-            aria-label={`选择创作模式，当前为${currentSkillLabel}`}
-            title={`创作模式：${currentSkillLabel}`}
+            aria-label={`选择创作方式，当前为${currentSkillLabel}`}
+            title={`创作方式：${currentSkillLabel}`}
           />
         }
       >
@@ -115,8 +116,10 @@ export function TaskCapabilityPicker({ running, skillId, onSkillChange }: TaskCa
         className="w-80 rounded-xl border border-border/70 p-1.5 shadow-[0_18px_50px_-28px_color-mix(in_oklch,var(--foreground)_42%,transparent)] ring-0"
       >
         <header className="px-2 pt-1.5 pb-2">
-          <h2 className="text-[13px] font-medium">创作模式</h2>
-          <p className="mt-0.5 text-[10px] text-muted-foreground">模式会自动安排联网、思考与工作区工具。</p>
+          <h2 className="text-[13px] font-medium">创作方式</h2>
+          <p className="mt-0.5 text-[10px] text-muted-foreground">
+            默认自动；研究和写作会加载 Skill，问答是离线回答预设。
+          </p>
         </header>
 
         <section aria-labelledby="task-skill-options-title">
@@ -137,7 +140,6 @@ export function TaskCapabilityPicker({ running, skillId, onSkillChange }: TaskCa
                   className="h-auto min-h-11 w-full justify-start gap-2 rounded-lg px-2 py-1.5 text-left font-normal data-[selected=true]:bg-muted/65"
                   data-selected={selected || undefined}
                   aria-pressed={selected}
-                  disabled={running}
                   onClick={() => {
                     onSkillChange(option.id)
                     setOpen(false)
@@ -162,7 +164,7 @@ export function TaskCapabilityPicker({ running, skillId, onSkillChange }: TaskCa
         </section>
 
         <p className="border-t border-border px-2 pt-2 pb-1 text-[9px] leading-4 text-muted-foreground">
-          文件写入仍会逐次展示 Diff，并只在你明确批准后执行。
+          可以随时切换；已开始的运行保持原策略。文件写入仍需 Diff 审批。
         </p>
       </PopoverContent>
     </Popover>

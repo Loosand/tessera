@@ -1,8 +1,8 @@
 /**
- * [INPUT]: AI SDK Chat/Agent 运行时适配器、受信任 RunPolicy、客户端交互/研究计划工具、受限工作区/MCP 工具契约与模型目录发现服务
- * [OUTPUT]: @tessera/ai/server 的主进程安全公开入口与统一策略解析能力
+ * [INPUT]: AI SDK Chat/Agent 运行时适配器、受信任 RunPolicy、客户端交互/研究计划工具、内容领域、受限工作区/MCP 工具契约与模型目录发现服务
+ * [OUTPUT]: @tessera/ai/server 的主进程安全公开入口、内容领域工具集与统一策略解析能力
  * [POS]: AI 包服务端子路径边界
- * [DOC]: docs/architecture/ai-providers.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/mcp.md、docs/architecture/task-navigation.md
+ * [DOC]: docs/architecture/ai-providers.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/mcp.md、docs/architecture/task-navigation.md、docs/architecture/unified-creation-agent.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -27,6 +27,7 @@ export {
   resolveTaskRunPolicy,
   taskRunPolicyIssueMessage,
 } from "../run-policy"
+export { inferAutomaticTaskSkill } from "../intent-routing"
 export {
   type AiAgentRuntimeOptions,
   type AiSdkAgentRuntimeRequest,
@@ -42,10 +43,14 @@ export {
   streamAiAgent,
 } from "./agent-runtime"
 export {
-  type AiChatRuntimeInput,
-  type AiChatRuntimeOptions as AiChatStreamRuntimeOptions,
-  streamAiChat,
-} from "./chat-runtime"
+  type ContentDomainAgentTools,
+  createContentDomainToolSet,
+  createManagedDocumentInputSchema,
+  createManagedProjectInputSchema,
+  inspectManagedProjectInputSchema,
+  moveManagedDocumentsInputSchema,
+} from "./content-domain-tools"
+export type { AiChatRuntimeInput } from "./chat-runtime"
 export {
   type AiModelDiscoveryOptions,
   AiProviderConnectionError,

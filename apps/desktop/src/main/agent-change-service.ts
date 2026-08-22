@@ -1,6 +1,6 @@
 /**
  * [INPUT]: SQLite Agent 变更仓储、当前工作区根目录、AI SDK 工具输入/审批 Part 与中止信号
- * [OUTPUT]: 冻结 Markdown 候选内容、审批决定对账、版本复核、原子写入、Diff 预览和审计结果
+ * [OUTPUT]: 冻结工作区 Markdown 候选内容、只对账本领域工具审批、版本复核、原子写入、Diff 预览和审计结果
  * [POS]: Electron 主进程中可写 Agent 的人工审批与文件落盘领域边界
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md、docs/architecture/database.md
  *
@@ -183,7 +183,13 @@ export function createAgentChangeService(client: DatabaseClient): AgentChangeSer
     },
     reconcileDecisions: (taskId, messages) => {
       for (const part of toolParts(messages)) {
-        if (part.state !== "approval-responded" || !part.approval) continue
+        if (
+          part.type !== "tool-write-workspace-document" ||
+          part.state !== "approval-responded" ||
+          !part.approval
+        ) {
+          continue
+        }
         const proposal = findAgentChangeProposal(client, part.approval.id)
         if (!proposal || proposal.taskId !== taskId || proposal.toolCallId !== part.toolCallId) {
           throw new AgentChangeError("找不到对应的 Agent 变更提案，无法继续执行。")

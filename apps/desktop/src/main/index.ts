@@ -1,8 +1,8 @@
 /**
- * [INPUT]: Electron 生命周期、共享 IPC 契约、AI Chat/Agent/Skill 配置、AI SDK 开发期日志、用户 Skill 扫描安装服务、Agent 变更服务、模型服务、safeStorage 与 Tessera 核心服务
- * [OUTPUT]: 受限工作区/MCP Agent 工具、内置/用户 Skill 校验后的 SQLite 可恢复后台 AI 运行、官方 AI SDK 日志入口、Diff/MCP 审批、持久化 AI/MCP/用户 Skill 配置与扫描会话、关闭保存握手和桌面窗口
+ * [INPUT]: Electron 生命周期、共享 IPC 契约、AI Chat/Agent/Skill 配置、AI SDK 开发期日志、用户 Skill 扫描安装服务、混合内容库、Agent 变更服务、模型服务、safeStorage 与 Tessera 核心服务
+ * [OUTPUT]: 受限工作区/MCP Agent 工具、托管内容库/Artifact 查询、内置/用户 Skill 校验后的 SQLite 可恢复后台 AI 运行、官方 AI SDK 日志入口、Diff/MCP 审批、持久化 AI/MCP/用户 Skill 配置与扫描会话、关闭保存握手和桌面窗口
  * [POS]: Electron 主进程入口与平台安全边界
- * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/ai-observability.md、docs/architecture/database.md、docs/architecture/mcp.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
+ * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/ai-observability.md、docs/architecture/database.md、docs/architecture/mcp.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md、docs/architecture/unified-creation-agent.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -18,10 +18,10 @@ import { fileURLToPath } from "node:url"
 import {
   AiProviderConfigError,
   AiProviderConnectionError,
+  type ContentDomainAgentTools,
   type TaskAgentRunMetrics,
   listAiProviderModels,
   streamAiAgent,
-  streamAiChat,
 } from "@tessera/ai/server"
 import {
   type AiChatStartInput,
@@ -50,6 +50,7 @@ import {
   listRecentWorkspaces,
   listRunningTaskRuns,
   openDatabase,
+  saveTaskResourceBinding,
   saveWorkspace,
   startTaskRun,
 } from "@tessera/database"
@@ -68,6 +69,11 @@ import { AgentChangeError, type AgentChangeService, createAgentChangeService } f
 import { parseAiChatStreamEvent } from "./ai-chat-event"
 import { registerAiSdkDevtools, startAiSdkDevtoolsViewer, stopAiSdkDevtoolsViewer } from "./ai-devtools"
 import { type DesktopAiService, createDesktopAiService } from "./ai-service"
+import {
+  ContentLibraryError,
+  type ContentLibraryService,
+  createContentLibraryService,
+} from "./content-library-service"
 import { handleDesktopInvoke, onDesktopSend } from "./ipc-contract"
 import { McpConfigError, type McpService, createMcpService } from "./mcp-service"
 import { createReadonlyWorkspaceAgentTools } from "./read-only-agent-tools"
@@ -96,6 +102,7 @@ let desktopTaskService: DesktopTaskService | null = null
 let agentChangeService: AgentChangeService | null = null
 let mcpService: McpService | null = null
 let userSkillService: UserSkillService | null = null
+let contentLibraryService: ContentLibraryService | null = null
 let appQuitApproved = false
 let appQuitRequested = false
 
@@ -147,6 +154,11 @@ function requireUserSkillService(): UserSkillService {
   return userSkillService
 }
 
+function requireContentLibraryService(): ContentLibraryService {
+  if (!contentLibraryService) throw new ContentLibraryError("内容库服务尚未就绪。", "library-unavailable")
+  return contentLibraryService
+}
+
 function notifyAiProviderConfigsChanged() {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.webContents.isDestroyed()) window.webContents.send(IPC_CHANNELS.aiProviderConfigsChanged)
@@ -195,6 +207,47 @@ function summarizeTaskRunResources(
   }
 }
 
+function recordTaskRunResourceBindings(
+  client: DatabaseClient,
+  input: AiChatStartInput,
+  workspace: WorkspaceInfo | null,
+) {
+  const saveBinding = (
+    resourceType: "attachment" | "document" | "project",
+    resourceId: string,
+    role: "context" | "scope",
+  ) => {
+    const id = createHash("sha256")
+      .update([input.taskId, input.requestId, resourceType, resourceId, role].join("\0"))
+      .digest("hex")
+    saveTaskResourceBinding(client, {
+      id,
+      taskId: input.taskId,
+      runId: input.requestId,
+      resourceType,
+      resourceId,
+      role,
+    })
+  }
+
+  if (workspace) saveBinding("project", workspace.id, "scope")
+  if (workspace && input.currentDocumentPath) {
+    const documentId = createHash("sha256")
+      .update(`${workspace.id}\0${input.currentDocumentPath}`)
+      .digest("hex")
+    saveBinding("document", documentId, "context")
+  }
+  for (const message of input.messages) {
+    for (const part of message.parts) {
+      if (part.type !== "file") continue
+      const attachmentId = createHash("sha256")
+        .update([part.mediaType, part.filename ?? "", part.url].join("\0"))
+        .digest("hex")
+      saveBinding("attachment", attachmentId, "context")
+    }
+  }
+}
+
 function taskRunCompletion(
   metrics: TaskAgentRunMetrics | null,
   lastType: AiChatStreamChunk["type"] | undefined,
@@ -223,30 +276,64 @@ function taskRunCompletion(
 async function streamAiTask(
   input: ReturnType<typeof resolveAiChatInput>,
   workspace: WorkspaceInfo | null,
-  options: Parameters<typeof streamAiChat>[1],
+  options: Pick<Parameters<typeof streamAiAgent>[1], "abortSignal" | "onChunk" | "onRunMetrics" | "skill">,
 ) {
-  if (input.mode === "chat") return streamAiChat(input, options)
-  if (!workspace) throw new AiProviderConfigError("Agent 任务必须在已打开的工作区中运行。")
-  const readonlyTools = createReadonlyWorkspaceAgentTools({
-    rootPath: workspace.rootPath,
-    ...(input.currentDocumentPath ? { currentDocumentPath: input.currentDocumentPath } : {}),
-  })
+  const workspaceTools = workspace
+    ? createReadonlyWorkspaceAgentTools({
+        rootPath: workspace.rootPath,
+        ...(input.currentDocumentPath ? { currentDocumentPath: input.currentDocumentPath } : {}),
+      })
+    : null
   const externalTools = await requireMcpService().createAgentTools(options.abortSignal)
+  const contentService = requireContentLibraryService()
+  const contentTools: ContentDomainAgentTools | undefined = contentService.current()
+    ? {
+        listProjects: async (signal: AbortSignal) => {
+          signal.throwIfAborted()
+          return contentService.listProjects()
+        },
+        listArtifacts: async (signal: AbortSignal) => {
+          signal.throwIfAborted()
+          return contentService.listArtifacts(input.taskId)
+        },
+        inspectProject: async ({ projectId }, context) => {
+          context.signal.throwIfAborted()
+          return contentService.inspectProject({ taskId: input.taskId, runId: input.requestId }, projectId)
+        },
+        createDocument: async (document, context) => {
+          context.signal.throwIfAborted()
+          return contentService.createDocument({ taskId: input.taskId, runId: input.requestId }, document)
+        },
+        createProject: async (project, context) => {
+          context.signal.throwIfAborted()
+          return contentService.createProject({ taskId: input.taskId, runId: input.requestId }, project)
+        },
+        moveDocuments: async (move, context) => {
+          context.signal.throwIfAborted()
+          return contentService.moveDocuments({ taskId: input.taskId, runId: input.requestId }, move)
+        },
+      }
+    : undefined
   return streamAiAgent(input, {
     ...options,
+    ...(contentTools ? { contentTools } : {}),
     externalTools,
-    workspaceName: workspace.name,
-    tools: {
-      ...readonlyTools,
-      writeWorkspaceDocument: (change, context) =>
-        requireAgentChangeService().execute(
-          input.taskId,
-          context.toolCallId,
-          change,
-          workspace.rootPath,
-          context.signal,
-        ),
-    },
+    ...(workspace && workspaceTools
+      ? {
+          workspaceName: workspace.name,
+          tools: {
+            ...workspaceTools,
+            writeWorkspaceDocument: (change, context) =>
+              requireAgentChangeService().execute(
+                input.taskId,
+                context.toolCallId,
+                change,
+                workspace.rootPath,
+                context.signal,
+              ),
+          },
+        }
+      : {}),
   })
 }
 
@@ -283,7 +370,12 @@ function abortAiChatsForWebContents(webContentsId: number) {
 }
 
 function aiChatErrorMessage(error: unknown) {
-  if (error instanceof AiProviderConfigError || error instanceof AgentChangeError) return error.message
+  if (
+    error instanceof AiProviderConfigError ||
+    error instanceof AgentChangeError ||
+    error instanceof ContentLibraryError
+  )
+    return error.message
   return "模型请求失败，请检查供应商配置、模型状态与网络连接。"
 }
 
@@ -853,11 +945,11 @@ function registerIpcHandlers() {
       if (previousRun) releaseAiChatRun(previousRun)
       const workspace = activeWorkspaces.get(event.sender.id)?.workspace ?? null
       requireDesktopTaskService().authorizeTurn(input.taskId, input.mode, workspace, input.skillId)
-      const loadedSkill = await requireUserSkillService().load(input.skillId)
-      if (input.mode === "agent") {
+      if (workspace) {
         requireAgentChangeService().reconcileDecisions(input.taskId, input.messages)
       }
-      const runtimeInput = resolveAiChatInput(input)
+      const runtimeInput = resolveAiChatInput({ ...input, mode: workspace ? "agent" : "chat" })
+      const loadedSkill = await requireUserSkillService().load(runtimeInput.skillId)
       if (!databaseClient) throw new AiProviderConfigError("本地任务数据库尚未就绪。")
       const runDatabase = databaseClient
       const abortController = new AbortController()
@@ -893,6 +985,7 @@ function registerIpcHandlers() {
         resourceSummaryJson: JSON.stringify(summarizeTaskRunResources(input, workspace)),
         startedAt: runStartedAt,
       })
+      recordTaskRunResourceBindings(runDatabase, input, workspace)
 
       const pendingToolInputs = new Map<string, { input: unknown; toolName: string }>()
 
@@ -1030,6 +1123,49 @@ function registerIpcHandlers() {
     IPC_CHANNELS.workspaceCurrent,
     (event) => activeWorkspaces.get(event.sender.id)?.workspace ?? null,
   )
+  handleDesktopInvoke(IPC_CHANNELS.contentLibraryCurrent, () => {
+    try {
+      return { ok: true, library: requireContentLibraryService().current() }
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof ContentLibraryError ? error.message : "读取内容库设置失败。",
+      }
+    }
+  })
+  handleDesktopInvoke(IPC_CHANNELS.contentLibrarySelect, async (event) => {
+    try {
+      const window = BrowserWindow.fromWebContents(event.sender)
+      const options: OpenDialogOptions = {
+        title: "选择托管内容库",
+        buttonLabel: "选择",
+        properties: ["openDirectory", "createDirectory"],
+      }
+      const selection = window
+        ? await dialog.showOpenDialog(window, options)
+        : await dialog.showOpenDialog(options)
+      const selectedPath = selection.filePaths[0]
+      if (selection.canceled || !selectedPath) {
+        return { ok: true, library: requireContentLibraryService().current() }
+      }
+      return { ok: true, library: await requireContentLibraryService().configure(selectedPath) }
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof ContentLibraryError ? error.message : "设置内容库失败。",
+      }
+    }
+  })
+  handleDesktopInvoke(IPC_CHANNELS.contentLibraryRevoke, () => {
+    try {
+      return { ok: true, library: requireContentLibraryService().revoke() }
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof ContentLibraryError ? error.message : "移除内容库授权失败。",
+      }
+    }
+  })
   handleDesktopInvoke(IPC_CHANNELS.workspaceSelect, async (event) => {
     const window = BrowserWindow.fromWebContents(event.sender)
     const options: OpenDialogOptions = {
@@ -1065,6 +1201,10 @@ function registerIpcHandlers() {
   handleDesktopInvoke(IPC_CHANNELS.taskListWorkspace, (event) => {
     const workspace = workspaceForEvent(event)
     return requireDesktopTaskService().listWorkspace(workspace.id)
+  })
+  handleDesktopInvoke(IPC_CHANNELS.taskListArtifacts, (_event, taskId) => {
+    requireDesktopTaskService().read(taskId)
+    return requireContentLibraryService().listArtifacts(taskId)
   })
   handleDesktopInvoke(IPC_CHANNELS.taskRead, (_event, taskId) => {
     return requireDesktopTaskService().read(taskId)
@@ -1300,6 +1440,7 @@ app.whenReady().then(async () => {
   databaseClient = openDatabase({ path: join(userDataPath, "tessera.sqlite3") })
   desktopAiService = createDesktopAiService(databaseClient)
   desktopTaskService = createDesktopTaskService(databaseClient)
+  contentLibraryService = createContentLibraryService(databaseClient)
   agentChangeService = createAgentChangeService(databaseClient)
   mcpService = createMcpService({
     client: databaseClient,
@@ -1351,6 +1492,7 @@ app.on("will-quit", () => {
   agentChangeService = null
   mcpService = null
   userSkillService = null
+  contentLibraryService = null
 })
 
 app.on("window-all-closed", () => {

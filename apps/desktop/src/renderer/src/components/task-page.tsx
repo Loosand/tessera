@@ -1,8 +1,8 @@
 /**
- * [INPUT]: 隐式执行模式/创作方式的任务快照、可选工作区/当前文档草稿、页面或侧栏表面、导航回调、AI 模型与 Electron useChat Transport
- * [OUTPUT]: 主任务与文档侧栏共用的首次发送懒创建、显式文档上下文、同源 RunPolicy 预检、流式恢复、Agent Diff 审批和持续保存会话表面
+ * [INPUT]: 隐式执行模式/创作方式的任务快照、可选工作区/当前文档草稿、Artifact、页面或侧栏表面、导航回调、AI 模型与 Electron useChat Transport
+ * [OUTPUT]: 主任务与文档侧栏共用的首次发送懒创建、显式文档上下文、Artifact 导航、同源 RunPolicy 预检、流式恢复、Agent Diff 审批和持续保存会话表面
  * [POS]: Tessera 主任务页与文档 AI 侧栏共用的单一对话实现
- * [DOC]: design.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
+ * [DOC]: design.md、docs/architecture/unified-creation-agent.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -20,6 +20,7 @@ import { type UIMessage, hasPendingTaskUserInput, toTaskMessages, useElectronCha
 import {
   type DocumentSnapshot,
   REQUEST_USER_INPUT_TOOL_NAME,
+  type TaskArtifact,
   type TaskMessage,
   type TaskSessionStatus,
 } from "@tessera/contracts"
@@ -44,6 +45,7 @@ import {
 import type { ActiveTask } from "../hooks/use-tasks"
 import { ChatMessage } from "./chat-message"
 import { aiModelKey } from "./model-picker"
+import { TaskArtifactTray } from "./task-artifact-tray"
 import { type ComposerImage, TaskComposer } from "./task-composer"
 
 const ACCEPTED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"])
@@ -63,6 +65,7 @@ type TaskPageProps = Readonly<{
   onEnsureTask: (title: string) => Promise<unknown | null>
   onPersistTask: (messages: TaskMessage[], status: TaskSessionStatus) => Promise<unknown | null>
   onSkillChange: (skillId: ActiveTask["skillId"]) => void
+  onOpenArtifact?: ((artifact: TaskArtifact) => void) | undefined
   onOpenDocument?: ((path: string, line?: number) => void) | undefined
   onToggleSidebar: () => void
   onOpenSettings: () => void
@@ -160,6 +163,7 @@ export function TaskPage({
   onEnsureTask,
   onPersistTask,
   onSkillChange,
+  onOpenArtifact,
   onOpenDocument,
   onToggleSidebar,
   onOpenSettings,
@@ -177,19 +181,21 @@ export function TaskPage({
     () => defaultAttachCurrentDocument && Boolean(currentDocument),
   )
   const [notice, setNotice] = useState("")
+  const [artifacts, setArtifacts] = useState<TaskArtifact[]>([])
   const selectedModel = useMemo(
     () => models.find((model) => aiModelKey(model) === selectedModelKey),
     [models, selectedModelKey],
   )
+  const runtimeMode = workspaceName ? "agent" : "chat"
   const policyResolution = useMemo(
-    () => resolveAutomaticTaskRunPolicy(task.skillId, task.mode, selectedModel),
-    [selectedModel, task.mode, task.skillId],
+    () => resolveAutomaticTaskRunPolicy(task.skillId, runtimeMode, selectedModel),
+    [runtimeMode, selectedModel, task.skillId],
   )
   const execution = policyResolution?.execution ?? null
   const researchReady = policyResolution?.issues.length === 0
   const researchNotice =
     task.skillId === "research" && !researchReady
-      ? "研究模式需要支持深度思考与联网搜索的模型，请更换模型。"
+      ? "研究方式需要支持深度思考与联网搜索的模型，请更换模型。"
       : ""
   const executionNotice = policyResolution?.issues[0]
     ? taskRunPolicyIssueMessage(policyResolution.issues[0])
@@ -204,7 +210,7 @@ export function TaskPage({
     configId: selectedModel?.configId ?? "",
     ...(documentContext ? { currentDocumentPath: documentContext.relativePath } : {}),
     initialMessages: task.messages,
-    mode: task.mode,
+    mode: runtimeMode,
     skillId: task.skillId,
     providerId: selectedModel?.providerId ?? "openai-compatible",
     modelId: selectedModel?.id ?? "",
@@ -220,6 +226,23 @@ export function TaskPage({
     },
     [task.id],
   )
+
+  useEffect(() => {
+    const desktopApi = window.tessera
+    if (!desktopApi || !task.persisted || running) return
+    let cancelled = false
+    void desktopApi
+      .listTaskArtifacts(task.id)
+      .then((nextArtifacts) => {
+        if (!cancelled) setArtifacts(nextArtifacts)
+      })
+      .catch(() => {
+        if (!cancelled) setArtifacts([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [running, task.id, task.persisted])
 
   useEffect(() => {
     if (selectedModel) return
@@ -317,10 +340,6 @@ export function TaskPage({
       setNotice(researchNotice)
       return
     }
-    if (task.mode === "agent" && !workspaceName) {
-      setNotice("Agent 任务必须在工作区中运行，请先打开工作区。")
-      return
-    }
     if (executionNotice) {
       setNotice(executionNotice)
       return
@@ -365,17 +384,13 @@ export function TaskPage({
       })
   }
 
-  const agentNotice =
-    task.mode === "agent" && !workspaceName ? "Agent 任务必须在工作区中运行，请先打开工作区。" : ""
-  const agentScope =
-    task.mode === "agent" && workspaceName
-      ? `范围：工作区「${workspaceName}」中的 Markdown；写入必须先看 Diff 并批准。`
-      : ""
+  const agentScope = workspaceName
+    ? `范围：工作区「${workspaceName}」中的 Markdown；写入必须先看 Diff 并批准。`
+    : ""
   const composerNotice =
     notice ||
     (waitingForInput ? "当前任务正在等待你的回答。" : "") ||
     researchNotice ||
-    agentNotice ||
     executionNotice ||
     chat.error?.message ||
     taskError ||
@@ -383,8 +398,8 @@ export function TaskPage({
 
   const composer = (compact = false) => (
     <TaskComposer
-      agentMode={task.mode === "agent"}
-      agentReady={Boolean(workspaceName) && execution?.agentReady === true}
+      agentMode={Boolean(workspaceName)}
+      agentReady={execution?.agentReady === true}
       availableDocument={
         currentDocument
           ? { filename: currentDocument.name, relativePath: currentDocument.relativePath }
@@ -466,26 +481,28 @@ export function TaskPage({
         </header>
       ) : null}
 
-      {chat.messages.length === 0 ? (
+      {chat.messages.length === 0 && surface === "sidebar" ? (
+        <>
+          <div className="min-h-0 flex-1 overflow-y-auto px-4">
+            <div className="flex min-h-full items-end justify-center pb-5 text-center">
+              <div>
+                <h1 className="text-sm font-medium">围绕当前文档协作</h1>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  提问、研究或修改，当前文档会作为可见附件发送。
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="shrink-0 bg-gradient-to-t from-background via-background to-transparent px-3 pt-3 pb-3">
+            {composer(true)}
+          </div>
+        </>
+      ) : chat.messages.length === 0 ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <div
-            className={`mx-auto flex min-h-full w-full flex-col items-center justify-center ${surface === "sidebar" ? "px-3 py-5" : "max-w-3xl px-6 py-14 pb-24"}`}
-          >
-            <div className={surface === "sidebar" ? "mb-4 text-center" : "mb-7 text-center"}>
-              <h1
-                className={
-                  surface === "sidebar" ? "text-sm font-medium" : "text-xl font-semibold tracking-tight"
-                }
-              >
-                {surface === "sidebar" ? "围绕当前文档协作" : "今天想做点什么？"}
-              </h1>
-              <p
-                className={`${surface === "sidebar" ? "mt-1 text-xs leading-5" : "mt-1.5 text-sm"} text-muted-foreground`}
-              >
-                {surface === "sidebar"
-                  ? "提问、研究或修改，可把当前文档作为可见附件发送。"
-                  : "研究、阅读、理解与写作，从一个问题开始。"}
-              </p>
+          <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col items-center justify-center px-6 py-14 pb-24">
+            <div className="mb-7 text-center">
+              <h1 className="text-xl font-semibold tracking-tight">今天想做点什么？</h1>
+              <p className="mt-1.5 text-sm text-muted-foreground">研究、阅读、理解与写作，从一个问题开始。</p>
             </div>
             {composer()}
           </div>
@@ -518,7 +535,7 @@ export function TaskPage({
                           chat.addToolApprovalResponse({
                             id,
                             approved,
-                            ...(!approved ? { reason: "用户拒绝了这次文档更改。" } : {}),
+                            ...(!approved ? { reason: "用户拒绝了这次操作。" } : {}),
                           })
                         }
                         onUserInput={(toolCallId, output) =>
@@ -540,6 +557,15 @@ export function TaskPage({
             className={`shrink-0 bg-gradient-to-t from-background via-background to-transparent pt-3 ${surface === "sidebar" ? "px-3 pb-3" : "px-5 pb-4"}`}
           >
             <div className={surface === "sidebar" ? "w-full" : "mx-auto w-full max-w-3xl"}>
+              {onOpenArtifact ? (
+                <div className="mb-2">
+                  <TaskArtifactTray
+                    artifacts={artifacts}
+                    compact={surface === "sidebar"}
+                    onOpen={onOpenArtifact}
+                  />
+                </div>
+              ) : null}
               {composer(true)}
             </div>
           </div>

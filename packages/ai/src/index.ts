@@ -39,3 +39,4 @@ export {
   resolveTaskRunPolicy,
   taskRunPolicyIssueMessage,
 } from "./run-policy"
+export { inferAutomaticTaskSkill } from "./intent-routing"

@@ -14,9 +14,9 @@
 
 import type { PermissionEffect } from "@tessera/agent-runtime"
 import {
-  USER_TASK_SKILL_PREFIX,
   type BuiltInTaskSkillId,
   type TaskSkillId,
+  USER_TASK_SKILL_PREFIX,
   type UserTaskSkillId,
   isUserTaskSkillId,
 } from "@tessera/contracts"
@@ -170,14 +170,14 @@ const BUILT_IN_SKILLS = {
   },
   writing: {
     descriptor: defineSkill({
-      defaultPrompt: "使用 $writing 面向目标读者规划、起草或修订这篇文档。",
+      defaultPrompt: "使用 $writing 基于我的目标和材料起草或修订文档，保持事实和我的声音。",
       name: "writing",
       description:
-        "根据目标、读者和已有材料规划、起草或修订结构清晰的 Markdown 内容。用于写作、改写、编辑和组织文档的任务。",
+        "把用户的材料、事实和判断组织成可信、清晰且保留作者声音的 Markdown。用于起草、续写、改写、压缩、扩写或审稿。",
       displayName: "写作",
       root: "builtin://writing",
       scope: "built-in",
-      shortDescription: "面向目标和读者规划、起草与修订 Markdown 内容",
+      shortDescription: "把材料与判断写成可信、清晰、保留作者声音的 Markdown",
       permissions: [
         { action: "workspace.read", effect: "ask", resource: "workspace:**/*.md" },
         { action: "workspace.write", effect: "ask", resource: "workspace:**/*.md" },

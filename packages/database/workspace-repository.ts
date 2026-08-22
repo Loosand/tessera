@@ -1,6 +1,6 @@
 /**
  * [INPUT]: Drizzle 数据库实例与工作区元数据
- * [OUTPUT]: 最近工作区查询、可恢复移除和幂等写入操作
+ * [OUTPUT]: 最近工作区查询、可恢复移除，以及不会意外降级托管身份的幂等写入操作
  * [POS]: 工作区持久化的数据库仓储边界
  * [DOC]: docs/architecture/database.md
  *
@@ -20,6 +20,10 @@ export type WorkspaceRecordInput = Pick<Workspace, "id" | "rootPath" | "displayN
 }
 
 export function saveWorkspace(client: DatabaseClient, workspace: WorkspaceRecordInput) {
+  const explicitManagedMetadata = {
+    ...(workspace.contentLibraryId !== undefined ? { contentLibraryId: workspace.contentLibraryId } : {}),
+    ...(workspace.storageKind !== undefined ? { storageKind: workspace.storageKind } : {}),
+  }
   client.db
     .insert(workspaces)
     .values({
@@ -33,8 +37,7 @@ export function saveWorkspace(client: DatabaseClient, workspace: WorkspaceRecord
         displayName: workspace.displayName,
         lastOpenedAt: workspace.lastOpenedAt,
         hiddenAt: null,
-        contentLibraryId: workspace.contentLibraryId ?? null,
-        storageKind: workspace.storageKind ?? "external",
+        ...explicitManagedMetadata,
       },
     })
     .run()

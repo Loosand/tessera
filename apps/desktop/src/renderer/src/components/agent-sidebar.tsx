@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 当前文档、共享任务会话子树与关闭操作
- * [OUTPUT]: 承载正常任务对话实现的可访问文档右侧 AI 协作面板
+ * [INPUT]: 当前文档、当前任务/同工作区任务列表、共享任务会话子树与任务切换/关闭操作
+ * [OUTPUT]: 带任务身份、历史切换和新建入口，承载正常任务对话实现的可访问文档右侧 AI 协作面板
  * [POS]: TaskPage 在文档工作表面中的窄布局容器
  * [DOC]: design.md、docs/architecture.md、docs/architecture/task-navigation.md
  *
@@ -11,21 +11,50 @@
  */
 
 import type { DocumentSnapshot } from "@tessera/contracts"
-import { AiBrain01Icon, ArrowRight01Icon } from "@tessera/design-system/components/icons"
+import {
+  Add01Icon,
+  AiBrain01Icon,
+  ArrowDown01Icon,
+  ArrowRight01Icon,
+  Message01Icon,
+} from "@tessera/design-system/components/icons"
 import { Button } from "@tessera/design-system/components/ui/button"
 import { Icon } from "@tessera/design-system/components/ui/icon"
+import { Popover, PopoverContent, PopoverTrigger } from "@tessera/design-system/components/ui/popover"
 import { m, useReducedMotion } from "motion/react"
-import type { ReactNode } from "react"
+import React, { type ReactNode, useMemo, useState } from "react"
 import { motionSprings } from "../motion"
 
+export type AgentSidebarTask = Readonly<{
+  id: string
+  title: string
+}>
+
 type AgentSidebarProps = Readonly<{
+  activeTask: AgentSidebarTask
   children: ReactNode
   document: DocumentSnapshot | null
   onClose: () => void
+  onNewTask: () => void
+  onOpenTask: (taskId: string) => void
+  tasks: readonly AgentSidebarTask[]
 }>
 
-export function AgentSidebar({ children, document, onClose }: AgentSidebarProps) {
+export function AgentSidebar({
+  activeTask,
+  children,
+  document,
+  onClose,
+  onNewTask,
+  onOpenTask,
+  tasks,
+}: AgentSidebarProps) {
   const shouldReduceMotion = useReducedMotion()
+  const [taskMenuOpen, setTaskMenuOpen] = useState(false)
+  const taskOptions = useMemo(
+    () => [activeTask, ...tasks.filter((task) => task.id !== activeTask.id)].slice(0, 10),
+    [activeTask, tasks],
+  )
 
   return (
     <m.aside
@@ -47,6 +76,64 @@ export function AgentSidebar({ children, document, onClose }: AgentSidebarProps)
           <Icon icon={ArrowRight01Icon} size={15} />
         </Button>
       </header>
+
+      <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border/45 px-2">
+        <Popover open={taskMenuOpen} onOpenChange={setTaskMenuOpen}>
+          <PopoverTrigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 min-w-0 flex-1 justify-start gap-2 px-2 data-[popup-open]:bg-sidebar-accent"
+                aria-label="切换侧栏任务"
+                title={activeTask.title}
+              />
+            }
+          >
+            <Icon icon={Message01Icon} size={14} className="shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1 truncate text-left text-xs">{activeTask.title}</span>
+            <Icon icon={ArrowDown01Icon} size={12} className="shrink-0 text-muted-foreground" />
+          </PopoverTrigger>
+          <PopoverContent
+            side="bottom"
+            align="end"
+            sideOffset={5}
+            className="w-[350px] max-w-[calc(100vw-40px)] rounded-xl border border-border/70 p-1.5 ring-0"
+          >
+            <div className="px-2 py-1 text-[10px] font-medium text-muted-foreground">当前任务与项目历史</div>
+            <div className="grid max-h-64 gap-0.5 overflow-y-auto">
+              {taskOptions.map((task) => (
+                <button
+                  key={task.id}
+                  type="button"
+                  className="flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-xs transition-colors hover:bg-sidebar-accent data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium"
+                  data-active={task.id === activeTask.id || undefined}
+                  title={task.title}
+                  onClick={() => {
+                    setTaskMenuOpen(false)
+                    if (task.id !== activeTask.id) onOpenTask(task.id)
+                  }}
+                >
+                  <Icon icon={Message01Icon} size={13} className="shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 flex-1 truncate">{task.title}</span>
+                </button>
+              ))}
+            </div>
+          </PopoverContent>
+        </Popover>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          className="shrink-0"
+          aria-label="新建侧栏任务"
+          title="新任务"
+          onClick={onNewTask}
+        >
+          <Icon icon={Add01Icon} size={15} />
+        </Button>
+      </div>
 
       <div className="min-h-0 flex-1">{children}</div>
     </m.aside>

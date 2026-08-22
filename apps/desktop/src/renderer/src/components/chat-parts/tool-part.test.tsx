@@ -1,8 +1,8 @@
 /**
- * [INPUT]: AI SDK 动态或具名工具 Part
- * [OUTPUT]: Tool Chips 状态、资源、输入详情与失败原因的回归验证
+ * [INPUT]: AI SDK 动态或具名工具 Part、内容领域审批输入
+ * [OUTPUT]: Tool Chips 状态、资源、输入详情、失败原因与正式产物紧凑审批的回归验证
  * [POS]: tool-part 的数据适配与呈现单元测试
- * [DOC]: design.md、docs/architecture/ai-chat-agent-todo.md
+ * [DOC]: design.md、docs/architecture/unified-creation-agent.md、docs/architecture/ai-chat-agent-todo.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -51,5 +51,26 @@ describe("通用工具调用", () => {
     expect(markup).toContain('aria-expanded="true"')
     expect(markup).toContain("执行失败")
     expect(markup).toContain("连接超时")
+  })
+
+  it("创建正式文档时显示未归档摘要和截断正文，不回退成原始大 JSON", () => {
+    const part = {
+      type: "tool-create-document",
+      toolCallId: "create-1",
+      state: "approval-requested",
+      input: {
+        title: "玛德琳",
+        content: `# 玛德琳\n\n${"正文".repeat(800)}`,
+        reason: "用户要求成稿",
+      },
+      approval: { id: "approval-1", isAutomatic: false },
+    } as ToolMessagePart
+    const markup = renderToStaticMarkup(<ToolPart part={part} onToolApproval={() => {}} />)
+
+    expect(markup).toContain("创建正式文档「玛德琳」")
+    expect(markup).toContain("未归档")
+    expect(markup).toContain("正文预览已截断")
+    expect(markup).not.toContain("用户要求成稿")
+    expect(markup).toContain("允许执行")
   })
 })

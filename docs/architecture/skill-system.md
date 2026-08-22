@@ -8,7 +8,7 @@
 > `apps/desktop/src/renderer/src/components/task-composer.tsx`、
 > `apps/desktop/src/renderer/src/components/skill-management-page.tsx`
 >
-> 状态：部分实现。标准 `SKILL.md` 校验、内置注册表、用户单目录导入/递归扫描预览/批量托管/启停/删除、渐进式加载、逐轮显式选择与完整 RunPolicy 快照、统一 AI SDK `ToolLoopAgent` call options 注入、研究提问/计划工具和 Skill 管理页已实现；自动意图路由、工作区级自动发现、更新/版本、附属资源按需加载与社区目录尚未实现。
+> 状态：部分实现。标准 `SKILL.md` 校验、内置注册表、用户单目录导入/递归扫描预览/批量托管/启停/删除、渐进式加载、逐轮显式选择与完整 RunPolicy 快照、统一 AI SDK `ToolLoopAgent` call options 注入、基础自动意图路由、研究提问/计划工具、Tessera 写作工作流和 Skill 管理页已实现；工作区级自动发现、更新/版本、附属资源按需加载、写作行为评测与社区目录尚未实现。
 
 ## 地位
 
@@ -21,9 +21,9 @@ Skill 是可阅读的模型工作流，不是新的模型、Agent 运行时或�
 - 每个 run 固化实际 `skill_id` 和工具策略，后续 run 可以改变，历史 run 不被回写。
 - Skill 声明只参与能力需求解释，实际权限仍来自显式资源、主进程边界和审批策略。
 
-界面把未选择呈现为“自动”，并与“研究”“写作”“问答”组成四种创作模式。`question-answering` 只是本轮关闭联网、不加载 Skill 的行为提示，不对应伪造的 `SKILL.md`；研究和写作是随应用发布的两份内置 Skill。Chat/Agent 不进入创作模式 UI。
+界面把未选择呈现为“自动”，并在同一创作方式面板中提供“研究”“写作”“问答”快捷项，但它们不是同一类对象：`research` / `writing` 对应随应用发布的内置 Skill，`question-answering` 只是关闭联网、不加载 Skill 的回答预设。图片、视频等未来入口属于工具、输出能力或专用模型路由，不应伪装成 Skill；它们可以在同一快捷面板分组呈现，也不与 Skill 互斥。Chat/Agent 不进入这个 UI。
 
-当前实现仍把内部 mode 和下一轮创作模式默认值保存到 `task_sessions`，但不再在首次发送后锁定；每次运行同时把实际 Skill 保存到 `task_runs`。会话字段只服务兼容读取和下一轮 UI 默认值，不是权限事实；进一步迁移见[统一创作 Agent 与内容存储探索](unified-creation-agent.md)。
+当前实现仍把内部 mode 和之后运行使用的创作方式默认值保存到 `task_sessions`，但不再在首次发送或运行期间锁定；每次运行同时把实际 Skill 保存到 `task_runs`。会话字段只服务兼容读取和 UI 默认值，不是权限事实；进一步迁移见[统一创作 Agent 与内容存储探索](unified-creation-agent.md)。
 
 ## 用户安装
 
@@ -65,7 +65,7 @@ research/
 目标流程把选择与实际策略固化到每个 run：
 
 ```text
-本轮创作模式提示 + 用户 turn + 可见资源 + 模型能力
+本轮创作方式提示 + 用户 turn + 可见资源 + 模型能力
   -> resolveRunPolicy()
   -> SQLite task_runs.skill_id / policy snapshot
   -> loadBuiltInSkill(actualSkillId) / userSkillService.load(actualSkillId)
@@ -86,7 +86,7 @@ Skill 负责告诉模型何时需要澄清、何时应先计划；共享运行�
 
 Skill 描述符可以声明 `workspace.read`、`workspace.write` 或 `network.search` 等所需能力，但声明始终是需求，不是授权：
 
-- 研究模式会请求深度推理和原生联网，并提高有界搜索额度；写作与自动模式也可在当前模型/端点支持时注册原生搜索工具。能力来自本轮策略和已验证模型事实，不来自 Skill 权限声明。
+- 研究方式会请求深度推理和原生联网，并提高有界搜索额度；写作与自动方式也可在当前模型/端点支持时注册原生搜索工具。能力来自本轮策略和已验证模型事实，不来自 Skill 权限声明。
 - 写作 Skill 本身不会获得任意内容写入；只有本轮已经关联授权内容目标时，统一 Agent 才能注册 `create-document` / `update-document` 等领域工具。目标可以由当前实验的托管内容库、外部工作区或未来数据库适配器提供。
 - 所有文件写入继续先冻结候选内容，展示文档渲染和高亮 Diff，并在用户批准后复核磁盘版本再原子写入。
 - Skill 指令不能扩大内容作用域、创建存储授权、注册 Shell/MCP、删除或重命名内容，也不能替代工具输入校验和审计。
@@ -98,10 +98,10 @@ Skill 描述符可以声明 `workspace.read`、`workspace.write` 或 `network.se
 | --- | --- | --- | --- |
 | 自动 | 按本轮解析 | 根据用户意图、显式资源和模型事实选择安全能力；简单问题可以不加载 Skill | 无 |
 | 研究 | `$research` | 必要时结构化澄清，发布多步研究计划，核验来源并区分事实/推断/不确定性 | 工作区读取、网络搜索 |
-| 写作 | `$writing` | 识别目标/读者、规划结构、起草或修订 Markdown | 工作区读取、工作区写入 |
+| 写作 | `$writing` | 区分起草/续写/改写/审稿，整理事实与判断，在保持作者声音和修改边界的前提下交付并质检 Markdown | 工作区读取、工作区写入 |
 | 问答 | 无 | 不联网，使用对话历史与显式附件直接回答 | 无 |
 
-研究正文已接通澄清与计划工具，写作正文仍保持最小可验证工作流。后续打磨提示、评测和更多专用工具时，不改变注册、持久化、权限和注入协议。
+研究正文已接通澄清与计划工具；写作正文已实现写作契约、材料分类、文体选择、受控修订和四层质检。当前质检仍是 Skill 内的模型工作流，尚未建立独立行为评测集；后续增加固定样本、人工评分和更多专用工具时，不改变注册、持久化、权限和注入协议。
 
 ## 管理界面
 
@@ -111,7 +111,7 @@ Skill 描述符可以声明 `workspace.read`、`workspace.write` 或 `network.se
 
 ## 后续
 
-- 用类型化 `RunPolicy` 和统一 Agent call options 替代当前两条工具装配路径，并继续扩充 `task_run` 的工具/资源策略快照。
+- 已用类型化 `RunPolicy` 和统一 Agent call options 收敛工具装配；后续继续扩充更强语义意图、Skill 版本和 `task_run` 的可解释策略。
 - 在自动模式增加可评测的每轮意图解析，使同一会话能够从问答自然进入研究或写作。
 - 增加工作区级目录发现、同名优先级，以及用户 Skill 更新、版本/目录哈希和恢复策略。
 - 让注册表从 `agents/openai.yaml` 读取展示元数据，消除内置 TypeScript 清单中的重复字段。

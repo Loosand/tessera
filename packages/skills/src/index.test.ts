@@ -41,7 +41,7 @@ describe("Skill 注册表", () => {
     })
     await expect(loadBuiltInSkill("writing")).resolves.toMatchObject({
       displayName: "写作",
-      instructions: expect.stringContaining("# 写作"),
+      instructions: expect.stringContaining("# Tessera 写作"),
     })
   })
 })

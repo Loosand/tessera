@@ -1,8 +1,8 @@
 /**
- * [INPUT]: 应用信息、useWorkspace 文档会话与隐式 Chat/Agent、内置/用户创作 Skill 的 useTasks 任务导航状态
- * [OUTPUT]: 首页/用户 Skill 管理/任务/工作区保活视图、主任务与文档侧栏共享会话、跨工作区恢复、源码行导航和文档主区域
+ * [INPUT]: 应用信息、useWorkspace 文档会话与隐式统一 Agent、Artifact、内置/用户创作 Skill 的 useTasks 任务导航状态
+ * [OUTPUT]: 首页/用户 Skill 管理/任务/工作区保活视图、Artifact 到文档加同一侧栏会话、侧栏任务切换、跨工作区恢复、源码行导航和文档主区域
  * [POS]: Tessera 桌面端的顶层产品壳层
- * [DOC]: design.md、docs/architecture.md、docs/architecture/editor.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
+ * [DOC]: design.md、docs/architecture.md、docs/architecture/unified-creation-agent.md、docs/architecture/editor.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -10,7 +10,7 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import type { AppInfo, TaskSessionSummary, TaskSkillId } from "@tessera/contracts"
+import type { AppInfo, TaskArtifact, TaskSessionSummary, TaskSkillId } from "@tessera/contracts"
 import { AnimatePresence, m, useReducedMotion } from "motion/react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { type DefaultEditorMode, useAppPreferences } from "../hooks/use-app-preferences"
@@ -190,11 +190,26 @@ export function AppShell({ appInfo }: AppShellProps) {
       return
     }
     flushPendingEdits()
-    if (workspace && (activeTask.workspaceId !== workspace.id || activeTask.mode !== "agent")) {
+    if (workspace && !activeTask.persisted && activeTask.workspaceId !== workspace.id) {
       startNewTask(workspace.id)
     }
     setAgentOpen(true)
-  }, [activeTask.mode, activeTask.workspaceId, agentOpen, flushPendingEdits, startNewTask, workspace])
+  }, [activeTask.persisted, activeTask.workspaceId, agentOpen, flushPendingEdits, startNewTask, workspace])
+
+  const createAgentTask = useCallback(() => {
+    flushPendingEdits()
+    startNewTask(workspace?.id ?? null)
+    setAgentOpen(true)
+  }, [flushPendingEdits, startNewTask, workspace?.id])
+
+  const openAgentTask = useCallback(
+    async (taskId: string) => {
+      flushPendingEdits()
+      const opened = await openTask(taskId)
+      if (opened) setAgentOpen(true)
+    },
+    [flushPendingEdits, openTask],
+  )
 
   const openWorkspace = useCallback(
     async (workspaceId: string) => {
@@ -283,6 +298,19 @@ export function AppShell({ appInfo }: AppShellProps) {
       })
     },
     [flushPendingEdits, openDocument],
+  )
+
+  const openTaskArtifact = useCallback(
+    async (artifact: TaskArtifact) => {
+      flushPendingEdits()
+      const project =
+        workspace?.id === artifact.project.id ? workspace : await openRecentWorkspace(artifact.project.id)
+      if (!project) return
+      setView("workspace")
+      setAgentOpen(true)
+      await openDocument(artifact.relativePath)
+    },
+    [flushPendingEdits, openDocument, openRecentWorkspace, workspace],
   )
 
   const createWorkspaceDocument = useCallback(
@@ -487,8 +515,12 @@ export function AppShell({ appInfo }: AppShellProps) {
                 {agentOpen ? (
                   <AgentSidebar
                     key="agent-sidebar"
+                    activeTask={activeTask}
                     document={activeDocument}
+                    tasks={tasks}
                     onClose={() => setAgentOpen(false)}
+                    onNewTask={createAgentTask}
+                    onOpenTask={(taskId) => void openAgentTask(taskId)}
                   >
                     <TaskPage
                       key={activeTask.id}
@@ -503,6 +535,7 @@ export function AppShell({ appInfo }: AppShellProps) {
                       onEnsureTask={ensureActiveTask}
                       onPersistTask={persistActiveTask}
                       onSkillChange={setActiveTaskSkill}
+                      onOpenArtifact={(artifact) => void openTaskArtifact(artifact)}
                       onOpenDocument={showDocument}
                       onToggleSidebar={() => setSidebarOpen((current) => !current)}
                       onOpenSettings={openSettings}
@@ -526,6 +559,7 @@ export function AppShell({ appInfo }: AppShellProps) {
                 onEnsureTask={ensureActiveTask}
                 onPersistTask={persistActiveTask}
                 onSkillChange={setActiveTaskSkill}
+                onOpenArtifact={(artifact) => void openTaskArtifact(artifact)}
                 onOpenDocument={showDocument}
                 onToggleSidebar={() => setSidebarOpen((current) => !current)}
                 onOpenSettings={openSettings}

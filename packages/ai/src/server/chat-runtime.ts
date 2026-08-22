@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 已解析的供应商连接、受信任 RunPolicy、含图片/显式 Markdown 上下文的任务消息、客户端交互/研究计划工具、AI SDK UIMessageChunk 与运行指标回调
- * [OUTPUT]: 把 Markdown 附件安全转换为带边界的模型材料，并经共用 Task Agent call options 注入 Skill、推理、工具、预算和原生生命周期观测，提供无工作区统一任务流、输入校验、错误归类脱敏和公开增量裁剪
- * [POS]: Electron 主进程与各 AI SDK 供应商之间的无工作区工具 Agent 运行时及共享流边界
+ * [INPUT]: 已解析的供应商连接、受信任 RunPolicy、含图片/显式 Markdown 上下文的任务消息与 AI SDK UIMessageChunk
+ * [OUTPUT]: 统一 Agent 复用的附件边界、输入校验、错误归类脱敏、搜索额度和公开增量裁剪
+ * [POS]: Electron 主进程与统一 ToolLoopAgent 之间的共享流协议辅助层，不提供独立 Chat 运行时
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/ai-observability.md、docs/architecture/ai-providers.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
@@ -18,21 +18,7 @@ import type {
   TaskMessage,
   TaskRunPolicy,
 } from "@tessera/contracts"
-import type { LoadedSkill } from "@tessera/skills"
-import {
-  type InferUITools,
-  type UIMessage,
-  type UIMessageChunk,
-  createAgentUIStream,
-  validateUIMessages,
-} from "ai"
-import { createAiSdkChatRuntime } from "./ai-sdk-runtime"
-import { buildTaskSkillInstructions } from "./skill-instructions"
-import { type TaskAgentRunMetrics, createTaskAgent } from "./task-agent"
-import {
-  createTaskInteractionTools,
-  hasRequestedUserInputSinceLastUserMessage,
-} from "./task-interaction-tools"
+import { type UIMessage, type UIMessageChunk, validateUIMessages } from "ai"
 
 const MAX_MESSAGES = 200
 const MAX_TEXT_CHARACTERS = 2_000_000
@@ -47,13 +33,6 @@ export type AiChatRuntimeInput = AiChatStartInput &
     endpointType: AiModelEndpointType
     runPolicy: TaskRunPolicy
   }
-
-export type AiChatRuntimeOptions = {
-  abortSignal: AbortSignal
-  onChunk: (chunk: AiChatStreamChunk) => void | Promise<void>
-  onRunMetrics?: (metrics: TaskAgentRunMetrics) => void
-  skill?: LoadedSkill
-}
 
 export type UiMessageValidationOptions<Message extends UIMessage> = Omit<
   Parameters<typeof validateUIMessages<Message>>[0],
@@ -242,50 +221,5 @@ export function publicChunk(chunk: UIMessageChunk): AiChatStreamChunk | null {
       return { type: "error", errorText: chunk.errorText }
     default:
       return null
-  }
-}
-
-export async function streamAiChat(
-  input: AiChatRuntimeInput,
-  { abortSignal, onChunk, onRunMetrics, skill }: AiChatRuntimeOptions,
-): Promise<void> {
-  const runtime = createAiSdkChatRuntime(input, {
-    webSearch: input.runPolicy.webSearch,
-    webSearchMaxUses: webSearchMaxUsesForSkill(input.runPolicy.skillId),
-  })
-  const tools = {
-    ...(runtime.tools ?? {}),
-    ...createTaskInteractionTools(input.runPolicy.skillId, {
-      allowUserInput: !hasRequestedUserInputSinceLastUserMessage(input.messages),
-    }),
-  }
-  type ChatUiMessage = UIMessage<unknown, never, InferUITools<typeof tools>>
-  const originalMessages = await toUiMessages<ChatUiMessage>(input.messages, { tools })
-  const instructions = await buildTaskSkillInstructions(input.runPolicy.skillId, skill)
-  const agent = createTaskAgent({
-    model: runtime.model,
-    ...(onRunMetrics ? { onRunMetrics } : {}),
-    ...(runtime.providerOptions ? { providerOptions: runtime.providerOptions } : {}),
-    tools,
-  })
-  const stream = await createAgentUIStream({
-    agent,
-    uiMessages: originalMessages,
-    originalMessages,
-    abortSignal,
-    options: { policy: input.runPolicy, ...(instructions ? { skillInstructions: instructions } : {}) },
-    timeout: {
-      totalMs: input.runPolicy.limits.timeoutMs,
-      firstChunkMs: 30_000,
-      chunkMs: 45_000,
-    },
-    sendReasoning: true,
-    sendSources: true,
-    onError: (error) => safeErrorMessage(error, input.apiKey),
-  })
-
-  for await (const chunk of stream) {
-    const sanitized = publicChunk(chunk)
-    if (sanitized) await onChunk(sanitized)
   }
 }

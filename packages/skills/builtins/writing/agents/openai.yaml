@@ -1,4 +1,4 @@
 interface:
   display_name: "写作"
-  short_description: "面向目标和读者规划、起草与修订 Markdown 内容"
-  default_prompt: "使用 $writing 面向目标读者规划、起草或修订这篇文档。"
+  short_description: "把材料与判断写成可信、清晰、保留作者声音的 Markdown"
+  default_prompt: "使用 $writing 基于我的目标和材料起草或修订文档，保持事实和我的声音。"

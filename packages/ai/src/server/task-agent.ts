@@ -131,7 +131,6 @@ export function taskAgentRunMetrics(event: GenerateTextEndEvent<ToolSet>): TaskA
 function excludedToolNames(scope: TaskToolScope, groups: TaskAgentToolGroups) {
   if (scope === "workspace-write") return new Set<string>()
   const excluded = new Set(groups.workspaceWrite ?? [])
-  for (const name of groups.external ?? []) excluded.add(name)
   if (scope === "conversation") {
     for (const name of groups.workspaceRead ?? []) excluded.add(name)
   }

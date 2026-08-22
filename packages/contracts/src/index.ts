@@ -2,7 +2,7 @@
  * [INPUT]: Electron 桌面应用当前需要的跨进程数据、生命周期、工作区条目、AI 模型事实/端点绑定、MCP 服务器、用户 Skill、任务运行策略、内容对象、开发期 AI 日志与 Agent 变更审批形状
  * [OUTPUT]: IPC 频道、工作区文件操作、模型/MCP/用户 Skill 配置、类型化 RunPolicy、后端无关内容引用、可恢复流式运行、开发期 AI 日志入口、客户端问答/研究计划工具、Agent Diff 审批、关闭握手与可推导的桌面 API 类型契约
  * [POS]: 应用和共享包共同依赖的底层契约入口
- * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/ai-observability.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/mcp.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
+ * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/ai-observability.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/mcp.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md、docs/architecture/unified-creation-agent.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -16,6 +16,9 @@ export const IPC_CHANNELS = {
   appCloseRequested: "app:close-requested",
   appConfirmClose: "app:confirm-close",
   aiDevtoolsOpen: "ai-devtools:open",
+  contentLibraryCurrent: "content-library:current",
+  contentLibrarySelect: "content-library:select",
+  contentLibraryRevoke: "content-library:revoke",
   workspaceCurrent: "workspace:current",
   workspaceSelect: "workspace:select",
   workspaceRecent: "workspace:recent",
@@ -64,6 +67,7 @@ export const IPC_CHANNELS = {
   taskSave: "task:save",
   taskRename: "task:rename",
   taskDelete: "task:delete",
+  taskListArtifacts: "task:list-artifacts",
 } as const
 
 export type IpcChannelMap = typeof IPC_CHANNELS
@@ -673,6 +677,64 @@ export type ResourceBinding = {
   taskId: string
 }
 
+/** 探索期托管内容库；正文仍以目录中的 Markdown 为事实源。 */
+export type ContentLibraryInfo = {
+  id: string
+  inbox: ProjectRef
+  name: string
+  rootPath: string
+}
+
+/** 可在对话、文档和项目视图之间传递的正式产物摘要。 */
+export type TaskArtifact = ArtifactRef & {
+  document: DocumentRef
+  project: ProjectRef
+  relativePath: string
+  updatedAt: number
+}
+
+export type WorkspaceOperationKind =
+  | "create-document"
+  | "create-project"
+  | "inspect-project"
+  | "move-documents"
+
+export type WorkspaceOperationStatus = "applied" | "conflict" | "failed"
+
+/** 不携带正文的领域操作审计摘要。 */
+export type WorkspaceOperationSummary = {
+  createdAt: number
+  id: string
+  kind: WorkspaceOperationKind
+  runId: string | null
+  status: WorkspaceOperationStatus
+  taskId: string
+}
+
+export type CreateDocumentInput = {
+  content: string
+  projectId?: string
+  reason: string
+  title: string
+}
+
+export type CreateProjectInput = {
+  name: string
+}
+
+export type MoveDocumentsInput = {
+  documentIds: string[]
+  targetProjectId: string
+}
+
+export type InspectProjectInput = {
+  projectId: string
+}
+
+export type ContentLibraryResult = OperationResult<{
+  library: ContentLibraryInfo | null
+}>
+
 export type WorkspaceDocumentEntry = {
   name: string
   relativePath: string
@@ -743,6 +805,9 @@ export type DesktopApiContract = {
   cancelClose: SendMethod<typeof IPC_CHANNELS.appCancelClose, []>
   confirmClose: SendMethod<typeof IPC_CHANNELS.appConfirmClose, []>
   getCurrentWorkspace: InvokeMethod<typeof IPC_CHANNELS.workspaceCurrent, [], WorkspaceInfo | null>
+  getCurrentContentLibrary: InvokeMethod<typeof IPC_CHANNELS.contentLibraryCurrent, [], ContentLibraryResult>
+  selectContentLibrary: InvokeMethod<typeof IPC_CHANNELS.contentLibrarySelect, [], ContentLibraryResult>
+  revokeContentLibrary: InvokeMethod<typeof IPC_CHANNELS.contentLibraryRevoke, [], ContentLibraryResult>
   selectWorkspace: InvokeMethod<typeof IPC_CHANNELS.workspaceSelect, [], WorkspaceInfo | null>
   listRecentWorkspaces: InvokeMethod<typeof IPC_CHANNELS.workspaceRecent, [], WorkspaceInfo[]>
   openRecentWorkspace: InvokeMethod<
@@ -857,6 +922,7 @@ export type DesktopApiContract = {
   >
   listRecentTasks: InvokeMethod<typeof IPC_CHANNELS.taskListRecent, [], TaskSessionSummary[]>
   listWorkspaceTasks: InvokeMethod<typeof IPC_CHANNELS.taskListWorkspace, [], TaskSessionSummary[]>
+  listTaskArtifacts: InvokeMethod<typeof IPC_CHANNELS.taskListArtifacts, [taskId: string], TaskArtifact[]>
   readTask: InvokeMethod<typeof IPC_CHANNELS.taskRead, [taskId: string], TaskSessionSnapshot>
   saveTask: InvokeMethod<typeof IPC_CHANNELS.taskSave, [input: TaskSessionSaveInput], TaskSessionSnapshot>
   renameTask: InvokeMethod<

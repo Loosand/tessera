@@ -1,16 +1,19 @@
 # 统一创作 Agent 与内容存储探索
 
 > 代码源头：`packages/agent-runtime/src/index.ts`、`packages/ai/src/server/agent-runtime.ts`、
-> `packages/ai/src/server/chat-runtime.ts`、`packages/ai/src/server/skill-instructions.ts`、
+> `packages/ai/src/server/content-domain-tools.ts`、`packages/ai/src/intent-routing.ts`、
+> `packages/ai/src/server/skill-instructions.ts`、
 > `packages/contracts/src/index.ts`、`packages/database/schema.ts`、
+> `packages/database/content-domain-repository.ts`、`apps/desktop/src/main/content-library-service.ts`、
 > `apps/desktop/src/main/task-service.ts`、`apps/desktop/src/main/read-only-agent-tools.ts`、
 > `apps/desktop/src/renderer/src/hooks/use-tasks.ts`、
-> `apps/desktop/src/renderer/src/components/task-page.tsx`
+> `apps/desktop/src/renderer/src/components/task-page.tsx`、
+> `apps/desktop/src/renderer/src/components/task-artifact-tray.tsx`
 >
-> 状态：交互方向已确认、内容存储方案处于探索阶段。统一 TaskPage、所有任务的 AI SDK `ToolLoopAgent`、共用
-> `callOptionsSchema` / `prepareCall` 动态配置、受信任 RunPolicy、工作区 Markdown 读写、当前文档附件、联网搜索、
-> 逐轮显式 Skill、完整策略/资源摘要快照、Diff 审批与运行事件已经存在；自动意图路由、规范化动态资源关系和
-> 项目/文档领域工具仍为规划。托管内容库混合方案仅作为当前实验基线，不排除数据库正文或完全开放外部工作区。
+> 状态：统一交互与混合方案原型及首轮 dev Electron 闭环已实现，最终内容存储仍处于探索阶段。所有任务共用 AI SDK `ToolLoopAgent`、
+> `callOptionsSchema` / `prepareCall`、受信任 RunPolicy、当前文档附件、联网、Skill、动态资源关系、Artifact、
+> 内容库领域工具、审批与操作审计；自动方式已对明确研究/写作请求做保守收窄。托管内容库只是当前实验基线，
+> 不排除数据库正文或完全开放外部工作区。
 
 ## 地位
 
@@ -27,7 +30,8 @@
 1. **单一对话入口**：新任务、工作区任务和文档侧栏最终都使用同一套消息、运行与工具协议。
 2. **默认使用 Agent 运行时**：每轮由 AI SDK `ToolLoopAgent` 执行；无需工具时直接生成正文，不能为了证明
    “正在使用 Agent”制造搜索或工具调用。
-3. **创作模式是本轮意图提示**：自动、研究、写作、问答只影响下一次运行的策略，不在会话首次保存后锁定。
+3. **创作方式是逐轮快捷提示**：默认由 Agent 自动编排；研究、写作、问答只覆盖之后发起的运行，不在会话首次
+   保存后锁定，也不把一个 Task 变成不可切换的“模式”。
 4. **Skill 按轮次选择**：用户可以在同一会话中从普通问答自然进入研究或写作；实际使用的 Skill 固化到
    对应 `task_run`，保证历史可解释，但不固定整个 `task_session`。
 5. **上下文动态关联**：任务可以从无工作区开始，随后附加当前文档、关联一个或多个工作区、创建新项目并
@@ -36,6 +40,8 @@
    当前选定的存储后端；模型不依赖数据库表、绝对路径或任意文件系统能力。
 7. **存储选择不泄漏到交互**：无论实验采用数据库、托管内容库还是外部工作区，用户看到的 Task、Project、
    Document、Artifact 和 Operation 语义保持一致。
+8. **任务随创作过程延续**：通过 Artifact 打开或移动到其他项目只改变当前资源作用域，不重置 Task；文档侧栏
+   显示当前任务、项目历史和新建入口，并与主任务页共用消息、reasoning、工具和恢复协议。
 
 ## 目标交互
 
@@ -58,17 +64,19 @@
 ```
 
 用户不需要在流程开始时决定 Chat/Agent，也不需要手动打开联网、工具调用或思考强度。用户明确选择研究、
-写作或问答时，选择只覆盖下一轮；未选择时使用自动策略。
+写作或问答时，选择只覆盖之后发起的运行；未选择时使用自动策略。生成期间也可以先调整选择，已经开始的 run
+保持冻结策略，后续新 run 读取新的选择。
 
 ## 运行时编排
 
 ### 每轮策略解析
 
 每次用户提交都先由受信任的运行策略解析器生成 `RunPolicy`。当前第一版已经以主进程持久化的模型事实、显式创作
-方式和内部工作区作用域生成端点、联网、推理、工具作用域及预算；renderer 只做同源预检，不再通过 IPC 决定联网
-或思考强度。后续自动意图识别继续补充用户 turn、动态资源和权限输入。完整输入边界为：
+方式、当前轮用户文本和眼下已授权工作区生成端点、联网、推理、工具作用域及预算；renderer 只做同源预检，
+不再通过 IPC 决定联网或思考强度。自动方式只识别明确的研究/写作意图，项目整理保持自动并交给领域工具；
+显式模式始终优先，模型能力不足时自动研究回落为普通自动策略。完整输入边界为：
 
-- 用户对下一轮的显式创作模式提示；
+- 用户对之后运行的显式创作方式提示；
 - 当前会话历史和已持久化工具结果；
 - 可见、可移除的附件与当前文档上下文；
 - 当前关联工作区及主进程已经确认的授权范围；
@@ -127,16 +135,27 @@ AI SDK memory、WorkflowAgent 或实验性 API 只有在验证桌面进程生命
 Electron 边界的薄端口，不能演化成第二套 Agent 框架。若确需偏离标准方案，实施 PR 必须记录当前 SDK 版本、
 查过的 docs/source、缺口、替代方案、退出路径和回归测试。
 
-### 创作模式策略
+### 创作方式与能力分层
 
-| 用户选择 | 默认运行策略 | 边界 |
+输入框中的入口是一个混合快捷面板，不是一组互斥且不可逆的系统模式。当前分层如下：
+
+- “自动”表示没有显式覆盖，由 Agent 按请求和可用能力编排。
+- “研究”“写作”是内置 Skill 的快捷入口，同时带出受信任的 RunPolicy 默认值。
+- “问答”只是关闭联网和主动项目操作的回答预设，不伪造一份 Skill。
+- 图片、视频、幻灯片、网页等属于输出能力、工具或专用模型路由；接入后可以和 Skill 共存，但不能为了塞进同一
+  菜单就扩张成 `TaskSkillId`，也不能把用户锁进新的会话模式。当前只呈现已经打通的能力。
+
+AI SDK `ToolLoopAgent` 通过每次调用的 `callOptionsSchema` / `prepareCall` 读取这些选择。一次 run 开始后策略冻结，
+界面仍允许用户切换，新的值只影响之后发起的 run，不能回写正在执行的调用。
+
+| 快捷选择 | 默认运行策略 | 边界 |
 | --- | --- | --- |
 | 未选择 / 自动 | 根据意图、资源和模型事实决定是否搜索、加载 Skill 或使用工具 | 只能在已有授权范围内自动化 |
 | 研究 | 深度推理、原生联网、来源核验、必要时研究计划 | 缺少可靠联网能力时明确阻止或请求改用自动，不伪造研究 |
 | 写作 | 加载写作 Skill，读取显式材料，允许提出或创建 Markdown 产物 | 不自动获得未授权目录或覆盖现有正文的权限 |
 | 问答 | 不联网，不主动操作项目或文件，使用会话和显式附件直接回答 | 仍使用同一 Agent runtime，不另建 Chat 实现 |
 
-自动模式需要按当前用户 turn 识别意图。例如会话前几轮只是人物问答，后续“写成一篇自媒体稿”应让下一次
+自动方式需要按当前用户 turn 识别意图。例如会话前几轮只是人物问答，后续“写成一篇自媒体稿”应让下一次
 run 加载写作 Skill；过去的 run 保留当时实际策略，不被回写。
 
 ## 内容存储探索
@@ -153,8 +172,9 @@ run 加载写作 Skill；过去的 run 保留当时实际策略，不被回写�
 导出或直接迁移，领域工具协议也能在后续替换存储适配器。这个选择不是最终产品承诺。
 
 进入不可逆实现前，需要用真实任务评估：首次设置成本、无工作区开始的成功率、文档创建/移动失败率、外部编辑
-冲突、备份恢复、导入导出、多端需求、用户对文件所有权的重视程度，以及数据库/文件迁移成本。评审结论应新增
-独立 ADR，并同步本文状态。
+冲突、备份恢复、导入导出、多端需求、用户对文件所有权的重视程度，以及数据库/文件迁移成本。当前指标、证据与
+最终门槛记录在 [ADR-0001：内容存储实验基线与评审门槛](adr-0001-content-storage-experiment.md)；它仍是提议，
+不代表最终选型。
 
 ## 产品对象与当前混合基线映射
 
@@ -164,8 +184,8 @@ run 加载写作 Skill；过去的 run 保留当时实际策略，不被回写�
 | Run | 一次用户提交触发的执行 | SQLite 运行、策略快照和有序事件 |
 | Workspace / Project | 一个长期项目容器 | 已登记的本地目录；公共 `ProjectRef` 不暴露后端位置 |
 | Document | 可继续编辑和交付的内容 | Markdown 文件；公共 `DocumentRef` 只使用稳定 ID 和项目关系 |
-| Artifact | Agent 在某个 run 创建或修改的产物关系 | 已定义 `ArtifactRef` 契约；持久化表与工具仍规划 |
-| Resource Binding | 当前对话可以使用的材料与作用域 | 已定义 `ResourceBinding` 契约；当前 run 先保存摘要，规范化关系仍规划 |
+| Artifact | Agent 在某个 run 创建或修改的产物关系 | `artifacts` 保存稳定身份，文档移动不改变 Artifact ID |
+| Resource Binding | 当前对话可以使用的材料与作用域 | `task_resource_bindings` 保存逐轮附件、文档、项目及 output/scope/context 角色 |
 | Operation | 创建、移动、重命名或写入动作 | 主进程文件操作 + SQLite 审计 |
 
 ### 当前混合基线的内容层与控制层
@@ -183,9 +203,9 @@ Markdown / 图片 / 附件             Task / Run / Message
 
 ### 内容库与 Inbox
 
-作为当前混合方案实验，为支持无需预选工作区的自然流程，规划增加一个用户明确选择的“Tessera 内容库”根目录：
+作为当前混合方案实验，为支持无需预选工作区的自然流程，已经实现一个用户明确选择的“Tessera 内容库”根目录：
 
-- 初次需要落地产物时，用户选择或创建内容库根目录；选择结果成为可撤销授权，不静默使用任意系统目录。
+- 用户从设置页选择或创建内容库根目录；选择结果成为可撤销授权，不静默使用任意系统目录。
 - 根目录下维护一个普通、可见的“未归档”工作区。无项目任务创建的新文档默认进入这里。
 - 用户可以继续把内容库外的任意目录登记为外部 Workspace；外部目录不会被强制搬入内容库。
 - 在内容库内创建项目只创建普通子目录和 Workspace 登记，不引入只能由 Tessera 读取的专有容器。
@@ -246,8 +266,9 @@ Markdown / 图片 / 附件             Task / Run / Message
 
 ## 界面约束
 
-- 输入框不显示 Chat/Agent、联网、工具调用或思考档位开关；只保留附件、创作模式、模型和发送。
-- 创作模式默认不选或显示“自动”，选择只影响下一轮，发送后仍可继续切换。
+- 输入框不显示 Chat/Agent、联网、工具调用或思考档位开关；只保留附件、创作方式、模型和发送。
+- 创作方式默认显示“自动”，运行前、运行中和运行后均可切换；已经开始的 run 保持原策略，新选择从之后发起的
+  run 生效。
 - 运行过程按真实事件折叠为活动时间线：思考、搜索、读取、提问、创建文档、创建项目、移动文档和验证结构。
 - 供应商没有返回可展示 reasoning 文本时，将同一回复内的空 reasoning 生命周期聚合为一个紧凑“思考中 / 思考完成”阶段，不显示占位正文或无效展开按钮；非空 reasoning 仍按原始 Part 展示，工具活动由工具 Part 表达。
 - 文档创建后自动进入对话 + Artifact 的左右协作视图；关闭侧栏不丢失会话、运行或附件关系。
@@ -261,9 +282,11 @@ Markdown / 图片 / 附件             Task / Run / Message
 - `task_sessions`：会话身份、标题、状态和时间，不再以 mode/Skill/单一 Workspace 定义整个会话权限。
 - `task_messages`：用户、助手和工具的版本化消息 Part。
 - `task_runs`：每轮实际模型、创作策略、Skill、联网/工具策略、资源快照摘要、完成原因、用量和耗时。
-- `task_resource_bindings`（规划）：Task/Run 与 Workspace、Document、Attachment 的动态关系和角色。
-- `artifacts`（规划）：Agent 产物的稳定 ID、当前工作区/相对路径、创建 run 和状态。
-- `workspace_operations`（规划）：创建项目、移动/重命名文件的参数、授权依据、结果和恢复信息。
+- `content_libraries`：当前授权内容库及撤销时间；撤销只移除授权，不删除用户文件。
+- `task_resource_bindings`：Task/Run 与 Workspace、Document、Attachment 的动态关系和角色；同一 Task 最新 scope
+  关系表示当前项目，旧 run 关系保持不变。
+- `artifacts`：Agent 产物的稳定 ID、当前文档关系、创建 run 和状态。
+- `workspace_operations`：创建文档/项目、移动文档和结构检查的参数、结果、冲突与恢复信息。
 - `agent_change_proposals`：保留现有正文候选、Diff、决定和写入结果。
 
 ### 兼容迁移
@@ -280,19 +303,21 @@ Markdown / 图片 / 附件             Task / Run / Message
    `InferAgentUIMessage`、`ChatTransport` 和生命周期回调的映射；删除重复抽象的设计，不先写新框架。
 2. **统一运行入口（已完成基础切换）**：所有任务都通过 `ToolLoopAgent`，并共用 `task-agent.ts` 的类型化 call
    options / `prepareCall`；无资源时只注册对话、可用联网和结构化交互工具，允许零工具回答。
-3. **按 run 保存策略与指标（已实现基础闭环）**：创作模式可逐轮切换，主进程生成类型化 RunPolicy；`task_runs` 同时
+3. **按 run 保存策略与指标（已实现）**：创作方式可逐轮切换，主进程生成类型化 RunPolicy；`task_runs` 同时
    保存兼容查询列、完整 `policy_json`、不含正文/绝对路径的 `resource_summary_json`，以及 AI SDK 生命周期提供的完成原因、
-   Token/缓存、步骤/工具计数和耗时汇总，旧任务继续保持未知值兼容。下一步把摘要升级为规范化动态资源关系。
-4. **动态资源绑定**：引入 Task/Run 到 Workspace、当前文档和附件的关系；文档侧栏与完整任务页继续复用
+   Token/缓存、步骤/工具计数和耗时汇总，旧任务继续保持未知值兼容；规范化关系另存实际逐轮资源。
+4. **动态资源绑定（已实现）**：引入 Task/Run 到 Workspace、当前文档和附件的关系；文档侧栏与完整任务页继续复用
    同一 Task。
-5. **领域工具**：实现 `create-document`、`create-workspace`、`move-documents` 和结构验证的主进程应用服务、
+5. **领域工具（已实现）**：实现 `create-document`、`create-project`、`move-documents` 和结构验证的主进程应用服务、
    IPC、审计与冲突测试。
-6. **内容库与 Inbox 实验**：增加一次性根目录选择、默认未归档工作区和外部 Workspace 并存规则；所有数据
+6. **内容库与 Inbox 实验（已实现原型）**：增加可撤销根目录选择、默认未归档工作区和外部 Workspace 并存规则；所有数据
    保持普通 Markdown，可完整导出和移除授权。
 7. **存储决策评审**：用端到端任务和恢复演练比较数据库、托管内容库与完全外部工作区，形成独立 ADR；
    评审前不做不可逆正文迁移。
-8. **产物协作界面**：实现 Artifact 卡片、左右视图、活动时间线和移动后的作用域切换；界面依赖领域对象而非路径。
-9. **收敛旧模式**：停止新建内部 Chat，移除用户路径上由 `mode` 造成的能力分叉；旧数据继续可读。
+8. **产物协作界面（已实现基础闭环）**：Artifact 卡片可打开文档 + 原 Task 侧栏，移动后追加新的 scope 关系；
+   完整 Operation 活动聚合仍需继续打磨。
+9. **收敛旧模式（部分实现）**：用户路径和模型运行已无 Chat/Agent 选择；历史 `mode/workspace_id` 仍用于兼容归属，
+   当前轮是否注入工作区工具只由眼下打开且已授权的工作区决定。
 
 实施时每一步都必须保持现有 Markdown 路径防护、Diff 审批、运行恢复和人工编辑路径可用。不能用一次性大迁移同时
 替换运行时、数据库和文件操作。

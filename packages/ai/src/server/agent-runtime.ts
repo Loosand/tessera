@@ -1,8 +1,8 @@
 /**
- * [INPUT]: 已解析供应商连接、自动联网/思考策略、当前 Skill、完整 AI SDK UIMessage 历史、主进程注入的受限工作区/MCP 能力、中止信号与运行指标回调
- * [OUTPUT]: 同时承载供应商原生搜索、按 RunPolicy 收窄的工作区读写、强制审批 MCP、Skill instructions、标准 needsApproval 与原生生命周期观测的 AI SDK ToolLoopAgent 增量流
- * [POS]: @tessera/ai/server 中可读并可经人工批准修改 Markdown 的工作区 Agent 编排边界
- * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/ai-observability.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
+ * [INPUT]: 已解析供应商连接、自动联网/思考策略、当前 Skill、完整 AI SDK UIMessage 历史、主进程按授权注入的内容库/工作区/MCP 能力、中止信号与运行指标回调
+ * [OUTPUT]: 普通对话和工作区任务共用、同时承载供应商原生搜索、内容领域、按 RunPolicy 收窄的工作区读写、强制审批 MCP、Skill instructions、标准 needsApproval 与原生生命周期观测的 AI SDK ToolLoopAgent 增量流
+ * [POS]: @tessera/ai/server 中统一自然对话的 ToolLoopAgent 编排边界
+ * [DOC]: docs/architecture/unified-creation-agent.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/ai-observability.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -24,6 +24,7 @@ import {
   toUiMessages,
   webSearchMaxUsesForSkill,
 } from "./chat-runtime"
+import { type ContentDomainAgentTools, createContentDomainToolSet } from "./content-domain-tools"
 import { buildTaskSkillInstructions } from "./skill-instructions"
 import { type TaskAgentRunMetrics, createTaskAgent } from "./task-agent"
 import {
@@ -108,21 +109,23 @@ export type ExternalAgentTool = Readonly<{
 
 export type AiAgentRuntimeOptions = Readonly<{
   abortSignal: AbortSignal
+  contentTools?: ContentDomainAgentTools
   externalTools?: readonly ExternalAgentTool[]
   onChunk: (chunk: AiChatStreamChunk) => void | Promise<void>
   onRunMetrics?: (metrics: TaskAgentRunMetrics) => void
   skill?: LoadedSkill
-  tools: WorkspaceAgentTools
-  workspaceName: string
+  tools?: WorkspaceAgentTools
+  workspaceName?: string
 }>
 
 export type AiSdkAgentRuntimeRequest = Readonly<{
+  contentTools?: ContentDomainAgentTools
   externalTools?: readonly ExternalAgentTool[]
   input: AiChatRuntimeInput
   onRunMetrics?: (metrics: TaskAgentRunMetrics) => void
   skill?: LoadedSkill
-  tools: WorkspaceAgentTools
-  workspaceName: string
+  tools?: WorkspaceAgentTools
+  workspaceName?: string
 }>
 
 export function createExternalAgentToolSet(
@@ -146,11 +149,14 @@ export function createExternalAgentToolSet(
   ) satisfies ToolSet
 }
 
-function agentInstructions(workspaceName: string) {
-  return `你是 Tessera 的工作区 Agent，当前授权范围是工作区「${workspaceName}」中的 Markdown 文档。
+function agentInstructions(workspaceName: string | undefined, contentLibraryAvailable: boolean) {
+  return `你是 Tessera 的统一创作 Agent。用户不需要选择 Chat 或 Agent；你应自然回答，并在任务确实需要时自行调用当前可用工具。
+
+${workspaceName ? `当前已授权工作区「${workspaceName}」中的 Markdown 文档。` : "当前没有已授权的外部工作区。"}
+${contentLibraryAvailable ? "当前可使用托管内容库；正式产物默认创建到“未归档”。" : "当前没有配置托管内容库；需要保存正式产物时应说明如何在设置中选择内容库。"}
 
 规则：
-1. 需要工作区事实时先调用读取工具，不要猜测文件内容。
+1. 普通问答直接回答；需要最新事实时搜索，需要工作区事实时先调用读取工具，不要猜测文件内容。
 2. 回答中的工作区结论使用可点击 Markdown 链接，格式为“[路径:行号](路径#L行号)”；没有行号时使用“[路径](路径)”。
 3. 修改已有文档前必须先读取最新内容，并把读取结果中的 modifiedAt 和 contentHash 原样传给写工具；创建文档使用 create 操作。
 4. 写工具输入必须是完整候选 Markdown，并简要说明修改理由。写工具只会先请求用户审批；用户批准后才会在下一轮执行。
@@ -158,11 +164,15 @@ function agentInstructions(workspaceName: string) {
 6. 工具返回冲突时重新读取文件并说明差异，不得覆盖磁盘新版本。
 7. 跨越很多文件、会明显挤占主对话上下文的独立研究可以委派给只读研究子 Agent；简单问题直接使用读取工具。
 8. 不能删除、重命名、运行 Shell 或扩大访问范围；工具返回截断或限制信息时明确说明。
-9. MCP 工具来自用户显式启用的外部服务器，每次执行都必须等待用户批准；不要用多个相似 MCP 调用绕过拒绝。`
+9. MCP 工具来自用户显式启用的外部服务器，每次执行都必须等待用户批准；不要用多个相似 MCP 调用绕过拒绝。
+10. 只有用户明确要求“写成稿、保存、创建文档或交付正式内容”时才创建 Artifact；不要把普通回答自动存成文件。
+11. 创建正式文档时，未明确指定项目就省略 projectId，让它进入“未归档”；不要编造项目 ID。
+12. 只有用户明确要求建立独立项目或移动文档时才调用对应工具；移动前先查询当前任务 Artifact 和项目 ID，不得覆盖同名文档。`
 }
 
 async function* runAiSdkAgent(
   {
+    contentTools,
     externalTools = [],
     input,
     onRunMetrics,
@@ -178,55 +188,52 @@ async function* runAiSdkAgent(
   })
   const model = runtime.model
   const skillInstructions = await buildTaskSkillInstructions(input.runPolicy.skillId, skill)
-  const readonlyTools = {
-    "list-workspace-files": tool({
-      description: "列出工作区或指定目录中的 Markdown 文件，返回相对路径、大小和更新时间。",
-      inputSchema: z.strictObject({
-        directory: z.string().max(512).optional().describe("工作区相对目录；省略表示工作区根目录"),
-      }),
-      execute: (toolInput, options) =>
-        workspaceTools.listWorkspaceFiles(toolInput, options.abortSignal ?? abortSignal),
-    }),
-    "read-workspace-file": tool({
-      description: "读取一个工作区内 Markdown 文件的文本内容。路径必须来自工作区相对路径。",
-      inputSchema: z.strictObject({
-        path: z.string().min(1).max(1_024).describe("要读取的 Markdown 文件相对路径"),
-      }),
-      execute: (toolInput, options) =>
-        workspaceTools.readWorkspaceFile(toolInput, options.abortSignal ?? abortSignal),
-    }),
-    "search-workspace-text": tool({
-      description: "在工作区 Markdown 文件中搜索纯文本，返回相对路径、行号和匹配行。",
-      inputSchema: z.strictObject({
-        query: z.string().min(1).max(200).describe("不区分大小写的纯文本查询"),
-        directory: z.string().max(512).optional().describe("可选的工作区相对目录"),
-      }),
-      execute: (toolInput, options) =>
-        workspaceTools.searchWorkspaceText(toolInput, options.abortSignal ?? abortSignal),
-    }),
-    "read-current-document": tool({
-      description: "读取用户当前在 Tessera 编辑器中打开的 Markdown 文档；没有当前文档时返回明确状态。",
-      inputSchema: z.strictObject({}),
-      execute: (_toolInput, options) =>
-        workspaceTools.readCurrentDocument(options.abortSignal ?? abortSignal),
-    }),
-  }
-  const researchSubagent = new ToolLoopAgent({
-    model,
-    instructions: `你是 Tessera 的只读工作区研究子 Agent。使用工具完成一个边界明确的研究任务，不能修改文件。
+  const readonlyTools: ToolSet = workspaceTools
+    ? {
+        "list-workspace-files": tool({
+          description: "列出工作区或指定目录中的 Markdown 文件，返回相对路径、大小和更新时间。",
+          inputSchema: z.strictObject({
+            directory: z.string().max(512).optional().describe("工作区相对目录；省略表示工作区根目录"),
+          }),
+          execute: (toolInput, options) =>
+            workspaceTools.listWorkspaceFiles(toolInput, options.abortSignal ?? abortSignal),
+        }),
+        "read-workspace-file": tool({
+          description: "读取一个工作区内 Markdown 文件的文本内容。路径必须来自工作区相对路径。",
+          inputSchema: z.strictObject({
+            path: z.string().min(1).max(1_024).describe("要读取的 Markdown 文件相对路径"),
+          }),
+          execute: (toolInput, options) =>
+            workspaceTools.readWorkspaceFile(toolInput, options.abortSignal ?? abortSignal),
+        }),
+        "search-workspace-text": tool({
+          description: "在工作区 Markdown 文件中搜索纯文本，返回相对路径、行号和匹配行。",
+          inputSchema: z.strictObject({
+            query: z.string().min(1).max(200).describe("不区分大小写的纯文本查询"),
+            directory: z.string().max(512).optional().describe("可选的工作区相对目录"),
+          }),
+          execute: (toolInput, options) =>
+            workspaceTools.searchWorkspaceText(toolInput, options.abortSignal ?? abortSignal),
+        }),
+        "read-current-document": tool({
+          description: "读取用户当前在 Tessera 编辑器中打开的 Markdown 文档；没有当前文档时返回明确状态。",
+          inputSchema: z.strictObject({}),
+          execute: (_toolInput, options) =>
+            workspaceTools.readCurrentDocument(options.abortSignal ?? abortSignal),
+        }),
+      }
+    : {}
+  const workspaceResearchTools: ToolSet = {}
+  if (workspaceTools) {
+    const researchSubagent = new ToolLoopAgent({
+      model,
+      instructions: `你是 Tessera 的只读工作区研究子 Agent。使用工具完成一个边界明确的研究任务，不能修改文件。
 完成后输出包含关键结论、可点击 Markdown 文件引用和限制说明的紧凑摘要，供主 Agent 继续工作。`,
-    tools: readonlyTools,
-    maxOutputTokens: 2_048,
-    stopWhen: isStepCount(5),
-  })
-  const mcpTools = createExternalAgentToolSet(externalTools, abortSignal)
-  const tools = {
-    ...(runtime.tools ?? {}),
-    ...readonlyTools,
-    ...createTaskInteractionTools(input.runPolicy.skillId, {
-      allowUserInput: !hasRequestedUserInputSinceLastUserMessage(input.messages),
-    }),
-    "delegate-workspace-research": tool({
+      tools: readonlyTools,
+      maxOutputTokens: 2_048,
+      stopWhen: isStepCount(5),
+    })
+    workspaceResearchTools["delegate-workspace-research"] = tool({
       description: "把跨多个 Markdown 文件、上下文消耗较大的独立研究委派给只读子 Agent。",
       inputSchema: z.strictObject({
         task: z.string().min(1).max(2_000).describe("边界明确、可独立完成的工作区研究任务"),
@@ -238,30 +245,46 @@ async function* runAiSdkAgent(
         })
         return { summary: result.text, usage: result.usage }
       },
-    }),
-    "write-workspace-document": tool({
-      description:
-        "创建或更新工作区 Markdown 文档。调用会先展示完整候选内容和 Diff，只有用户明确批准后才执行。",
-      inputSchema: workspaceDocumentChangeInputSchema,
-      needsApproval: true,
-      execute: (toolInput, options) =>
-        workspaceTools.writeWorkspaceDocument(toolInput, {
-          signal: options.abortSignal ?? abortSignal,
-          toolCallId: options.toolCallId,
+    })
+  }
+  const mcpTools = createExternalAgentToolSet(externalTools, abortSignal)
+  const contentDomainTools = contentTools ? createContentDomainToolSet(contentTools, abortSignal) : {}
+  const workspaceWriteTools: ToolSet = workspaceTools
+    ? {
+        "write-workspace-document": tool({
+          description:
+            "创建或更新工作区 Markdown 文档。调用会先展示完整候选内容和 Diff，只有用户明确批准后才执行。",
+          inputSchema: workspaceDocumentChangeInputSchema,
+          needsApproval: true,
+          execute: (toolInput, options) =>
+            workspaceTools.writeWorkspaceDocument(toolInput, {
+              signal: options.abortSignal ?? abortSignal,
+              toolCallId: options.toolCallId,
+            }),
         }),
+      }
+    : {}
+  const tools = {
+    ...(runtime.tools ?? {}),
+    ...contentDomainTools,
+    ...readonlyTools,
+    ...workspaceResearchTools,
+    ...createTaskInteractionTools(input.runPolicy.skillId, {
+      allowUserInput: !hasRequestedUserInputSinceLastUserMessage(input.messages),
     }),
+    ...workspaceWriteTools,
     ...mcpTools,
   }
   const agent = createTaskAgent({
-    baseInstructions: agentInstructions(workspaceName),
+    baseInstructions: agentInstructions(workspaceName, Boolean(contentTools)),
     model,
     ...(onRunMetrics ? { onRunMetrics } : {}),
     ...(runtime.providerOptions ? { providerOptions: runtime.providerOptions } : {}),
     tools,
     toolGroups: {
       external: externalTools.map((externalTool) => externalTool.id),
-      workspaceRead: [...Object.keys(readonlyTools), "delegate-workspace-research"],
-      workspaceWrite: ["write-workspace-document"],
+      workspaceRead: [...Object.keys(readonlyTools), ...Object.keys(workspaceResearchTools)],
+      workspaceWrite: Object.keys(workspaceWriteTools),
     },
   })
   type AgentUiMessage = UIMessage<unknown, never, InferUITools<typeof tools>>
@@ -298,14 +321,24 @@ export const aiSdkAgentRuntime: AgentRuntime<AiSdkAgentRuntimeRequest, AiChatStr
 
 export async function streamAiAgent(
   input: AiChatRuntimeInput,
-  { abortSignal, externalTools, onChunk, onRunMetrics, skill, tools, workspaceName }: AiAgentRuntimeOptions,
+  {
+    abortSignal,
+    contentTools,
+    externalTools,
+    onChunk,
+    onRunMetrics,
+    skill,
+    tools,
+    workspaceName,
+  }: AiAgentRuntimeOptions,
 ): Promise<void> {
   for await (const chunk of aiSdkAgentRuntime.run(
     {
       input,
+      ...(contentTools ? { contentTools } : {}),
       ...(onRunMetrics ? { onRunMetrics } : {}),
-      tools,
-      workspaceName,
+      ...(tools ? { tools } : {}),
+      ...(workspaceName ? { workspaceName } : {}),
       ...(externalTools ? { externalTools } : {}),
       ...(skill ? { skill } : {}),
     },

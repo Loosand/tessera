@@ -17,8 +17,8 @@
 4. 通过 Diff、人工批准和审计记录修改 Markdown 的 Agent。
 5. 不区分 Chat/Agent 的统一 `ToolLoopAgent`、每轮动态 Skill、动态资源和后端无关的项目/文档领域工具。
 
-这个顺序是依赖关系，不是五套独立产品。当前独立任务与工作区任务都已使用 `ToolLoopAgent`，但仍按内部 mode
-决定是否注入工作区工具，这是迁移期实现；
+这个顺序是依赖关系，不是五套独立产品。当前独立任务与工作区任务都已使用同一个 `ToolLoopAgent`；历史 mode
+只保留兼容归属，当前是否注入工作区工具由眼下打开且已授权的工作区决定；
 目标交互只保留一个自然对话入口，每轮运行自行决定直接回答或调用工具。内容存储仍处于探索阶段，暂以托管内容库
 混合方案验证流程，同时保留数据库正文和完全开放外部工作区候选。详见
 [统一创作 Agent 与内容存储探索](unified-creation-agent.md)。
@@ -29,13 +29,13 @@
 | --- | --- | --- |
 | 供应商适配 | 部分实现 | `@tessera/ai` 已能创建 OpenAI 兼容、Anthropic 兼容、DeepSeek、Grok 和 OpenRouter 模型；兼容协议允许多条具名连接，官方服务保持单例；DeepSeek 官方 Anthropic Web Search 的已知错误形状差异已在 SDK Schema 前窄归一化。 |
 | 供应商配置 | 部分实现 | API Key 由系统安全存储加密，Base URL、启用状态和手动模型持久化；模型目录是可选能力，404/405 不判定推理连接失效。 |
-| 新任务界面 | 部分实现 | 只暴露可逐轮切换的自动/研究/写作/问答创作方式与模型选择，不显示 Chat/Agent、联网或思考开关；独立任务默认无工作区工具、工作区任务默认带工具的迁移期分流仍存在。已接入流式消息、停止、重试、结构化问题暂停/续跑、研究计划、首次发送懒创建、历史/工具上下文恢复、文件引用跳转和文档 Diff 审批。 |
-| Skill 基建 | 部分实现 | 标准 `SKILL.md` 校验、研究/写作内置注册表、用户单个导入与目录扫描批量安装、逐轮显式选择、AI SDK `instructions` 渐进式注入和研究专用交互工具已接通；自动意图路由、工作区自动发现、更新/版本和资源路由待实现。 |
-| Agent 协议 | 部分实现 | 无工作区与工作区任务均使用 AI SDK `ToolLoopAgent`；工作区路径通过统一 `AgentRuntime` 端口运行读写工具、只读研究子 Agent、当前端点已验证的供应商原生联网工具，以及显式信任/启用且逐次审批的 MCP 工具。两条入口的 Agent 定义/动态 call options 尚待合并，Shell 与 durable 自动续跑尚未接入。 |
+| 新任务界面 | 部分实现 | 只暴露自动/研究/写作/问答与模型，不显示 Chat/Agent、联网或思考开关；已接入流式消息、停止、恢复、结构化问题、研究计划、Artifact、文件跳转和 Diff 审批。 |
+| Skill 基建 | 部分实现 | 标准 `SKILL.md`、研究/写作内置注册表、用户导入、逐轮显式选择、AI SDK `instructions` 和研究交互已接通；自动方式已保守识别明确研究/写作意图，更新/版本与更强语义路由待实现。 |
+| Agent 协议 | 部分实现 | 所有任务使用同一 AI SDK `ToolLoopAgent` 与动态 call options；按当前资源注入工作区、内容领域、原生联网和逐次审批 MCP 工具。Shell 与 durable 自动续跑未接入。 |
 | 文档侧栏 | 已实现 | 文档右侧栏直接复用 `TaskPage`、任务 ID、IPC、持久化与恢复链路；当前 Markdown 最新草稿默认显示为可移除附件，发送后在主进程边界转成受限文本上下文。 |
 | 文件读写 | 已实现 | 主进程冻结候选内容，AI SDK 标准 `toolApproval` 暂停写工具；批准后复核路径、内容哈希与磁盘版本并原子写入，拒绝和冲突不改磁盘。 |
-| 会话数据 | 部分实现 | `task_sessions` / `task_messages` 已保存兼容 mode、下一轮 Skill 默认值、可选工作区、版本化消息与可恢复等待输入状态；`task_runs` 已保存本轮 mode、Skill、思考、联网、完整 RunPolicy、资源摘要和 AI SDK 生命周期完成原因/用量/耗时汇总。规范化动态资源关系与 Artifact 仍待补齐。 |
-| 内容存储 | 规划（探索） | 当前实现以外部 Markdown 工作区为事实源；下一阶段暂用托管内容库 + SQLite 控制层验证无工作区创作和项目整理，同时与数据库正文、完全外部工作区候选比较。 |
+| 会话数据 | 部分实现 | 会话/消息、逐轮 RunPolicy、资源摘要、运行指标、规范化资源关系、Artifact 和 Operation 已保存；旧 mode/workspace 只做兼容。 |
+| 内容存储 | 部分实现（探索） | 托管内容库 + SQLite 控制层原型已能创建未归档文档、项目和安全移动，同时保留外部工作区；最终仍与数据库正文、完全外部工作区比较。 |
 
 ## 固定边界
 
@@ -56,7 +56,7 @@
   -> 渲染层消息界面
   -> 类型化 IPC
   -> 主进程解析 RunPolicy、供应商、模型、Skill、资源和工具
-  -> AI SDK ToolLoopAgent（迁移期仍按内部 mode 装配两套工具定义）
+  -> AI SDK ToolLoopAgent（按当前授权资源动态装配工具）
   -> 文本增量或工具事件
   -> 渲染层呈现
 
@@ -193,23 +193,23 @@
 - [x] 在编码前针对锁定的 AI SDK 版本完成能力矩阵，至少核对 `ToolLoopAgent`、call options / `prepareCall`、`prepareStep`、`stopWhen`、`toolApproval`、typed UI messages、ChatTransport、生命周期和子 Agent；能力矩阵记录在[统一创作 Agent 与内容存储探索](unified-creation-agent.md)，依据 `ai@7.0.73` 随包 docs/source。
 - [x] 让无工作区任务也通过 AI SDK `ToolLoopAgent` 运行；无资源且无需搜索时允许零工具直接生成文本。
 - [x] 定义第一版受信任 `RunPolicy`：主进程按本轮显式创作方式、内部作用域和持久化模型事实解析实际端点、Skill、联网、推理、工具作用域及 step/token/time 上限；renderer 只做同源预检，IPC 不接受 `reasoning` / `webSearch` 命令。无工作区与工作区路径共用 `task-agent.ts` 的 `callOptionsSchema` / `prepareCall`，不复制 Agent loop。
-- [ ] 在第一版 RunPolicy 上增加用户 turn 自动意图识别、动态资源和更细权限/审批输入；任何自动化只能收窄主进程已经确认的资源授权。
+- [x] 在第一版 RunPolicy 上增加保守的用户 turn 自动研究/写作识别、规范化动态资源和领域工具审批；自动化只收窄主进程已经确认的资源授权。更强语义路由与细粒度策略仍继续演进。
 - [x] 把实际 Skill、完整 RunPolicy 和资源摘要固化到 `task_runs`：`0009-task-run-policy` 保存兼容查询列，`0010-task-run-context` 保存 `policy_json` / `resource_summary_json`，旧运行保持未知值；后续以关系表替代仅有摘要的动态资源表达。
 - [x] 允许自动/研究/写作/问答在每轮发送前切换；同一任务可以从普通问答进入研究和写作，旧 run 不被回写。
 - [x] 通过 `prepareCall` 返回 `activeTools`、reasoning、instructions、`stopWhen` 和输出上限，实现逐轮工具/预算收窄；后续只有确需 step 内继续缩小时才增加 `prepareStep`，任何 step 不能扩大 RunPolicy。
 - [x] 通过 AI SDK 工具 `needsApproval` 表达 Markdown 写入与 MCP 暂停；Tessera 只持久化审批、Diff 和审计，不自建平行工具状态机。更细的逐轮审批矩阵后续可由 `prepareCall` 返回 `toolApproval`。
 - [ ] 从 Agent 定义导出 `InferAgentUIMessage`，复用 `convertToModelMessages`、标准 Tool Part 与 `useChat`；应用元数据通过受控 schema 扩展，不复制消息协议。
 - [x] 使用 AI SDK 生命周期回调记录 step、工具耗时、usage 和 finish reason，并按 request ID 关联现有 `task_run_events`；SQLite 保存无正文汇总，开发期细节由官方 DevTools 查看，不从 UI chunk 反推。
-- [ ] 使用同一薄 `AgentRuntime`、消息 Part、暂停/续跑、审批、取消和运行恢复协议，停止为 Chat 和 Agent 维护两条产品链路。
-- [ ] Electron transport 只实现标准 `ChatTransport` 的 IPC/重连差异；由于 `DirectChatTransport` 当前不支持 reconnect，只用于适合的测试，不另写 React chat 状态机。
+- [x] 使用同一薄 `AgentRuntime`、消息 Part、暂停/续跑、审批、取消和运行恢复协议，停止为 Chat 和 Agent 维护两条产品运行链路。
+- [x] Electron transport 只实现标准 `ChatTransport` 的 IPC/重连差异；`DirectChatTransport` 不进入生产链路，也没有另写 React chat 状态机。
 
 ### 资源与领域工具
 
 - [x] 定义后端无关的 `ProjectRef`、`DocumentRef`、`ArtifactRef` 与 `ResourceBinding` 公共契约；不暴露数据库表、绝对路径或正文。Operation 与领域工具输入随首个内容服务实现补齐。
-- [ ] 实现 `list-workspaces`、`create-document`、`create-workspace`、`move-documents` 和 `inspect-workspace` 的受限应用服务。
-- [ ] 当前混合实验增加用户选择的内容库根目录和可见“未归档”Workspace；保留内容库外普通工作区，不静默搬迁用户目录。
-- [ ] 文档创建后在同一 TaskPage 打开 Artifact 协作视图；项目创建和移动完成后更新资源关联，不复制任务历史。
-- [ ] 创建、移动、重命名执行冲突预检、授权、活动展示、审计和恢复信息；覆盖、删除与 Shell 继续保持独立高风险边界；MCP 已使用独立信任和逐次审批，不继承项目操作授权。
+- [x] 实现 `list-projects`、`create-document`、`create-project`、`move-documents` 和 `inspect-project` 的受限应用服务。
+- [x] 当前混合实验增加用户选择的内容库根目录和可见“未归档”Workspace；保留内容库外普通工作区，不静默搬迁用户目录。
+- [x] 文档创建后在同一 TaskPage 显示 Artifact，并可打开文档 + 原任务侧栏；项目移动追加当前 scope，不复制任务历史。
+- [x] 创建与移动执行冲突预检、AI SDK 人工审批、审计和恢复信息；覆盖、删除与 Shell 保持不可达，MCP 继续独立逐次审批。
 
 ### 存储评审
 

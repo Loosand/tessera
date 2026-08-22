@@ -1,8 +1,8 @@
 /**
- * [INPUT]: DesktopApiContract、统一 RunPolicy、用户 Skill 标识、后端无关内容引用及其泛型查询工具
+ * [INPUT]: DesktopApiContract、统一 RunPolicy、用户 Skill 标识、托管内容库、Artifact 与后端无关内容引用及其泛型查询工具
  * [OUTPUT]: 编译期类型等价与错误用例，防止 IPC 方法关系和内容领域边界退化
  * [POS]: contracts 包的零运行时类型回归测试
- * [DOC]: docs/architecture.md、docs/architecture/mcp.md
+ * [DOC]: docs/architecture.md、docs/architecture/mcp.md、docs/architecture/unified-creation-agent.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -16,6 +16,7 @@ import type {
   AiChatStartInput,
   AiProviderId,
   ArtifactRef,
+  ContentLibraryResult,
   DesktopApiArguments,
   DesktopApiChannel,
   DesktopApiContract,
@@ -28,6 +29,7 @@ import type {
   McpServerConfig,
   OperationResult,
   ResourceBinding,
+  TaskArtifact,
   TaskRunPolicy,
   TaskSkillId,
   UserTaskSkillId,
@@ -62,6 +64,8 @@ export type DesktopApiContractTypeTests = [
   Expect<Equal<TaskRunPolicy["toolScope"], "conversation" | "workspace-read" | "workspace-write">>,
   Expect<Equal<ArtifactRef["relation"], "created" | "imported" | "updated">>,
   Expect<Equal<ResourceBinding["role"], "context" | "output" | "scope">>,
+  Expect<Equal<DesktopApiReturn<"getCurrentContentLibrary">, Promise<ContentLibraryResult>>>,
+  Expect<Equal<DesktopApiReturn<"listTaskArtifacts">, Promise<TaskArtifact[]>>>,
 ]
 
 // @ts-expect-error readDocument 只能接收一个相对路径参数。

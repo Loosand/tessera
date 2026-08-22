@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 创作模式、任务运行时与供应商实际连接上的模型端点
+ * [INPUT]: 逐轮创作方式、任务运行时与供应商实际连接上的模型端点
  * [OUTPUT]: 自动、研究、问答三类能力编排的回归验证
  * [POS]: task-page 隐式能力策略的纯函数单元测试
  * [DOC]: design.md、docs/architecture/task-navigation.md
