@@ -74,7 +74,7 @@ DeepSeek V4 在官方连接上的普通对话明确绑定 `openai-chat-completio
 
 参考实现与类型事实来自 LobeHub 官方仓库的 [模型能力类型](https://github.com/lobehub/lobehub/blob/canary/packages/model-bank/src/types/aiModel.ts)、[搜索能力决策](https://github.com/lobehub/lobehub/blob/canary/packages/model-bank/src/utils.ts) 与 [Google 模型目录示例](https://github.com/lobehub/lobehub/blob/canary/packages/model-bank/src/aiModels/google.ts)。
 
-## 普通对话运行时
+## 当前普通对话运行时
 
 ```text
 useChat + Electron ChatTransport
@@ -88,6 +88,10 @@ useChat + Electron ChatTransport
 ```
 
 普通对话只发送用户显式输入、显式 Markdown/图片附件与当前对话历史，不读取未附加的工作区内容。主进程会把 Markdown 附件解码为带“材料而非系统指令”边界的受限文本，并把供应商明确返回的 reasoning 增量按 AI SDK Part 原始顺序送入 renderer；界面以默认展开、可折叠且最大高度 12rem 的紧凑 Markdown 过程块展示。长内容在块内独立滚动，流式追加只在用户仍贴近末尾时自动跟随。正文与 reasoning 共享禁用原始 HTML 的语义渲染器。reasoning 不作为下一轮对话历史回传，也不把供应商未返回的内部思维链补写成可见内容。
+
+`streamText` 普通对话与工作区 `ToolLoopAgent` 是当前迁移期的两条内部路径。目标按[统一创作 Agent 与内容存储探索](unified-creation-agent.md)收敛到单一 `ToolLoopAgent`：无需工具时直接生成正文，需要时按每轮 RunPolicy 注册搜索、Skill 和受限领域工具。供应商适配与消息 Part 协议不因存储方案变化而分叉。
+
+实现前必须核对当前锁定 AI SDK 的随包 docs/source。每轮模型、instructions、active tools、provider options 和审批优先通过类型化 call options / `prepareCall` 配置；step 内调整使用 `prepareStep`，循环限制使用 `stopWhen`，观测使用生命周期回调。现有 Electron `ChatTransport` 只补足跨进程 IPC、后台事件持久化和 reconnect；不得平行实现 Agent loop、消息 Part、审批状态机或 React chat 状态。
 
 自动、研究与写作模式会在请求期模型路由确认原生搜索可用时启用 `web_search`，问答模式始终关闭；同一工具既可进入 Chat，也可与工作区工具共同进入 Agent 的工具循环。主进程保留查询、工具输出与 URL 来源 Part；renderer 按同一助手消息聚合真实搜索次数、去重来源和执行状态，过滤非 http(s) URL，并以可展开过程轨迹呈现。每个来源先通过 HTTPS 请求站点 `/favicon.ico`，失败后请求 Favicon.im，二者均失败时回退通用图标；图片懒加载且不发送 Referer。自动与写作每轮最多搜索 5 次，研究 Skill 每轮最多 15 次，运行时再以 20 次作为防御性硬上限；额度耗尽由工具结果表达，不能因供应商兼容差异升级为整轮 Schema 崩溃。供应商用于续轮引用的加密内容保留在工具历史中，不进入可见界面；没有真实工具 Part 时不根据 reasoning 文本伪造搜索活动。供应商原始校验错误在公开前映射为可操作文案，不向 renderer 暴露 Schema、堆栈或凭据。
 

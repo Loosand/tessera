@@ -51,6 +51,10 @@ async function fixture() {
     taskId: "agent-change-task",
     providerId: "deepseek",
     modelId: "deepseek-chat",
+    mode: "agent",
+    skillId: "writing",
+    reasoning: "high",
+    webSearch: false,
     startedAt: new Date(),
   })
   const service = createAgentChangeService(client)

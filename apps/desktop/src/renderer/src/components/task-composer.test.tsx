@@ -39,7 +39,6 @@ describe("任务输入框密度", () => {
         scope=""
         selectedModelKey=""
         skillId={null}
-        skillLocked={false}
         status="ready"
         value=""
       />,

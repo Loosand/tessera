@@ -62,7 +62,6 @@ type TaskComposerProps = {
   readonly scope: string
   readonly selectedModelKey: string
   readonly skillId: TaskSkillId
-  readonly skillLocked: boolean
   readonly status: "error" | "ready" | "streaming" | "submitted"
   readonly value: string
 }
@@ -89,7 +88,6 @@ export function TaskComposer({
   scope,
   selectedModelKey,
   skillId,
-  skillLocked,
   status,
   value,
 }: TaskComposerProps) {
@@ -223,12 +221,7 @@ export function TaskComposer({
             </PopoverContent>
           </Popover>
 
-          <TaskCapabilityPicker
-            running={running}
-            skillId={skillId}
-            skillLocked={skillLocked}
-            onSkillChange={onSkillChange}
-          />
+          <TaskCapabilityPicker running={running} skillId={skillId} onSkillChange={onSkillChange} />
 
           <div className="min-w-0 flex-1 px-1.5">
             {notice ? (

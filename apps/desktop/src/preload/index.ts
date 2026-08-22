@@ -1,8 +1,8 @@
 /**
  * [INPUT]: 共享桌面 API 契约与 Electron IPC 渲染器
- * [OUTPUT]: 暴露在 window.tessera 上的冻结窄接口、可恢复 AI 流、Agent 变更预览、受限工作区/任务操作和关闭保存握手
+ * [OUTPUT]: 暴露在 window.tessera 上的冻结窄接口、MCP 安全配置、可恢复 AI 流、Agent 变更预览、受限工作区/任务操作和关闭保存握手
  * [POS]: 主进程与沙箱渲染层之间的安全桥
- * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/task-navigation.md
+ * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/mcp.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -21,6 +21,10 @@ const api = Object.freeze({
   listAiProviderConfigs: () => invokeDesktop(IPC_CHANNELS.aiProviderListConfigs),
   listAiProviderModels: (input) => invokeDesktop(IPC_CHANNELS.aiProviderListModels, input),
   saveAiProviderConfig: (input) => invokeDesktop(IPC_CHANNELS.aiProviderSaveConfig, input),
+  listMcpServers: () => invokeDesktop(IPC_CHANNELS.mcpServerList),
+  saveMcpServer: (input) => invokeDesktop(IPC_CHANNELS.mcpServerSave, input),
+  deleteMcpServer: (serverId) => invokeDesktop(IPC_CHANNELS.mcpServerDelete, serverId),
+  testMcpServer: (serverId) => invokeDesktop(IPC_CHANNELS.mcpServerTest, serverId),
   startAiChat: (input) => invokeDesktop(IPC_CHANNELS.aiChatStart, input),
   resumeAiChat: (taskId) => invokeDesktop(IPC_CHANNELS.aiChatResume, taskId),
   cancelAiChat: (requestId) => sendDesktop(IPC_CHANNELS.aiChatCancel, requestId),
@@ -57,6 +61,7 @@ const api = Object.freeze({
   writeDocument: (relativePath, content, expectedModifiedAt) =>
     invokeDesktop(IPC_CHANNELS.documentWrite, relativePath, content, expectedModifiedAt),
   onAiProviderConfigsChanged: (listener) => subscribeDesktop(IPC_CHANNELS.aiProviderConfigsChanged, listener),
+  onMcpServersChanged: (listener) => subscribeDesktop(IPC_CHANNELS.mcpServersChanged, listener),
   onAiChatEvent: (listener) => subscribeDesktop(IPC_CHANNELS.aiChatEvent, listener),
   onWorkspaceChanged: (listener) => subscribeDesktop(IPC_CHANNELS.workspaceChanged, listener),
   onCloseRequested: (listener) => subscribeDesktop(IPC_CHANNELS.appCloseRequested, listener),

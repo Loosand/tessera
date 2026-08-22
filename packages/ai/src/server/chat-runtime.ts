@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 已解析的供应商连接、含图片/显式 Markdown 上下文的任务消息、创作方式、客户端交互/研究计划工具、自动能力策略与 AI SDK UIMessageChunk
- * [OUTPUT]: 把 Markdown 附件安全转换为带边界的模型材料、注入当前 Skill instructions、分配搜索额度并提供 Chat/Agent 共用输入校验、错误归类脱敏和公开增量裁剪
- * [POS]: Electron 主进程与各 AI SDK 供应商之间的普通对话运行时及共享流边界
+ * [OUTPUT]: 把 Markdown 附件安全转换为带边界的模型材料、注入当前 Skill instructions、分配搜索额度，并以 AI SDK ToolLoopAgent 提供无工作区工具的统一任务流、共用输入校验、错误归类脱敏和公开增量裁剪
+ * [POS]: Electron 主进程与各 AI SDK 供应商之间的无工作区工具 Agent 运行时及共享流边界
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/ai-providers.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
@@ -19,12 +19,12 @@ import type {
   TaskMessage,
 } from "@tessera/contracts"
 import {
+  ToolLoopAgent,
   type InferUITools,
   type UIMessage,
   type UIMessageChunk,
-  convertToModelMessages,
+  createAgentUIStream,
   isStepCount,
-  streamText,
   validateUIMessages,
 } from "ai"
 import { createAiSdkChatRuntime } from "./ai-sdk-runtime"
@@ -263,23 +263,25 @@ export async function streamAiChat(
   type ChatUiMessage = UIMessage<unknown, never, InferUITools<typeof tools>>
   const originalMessages = await toUiMessages<ChatUiMessage>(input.messages, { tools })
   const instructions = await buildTaskSkillInstructions(input.skillId)
-  const result = streamText({
+  const agent = new ToolLoopAgent({
     model: runtime.model,
-    messages: await convertToModelMessages(originalMessages, { tools }),
     ...(instructions ? { instructions } : {}),
     tools,
     reasoning: reasoningLevel(input.reasoning),
     stopWhen: isStepCount(input.skillId === "research" ? 8 : 4),
+  })
+  const stream = await createAgentUIStream({
+    agent,
+    uiMessages: originalMessages,
+    originalMessages,
     abortSignal,
     timeout: { totalMs: 120_000, firstChunkMs: 30_000, chunkMs: 45_000 },
-  })
-
-  for await (const chunk of result.toUIMessageStream({
-    originalMessages,
     sendReasoning: true,
     sendSources: true,
     onError: (error) => safeErrorMessage(error, input.apiKey),
-  })) {
+  })
+
+  for await (const chunk of stream) {
     const sanitized = publicChunk(chunk)
     if (sanitized) await onChunk(sanitized)
   }

@@ -1,6 +1,6 @@
 /**
- * [INPUT]: Electron 桌面应用当前需要的跨进程数据、生命周期、工作区条目、AI 模型事实/端点绑定、任务运行与 Agent 变更审批形状
- * [OUTPUT]: IPC 频道、工作区文件操作、模型能力/任务创作方式/可恢复流式运行、客户端问答/研究计划工具、Agent Diff 审批、关闭握手与可推导的桌面 API 类型契约
+ * [INPUT]: Electron 桌面应用当前需要的跨进程数据、生命周期、工作区条目、AI 模型事实/端点绑定、MCP 服务器、任务运行与 Agent 变更审批形状
+ * [OUTPUT]: IPC 频道、工作区文件操作、模型与 MCP 配置、任务创作方式/可恢复流式运行、客户端问答/研究计划工具、Agent Diff 审批、关闭握手与可推导的桌面 API 类型契约
  * [POS]: 应用和共享包共同依赖的底层契约入口
  * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -40,6 +40,11 @@ export const IPC_CHANNELS = {
   aiProviderListConfigs: "ai-provider:list-configs",
   aiProviderListModels: "ai-provider:list-models",
   aiProviderSaveConfig: "ai-provider:save-config",
+  mcpServersChanged: "mcp:servers-changed",
+  mcpServerDelete: "mcp:server-delete",
+  mcpServerList: "mcp:server-list",
+  mcpServerSave: "mcp:server-save",
+  mcpServerTest: "mcp:server-test",
   aiChatCancel: "ai-chat:cancel",
   aiChatEvent: "ai-chat:event",
   aiChatResume: "ai-chat:resume",
@@ -197,6 +202,74 @@ export type AiProviderModelListResult = OperationResult<
 
 export type AiProviderConfigResult = OperationResult<{ config: AiProviderConfig }>
 export type AiProviderConfigDeleteResult = OperationResult
+
+export const MCP_SERVER_TRANSPORTS = ["stdio", "streamable-http", "sse"] as const
+
+export type McpServerTransport = (typeof MCP_SERVER_TRANSPORTS)[number]
+export type McpRuntimeState = "disabled" | "idle" | "connecting" | "connected" | "error"
+
+export type McpToolAnnotations = {
+  destructive?: boolean
+  idempotent?: boolean
+  openWorld?: boolean
+  readOnly?: boolean
+}
+
+export type McpToolSummary = {
+  annotations?: McpToolAnnotations
+  description?: string
+  enabled: boolean
+  inputSchema: Record<string, unknown>
+  name: string
+  serverId: string
+  title?: string
+}
+
+export type McpServerConfig = {
+  args: string[]
+  command: string | null
+  description: string
+  disabledTools: string[]
+  enabled: boolean
+  envConfigured: boolean
+  headersConfigured: boolean
+  id: string
+  lastError?: string
+  name: string
+  serverName?: string
+  serverVersion?: string
+  status: McpRuntimeState
+  timeoutMs: number
+  transport: McpServerTransport
+  trusted: boolean
+  updatedAt: number
+  url: string | null
+}
+
+export type McpServerSaveInput = {
+  args: string[]
+  command?: string | null
+  description: string
+  disabledTools: string[]
+  enabled: boolean
+  env?: Record<string, string>
+  headers?: Record<string, string>
+  id: string
+  name: string
+  removeEnv?: boolean
+  removeHeaders?: boolean
+  timeoutMs: number
+  transport: McpServerTransport
+  trusted: boolean
+  url?: string | null
+}
+
+export type McpServerResult = OperationResult<{ server: McpServerConfig }>
+export type McpServerDeleteResult = OperationResult
+export type McpServerTestResult = OperationResult<{
+  server: McpServerConfig
+  tools: McpToolSummary[]
+}>
 
 export type AiChatReasoning = "auto" | "none" | "low" | "medium" | "high"
 
@@ -616,6 +689,22 @@ export type DesktopApiContract = {
     [input: AiProviderSaveInput],
     AiProviderConfigResult
   >
+  listMcpServers: InvokeMethod<typeof IPC_CHANNELS.mcpServerList, [], McpServerConfig[]>
+  saveMcpServer: InvokeMethod<
+    typeof IPC_CHANNELS.mcpServerSave,
+    [input: McpServerSaveInput],
+    McpServerResult
+  >
+  deleteMcpServer: InvokeMethod<
+    typeof IPC_CHANNELS.mcpServerDelete,
+    [serverId: string],
+    McpServerDeleteResult
+  >
+  testMcpServer: InvokeMethod<
+    typeof IPC_CHANNELS.mcpServerTest,
+    [serverId: string],
+    McpServerTestResult
+  >
   startAiChat: InvokeMethod<typeof IPC_CHANNELS.aiChatStart, [input: AiChatStartInput], AiChatStartResult>
   resumeAiChat: InvokeMethod<typeof IPC_CHANNELS.aiChatResume, [taskId: string], AiChatResumeResult>
   cancelAiChat: SendMethod<typeof IPC_CHANNELS.aiChatCancel, [requestId: string]>
@@ -635,6 +724,7 @@ export type DesktopApiContract = {
   >
   deleteTask: InvokeMethod<typeof IPC_CHANNELS.taskDelete, [taskId: string], boolean>
   onAiProviderConfigsChanged: SubscribeMethod<typeof IPC_CHANNELS.aiProviderConfigsChanged, []>
+  onMcpServersChanged: SubscribeMethod<typeof IPC_CHANNELS.mcpServersChanged, []>
   onAiChatEvent: SubscribeMethod<typeof IPC_CHANNELS.aiChatEvent, [event: AiChatStreamEvent]>
   onWorkspaceChanged: SubscribeMethod<typeof IPC_CHANNELS.workspaceChanged, [event: WorkspaceChangeEvent]>
   onCloseRequested: SubscribeMethod<typeof IPC_CHANNELS.appCloseRequested, []>

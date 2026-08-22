@@ -1,6 +1,6 @@
 /**
- * [INPUT]: Drizzle 数据库实例、任务运行元数据与按序序列化的 AI SDK UIMessageChunk 事件
- * [OUTPUT]: 任务运行创建、事件追加、结束、崩溃中断标记、恢复读取与清理
+ * [INPUT]: Drizzle 数据库实例、含逐轮 mode/Skill/思考/联网快照的任务运行元数据与按序序列化的 AI SDK UIMessageChunk 事件
+ * [OUTPUT]: 带实际执行策略的任务运行创建、事件追加、结束、崩溃中断标记、恢复读取与清理
  * [POS]: Electron 主进程持久化 AI 运行检查点的数据库边界
  * [DOC]: docs/architecture/database.md、docs/architecture/task-navigation.md
  *
@@ -19,7 +19,12 @@ export type TaskRunStatus = TaskRun["status"]
 export type TaskRunInput = Pick<
   TaskRun,
   "requestId" | "taskId" | "configId" | "providerId" | "modelId" | "startedAt"
->
+> & {
+  readonly mode: NonNullable<TaskRun["mode"]>
+  readonly reasoning: NonNullable<TaskRun["reasoning"]>
+  readonly skillId: TaskRun["skillId"]
+  readonly webSearch: NonNullable<TaskRun["webSearch"]>
+}
 
 export type TaskRunEventInput = Pick<TaskRunEventRecord, "requestId" | "sequence" | "payloadJson">
 
@@ -32,6 +37,10 @@ export function startTaskRun(client: DatabaseClient, input: TaskRunInput) {
       configId: input.configId,
       providerId: input.providerId,
       modelId: input.modelId,
+      mode: input.mode,
+      skillId: input.skillId,
+      reasoning: input.reasoning,
+      webSearch: input.webSearch,
       status: "running",
       lastSequence: 0,
       startedAt: input.startedAt,

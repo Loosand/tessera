@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 内存 SQLite、通用任务会话输入与模拟工作区
- * [OUTPUT]: Chat 空工作区、问答行为标记、Agent 工作区约束、任务 mode/创作方式不可变和重命名/删除的回归验证
+ * [OUTPUT]: 无工作区任务、问答行为标记、Agent 工作区约束、任务 mode 不可变、创作模式逐轮切换和重命名/删除的回归验证
  * [POS]: task-service 主进程权限边界的单元测试
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -50,9 +50,21 @@ describe("DesktopTaskService", () => {
 
     expect(snapshot).toMatchObject({ mode: "chat", skillId: "research", workspaceId: null })
     expect(() => service.authorizeTurn("chat-task", "chat", null, "research")).not.toThrow()
-    expect(() => service.authorizeTurn("chat-task", "chat", null, "writing")).toThrow(
-      "Skill 与已保存会话不一致",
-    )
+    expect(() => service.authorizeTurn("chat-task", "chat", null, "writing")).not.toThrow()
+    expect(
+      service.save(
+        {
+          id: "chat-task",
+          mode: "chat",
+          skillId: "writing",
+          status: "completed",
+          title: "普通对话",
+          workspaceId: null,
+          messages: snapshot.messages,
+        },
+        null,
+      ),
+    ).toMatchObject({ skillId: "writing" })
     expect(service.read("chat-task").messages[0]).toMatchObject({
       metadata: { modelId: "example/model" },
       parts: [

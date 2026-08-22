@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 已解析供应商连接、自动联网/思考策略、当前 Skill、完整 AI SDK UIMessage 历史、主进程注入的受限工作区能力与中止信号
- * [OUTPUT]: 同时承载供应商原生搜索、工作区读写、Skill instructions 与标准 toolApproval 的受限 AI SDK ToolLoopAgent 增量流
+ * [INPUT]: 已解析供应商连接、自动联网/思考策略、当前 Skill、完整 AI SDK UIMessage 历史、主进程注入的受限工作区/MCP 能力与中止信号
+ * [OUTPUT]: 同时承载供应商原生搜索、工作区读写、强制审批 MCP、Skill instructions 与标准 toolApproval 的受限 AI SDK ToolLoopAgent 增量流
  * [POS]: @tessera/ai/server 中可读并可经人工批准修改 Markdown 的工作区 Agent 编排边界
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -12,8 +12,8 @@
 
 import type { AgentRuntime } from "@tessera/agent-runtime"
 import type { AiChatStreamChunk } from "@tessera/contracts"
-import { ToolLoopAgent, createAgentUIStream, isStepCount, tool } from "ai"
-import type { InferUITools, UIMessage } from "ai"
+import { ToolLoopAgent, createAgentUIStream, dynamicTool, isStepCount, jsonSchema, tool } from "ai"
+import type { InferUITools, JSONSchema7, ToolSet, UIMessage } from "ai"
 import { z } from "zod"
 import { createAiSdkChatRuntime } from "./ai-sdk-runtime"
 import {
@@ -97,14 +97,27 @@ export type WorkspaceAgentTools = ReadonlyWorkspaceAgentTools & {
   ) => Promise<unknown>
 }
 
+export type ExternalAgentTool = Readonly<{
+  description: string
+  execute: (
+    input: unknown,
+    context: Readonly<{ signal: AbortSignal; toolCallId: string }>,
+  ) => Promise<unknown>
+  id: string
+  inputSchema: Record<string, unknown>
+  title: string
+}>
+
 export type AiAgentRuntimeOptions = Readonly<{
   abortSignal: AbortSignal
+  externalTools?: readonly ExternalAgentTool[]
   onChunk: (chunk: AiChatStreamChunk) => void | Promise<void>
   tools: WorkspaceAgentTools
   workspaceName: string
 }>
 
 export type AiSdkAgentRuntimeRequest = Readonly<{
+  externalTools?: readonly ExternalAgentTool[]
   input: AiChatRuntimeInput
   tools: WorkspaceAgentTools
   workspaceName: string
@@ -121,12 +134,13 @@ function agentInstructions(workspaceName: string, skillInstructions?: string) {
 5. 用户拒绝后不要在没有新要求或实质不同方案时重复提出同一修改。
 6. 工具返回冲突时重新读取文件并说明差异，不得覆盖磁盘新版本。
 7. 跨越很多文件、会明显挤占主对话上下文的独立研究可以委派给只读研究子 Agent；简单问题直接使用读取工具。
-8. 不能删除、重命名、运行 Shell 或扩大访问范围；工具返回截断或限制信息时明确说明。`
+8. 不能删除、重命名、运行 Shell 或扩大访问范围；工具返回截断或限制信息时明确说明。
+9. MCP 工具来自用户显式启用的外部服务器，每次执行都必须等待用户批准；不要用多个相似 MCP 调用绕过拒绝。`
   return skillInstructions ? `${instructions}\n\n${skillInstructions}` : instructions
 }
 
 async function* runAiSdkAgent(
-  { input, tools: workspaceTools, workspaceName }: AiSdkAgentRuntimeRequest,
+  { externalTools = [], input, tools: workspaceTools, workspaceName }: AiSdkAgentRuntimeRequest,
   abortSignal: AbortSignal,
 ): AsyncIterable<AiChatStreamChunk> {
   const runtime = createAiSdkChatRuntime(input, {
@@ -176,6 +190,21 @@ async function* runAiSdkAgent(
     maxOutputTokens: 2_048,
     stopWhen: isStepCount(5),
   })
+  const mcpTools = Object.fromEntries(
+    externalTools.map((externalTool) => [
+      externalTool.id,
+      dynamicTool({
+        description: `${externalTool.title}：${externalTool.description}`,
+        inputSchema: jsonSchema(externalTool.inputSchema as JSONSchema7),
+        needsApproval: true,
+        execute: (toolInput, options) =>
+          externalTool.execute(toolInput, {
+            signal: options.abortSignal ?? abortSignal,
+            toolCallId: options.toolCallId,
+          }),
+      }),
+    ]),
+  ) satisfies ToolSet
   const tools = {
     ...(runtime.tools ?? {}),
     ...readonlyTools,
@@ -205,6 +234,7 @@ async function* runAiSdkAgent(
           toolCallId: options.toolCallId,
         }),
     }),
+    ...mcpTools,
   }
   const agent = new ToolLoopAgent({
     model,
@@ -245,9 +275,12 @@ export const aiSdkAgentRuntime: AgentRuntime<AiSdkAgentRuntimeRequest, AiChatStr
 
 export async function streamAiAgent(
   input: AiChatRuntimeInput,
-  { abortSignal, onChunk, tools, workspaceName }: AiAgentRuntimeOptions,
+  { abortSignal, externalTools, onChunk, tools, workspaceName }: AiAgentRuntimeOptions,
 ): Promise<void> {
-  for await (const chunk of aiSdkAgentRuntime.run({ input, tools, workspaceName }, abortSignal)) {
+  for await (const chunk of aiSdkAgentRuntime.run(
+    { input, tools, workspaceName, ...(externalTools ? { externalTools } : {}) },
+    abortSignal,
+  )) {
     await onChunk(chunk)
   }
 }

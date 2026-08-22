@@ -19,6 +19,8 @@ import { agentRunsAndChangesMigration } from "./0004-agent-runs-and-changes"
 import { aiProviderConnectionsMigration } from "./0005-ai-provider-connections"
 import { taskSkillsMigration } from "./0006-task-skills"
 import { taskWaitingInputMigration } from "./0007-task-waiting-input"
+import { mcpServersMigration } from "./0008-mcp-servers"
+import { taskRunPolicyMigration } from "./0009-task-run-policy"
 import type { DatabaseMigration } from "./types"
 
 export type { DatabaseMigration } from "./types"
@@ -32,6 +34,8 @@ export const DATABASE_MIGRATIONS = [
   aiProviderConnectionsMigration,
   taskSkillsMigration,
   taskWaitingInputMigration,
+  mcpServersMigration,
+  taskRunPolicyMigration,
 ] as const satisfies readonly DatabaseMigration[]
 
 export type DatabaseMigrationId = (typeof DATABASE_MIGRATIONS)[number]["id"]

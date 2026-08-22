@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 当前工作区 ID 与预加载层的任务会话 API
- * [OUTPUT]: 独立任务自动使用 Chat、工作区任务自动使用 Agent 的创作模式草稿、历史恢复、重命名、删除和幂等保存操作
+ * [OUTPUT]: 独立任务与工作区任务的统一草稿、可逐轮切换的创作模式、历史恢复、重命名、删除和幂等保存操作
  * [POS]: 渲染层中工作区任务导航与对话持久化的单一状态入口
  * [DOC]: docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -291,7 +291,7 @@ export function useTasks(workspaceId: string | undefined) {
 
   const setActiveTaskSkill = useCallback((skillId: TaskSkillId) => {
     const task = activeTaskRef.current
-    if (task.persisted || task.messages.length > 0 || task.skillId === skillId) return
+    if (task.skillId === skillId) return
     const next = { ...task, skillId }
     activeTaskRef.current = next
     setActiveTask(next)

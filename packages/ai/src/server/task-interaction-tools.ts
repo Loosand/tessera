@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 当前任务 Skill 与模型对澄清问题、研究计划的结构化调用
  * [OUTPUT]: 仅用于核心语义消歧且每个用户请求最多出现一次的 request-user-input 工具，以及无副作用的 publish-research-plan 工具
- * [POS]: Chat streamText 与 ToolLoopAgent 共用的人机交互和研究展示工具集合
+ * [POS]: 所有 ToolLoopAgent 路径共用的人机交互和研究展示工具集合
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:

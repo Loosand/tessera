@@ -388,7 +388,6 @@ export function TaskPage({
       model={selectedModel}
       selectedModelKey={selectedModelKey}
       skillId={task.skillId}
-      skillLocked={task.persisted || chat.messages.length > 0}
       status={chat.status}
       notice={composerNotice}
       scope={agentScope}

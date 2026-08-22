@@ -20,6 +20,7 @@ export { default as ArrowUp01Icon } from "@hugeicons/core-free-icons/ArrowUp01Ic
 export { default as Attachment01Icon } from "@hugeicons/core-free-icons/Attachment01Icon"
 export { default as BookOpen01Icon } from "@hugeicons/core-free-icons/BookOpen01Icon"
 export { default as BrainCircuitIcon } from "@hugeicons/core-free-icons/BrainCircuitIcon"
+export { default as Cancel01Icon } from "@hugeicons/core-free-icons/Cancel01Icon"
 export { default as CancelCircleIcon } from "@hugeicons/core-free-icons/CancelCircleIcon"
 export { default as Chart01Icon } from "@hugeicons/core-free-icons/Chart01Icon"
 export { default as CheckmarkCircle02Icon } from "@hugeicons/core-free-icons/CheckmarkCircle02Icon"
@@ -77,3 +78,4 @@ export { default as TextBoldIcon } from "@hugeicons/core-free-icons/TextBoldIcon
 export { default as TextItalicIcon } from "@hugeicons/core-free-icons/TextItalicIcon"
 export { default as TextStrikethroughIcon } from "@hugeicons/core-free-icons/TextStrikethroughIcon"
 export { default as TextUnderlineIcon } from "@hugeicons/core-free-icons/TextUnderlineIcon"
+export { default as Wrench01Icon } from "@hugeicons/core-free-icons/Wrench01Icon"

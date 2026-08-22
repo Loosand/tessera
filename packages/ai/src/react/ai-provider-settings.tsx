@@ -18,19 +18,31 @@ import type {
 } from "@tessera/contracts"
 import {
   Add01Icon,
+  AiWebBrowsingIcon,
+  BrainCircuitIcon,
   CheckmarkCircle02Icon,
   Delete02Icon,
-  Edit02Icon,
   EyeIcon,
   EyeOffIcon,
+  ImageUpload01Icon,
   ListViewIcon,
+  Message01Icon,
   Refresh01Icon,
   Search01Icon,
+  Settings01Icon,
+  SourceCodeIcon,
+  Wrench01Icon,
 } from "@tessera/design-system/components/icons"
 import { Button } from "@tessera/design-system/components/ui/button"
-import { Icon } from "@tessera/design-system/components/ui/icon"
+import { Icon, type IconProps } from "@tessera/design-system/components/ui/icon"
 import { Input } from "@tessera/design-system/components/ui/input"
 import { Switch } from "@tessera/design-system/components/ui/switch"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@tessera/design-system/components/ui/tooltip"
 import {
   type ComponentType,
   type LazyExoticComponent,
@@ -423,6 +435,73 @@ function formatTokenLimit(value: number): string {
   return String(value)
 }
 
+type ModelCapabilityBadgeProps = {
+  icon: IconProps["icon"]
+  label: string
+  tone: "context" | "reasoning" | "structured" | "tool" | "vision" | "web"
+  value?: string
+}
+
+const MODEL_CAPABILITY_BADGE_TONES: Record<ModelCapabilityBadgeProps["tone"], string> = {
+  context: "bg-capability-context/10 text-capability-context",
+  reasoning: "bg-capability-reasoning/10 text-capability-reasoning",
+  structured: "bg-capability-structured/10 text-capability-structured",
+  tool: "bg-capability-tool/10 text-capability-tool",
+  vision: "bg-capability-vision/10 text-capability-vision",
+  web: "bg-capability-web/10 text-capability-web",
+}
+
+function ModelCapabilityBadge({ icon, label, tone, value }: ModelCapabilityBadgeProps) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        className={`flex h-6 shrink-0 items-center justify-center gap-1 rounded-full px-1.5 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/50 ${MODEL_CAPABILITY_BADGE_TONES[tone]}`}
+        aria-label={label}
+      >
+        <Icon icon={icon} size={13} strokeWidth={1.9} />
+        {value ? <span className="text-[9px] font-medium tabular-nums">{value}</span> : null}
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  )
+}
+
+function ModelCapabilityBadges({ model }: { model: AiProviderModelDraft }) {
+  const nativeWebSearch = model.endpointBindings?.some((binding) => binding.nativeWebSearch === "supported")
+  const acceptsImages = model.inputModalities?.includes("image")
+
+  return (
+    <TooltipProvider delay={250}>
+      <fieldset className="flex shrink-0 items-center gap-1">
+        <legend className="sr-only">模型能力</legend>
+        {model.contextWindow ? (
+          <ModelCapabilityBadge
+            icon={Message01Icon}
+            tone="context"
+            value={formatTokenLimit(model.contextWindow)}
+            label={`上下文窗口 ${formatTokenLimit(model.contextWindow)} Tokens`}
+          />
+        ) : null}
+        {acceptsImages ? (
+          <ModelCapabilityBadge icon={ImageUpload01Icon} tone="vision" label="支持图片输入" />
+        ) : null}
+        {model.capabilities?.reasoning === "supported" ? (
+          <ModelCapabilityBadge icon={BrainCircuitIcon} tone="reasoning" label="支持推理" />
+        ) : null}
+        {model.capabilities?.functionCall === "supported" ? (
+          <ModelCapabilityBadge icon={Wrench01Icon} tone="tool" label="支持工具调用与 Agent" />
+        ) : null}
+        {model.capabilities?.structuredOutput === "supported" ? (
+          <ModelCapabilityBadge icon={SourceCodeIcon} tone="structured" label="支持结构化输出" />
+        ) : null}
+        {nativeWebSearch ? (
+          <ModelCapabilityBadge icon={AiWebBrowsingIcon} tone="web" label="当前端点支持原生联网搜索" />
+        ) : null}
+      </fieldset>
+    </TooltipProvider>
+  )
+}
+
 type ProviderModelGroupProps = {
   disabled: boolean
   label: string
@@ -462,25 +541,17 @@ function ProviderModelGroup({
                   <code className="truncate font-mono text-[10px] text-muted-foreground">{model.id}</code>
                 ) : null}
               </div>
-              {model.ownedBy || model.modelType || model.contextWindow || model.maxOutputTokens ? (
+              {model.ownedBy || model.modelType || model.maxOutputTokens ? (
                 <p className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground">
                   {model.ownedBy ? <span>{model.ownedBy}</span> : null}
                   {model.modelType ? <span>{model.modelType}</span> : null}
-                  {model.contextWindow ? <span>上下文 {formatTokenLimit(model.contextWindow)}</span> : null}
                   {model.maxOutputTokens ? (
                     <span>最大输出 {formatTokenLimit(model.maxOutputTokens)}</span>
                   ) : null}
                 </p>
               ) : null}
-              <p className="mt-0.5 flex flex-wrap gap-x-2 text-[9px] text-muted-foreground">
-                {model.inputModalities?.length ? <span>输入 {model.inputModalities.join("/")}</span> : null}
-                {model.capabilities?.functionCall === "supported" ? <span>工具</span> : null}
-                {model.capabilities?.reasoning === "supported" ? <span>推理</span> : null}
-                {model.endpointBindings?.some((binding) => binding.nativeWebSearch === "supported") ? (
-                  <span>原生联网</span>
-                ) : null}
-              </p>
             </div>
+            <ModelCapabilityBadges model={model} />
             <Button
               variant="ghost"
               size="icon-sm"
@@ -489,7 +560,7 @@ function ProviderModelGroup({
               aria-label={`编辑模型 ${model.id}`}
               onClick={() => onEdit(model.id)}
             >
-              <Icon icon={Edit02Icon} size={14} />
+              <Icon icon={Settings01Icon} size={14} />
             </Button>
             <Switch
               checked={model.enabled}

@@ -24,6 +24,7 @@ export {
 export {
   type AiAgentRuntimeOptions,
   type AiSdkAgentRuntimeRequest,
+  type ExternalAgentTool,
   type ListWorkspaceFilesInput,
   type ReadonlyWorkspaceAgentTools,
   type ReadWorkspaceFileInput,

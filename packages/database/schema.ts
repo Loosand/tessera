@@ -1,6 +1,6 @@
 /**
- * [INPUT]: Tessera 对工作区索引、通用任务会话/创作方式、AI 供应商模型事实、Agent 运行检查点、变更审批和权限审计的持久化需求
- * [OUTPUT]: Drizzle SQLite 表、索引和可推导行类型，包括可恢复的任务等待输入标记（AI Key 仅保存 safeStorage 密文）
+ * [INPUT]: Tessera 对工作区索引、通用任务会话/创作方式、AI 供应商模型事实、MCP 服务器、逐轮执行策略、Agent 运行检查点、变更审批和权限审计的持久化需求
+ * [OUTPUT]: Drizzle SQLite 表、索引和可推导行类型，包括可恢复的任务等待输入标记与逐轮 mode/Skill/思考/联网快照（AI Key 与 MCP 凭据仅保存 safeStorage 密文）
  * [POS]: 数据库结构的类型事实源；不保存 Markdown 正文
  * [DOC]: docs/architecture/database.md
  *
@@ -151,6 +151,10 @@ export const taskRuns = sqliteTable(
     configId: text("config_id").notNull(),
     providerId: text("provider_id").notNull(),
     modelId: text("model_id").notNull(),
+    mode: text("mode", { enum: ["chat", "agent"] }),
+    skillId: text("skill_id", { enum: ["research", "writing", "question-answering"] }),
+    reasoning: text("reasoning", { enum: ["auto", "none", "low", "medium", "high"] }),
+    webSearch: integer("web_search", { mode: "boolean" }),
     status: text("status", {
       enum: ["running", "completed", "failed", "cancelled", "interrupted"],
     }).notNull(),
@@ -227,6 +231,34 @@ export const aiProviderConfigs = sqliteTable(
   (table) => [index("ai_provider_configs_provider_idx").on(table.providerId)],
 )
 
+export const mcpServerConfigs = sqliteTable(
+  "mcp_server_configs",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    transport: text("transport", { enum: ["stdio", "streamable-http", "sse"] }).notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
+    trusted: integer("trusted", { mode: "boolean" }).notNull().default(false),
+    command: text("command"),
+    argsJson: text("args_json").notNull().default("[]"),
+    url: text("url"),
+    timeoutMs: integer("timeout_ms").notNull().default(20_000),
+    envCiphertext: text("env_ciphertext"),
+    headersCiphertext: text("headers_ciphertext"),
+    disabledToolsJson: text("disabled_tools_json").notNull().default("[]"),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    check(
+      "mcp_server_configs_transport_check",
+      sql`${table.transport} IN ('stdio', 'streamable-http', 'sse')`,
+    ),
+    index("mcp_server_configs_enabled_idx").on(table.enabled),
+    index("mcp_server_configs_name_idx").on(table.name),
+  ],
+)
+
 export type Workspace = typeof workspaces.$inferSelect
 export type NewWorkspace = typeof workspaces.$inferInsert
 export type IndexedDocument = typeof documentIndex.$inferSelect
@@ -240,3 +272,5 @@ export type TaskRunEventRecord = typeof taskRunEvents.$inferSelect
 export type AgentChangeProposal = typeof agentChangeProposals.$inferSelect
 export type AiProviderConfigRecord = typeof aiProviderConfigs.$inferSelect
 export type NewAiProviderConfigRecord = typeof aiProviderConfigs.$inferInsert
+export type McpServerConfigRecord = typeof mcpServerConfigs.$inferSelect
+export type NewMcpServerConfigRecord = typeof mcpServerConfigs.$inferInsert

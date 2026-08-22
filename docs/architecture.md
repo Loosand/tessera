@@ -29,6 +29,11 @@ Tessera 管理本地工作区、文档、索引、Agent 权限和最终文件写
 Markdown 是正文事实源。SQLite 保存工作区登记、可重建索引和运行状态。编辑器、Agent 对话和数据库都不能持有
 无法从工作区恢复的正文唯一副本。
 
+目标产品只保留一个自然对话入口：每轮通过统一 Agent runtime 按需直接回答、联网、加载 Skill、创建文档或
+整理项目，Chat/Agent 不再是任务级产品模式。内容存储仍处于探索阶段；当前暂以“托管内容库中的 Markdown +
+SQLite 控制层”作为可逆实验基线，同时保留数据库正文和完全开放外部工作区两种候选。完整边界见
+[统一创作 Agent 与内容存储探索](architecture/unified-creation-agent.md)。
+
 ## 运行时边界
 
 ### 渲染层
@@ -37,7 +42,7 @@ Markdown 是正文事实源。SQLite 保存工作区登记、可重建索引和�
 - **已实现**：平台操作只通过 `packages/contracts` 定义的预加载接口调用。
 - **已实现**：渲染层 CSP 保持脚本与主动连接同源，只额外允许以无 Referer 的 HTTPS 图片请求加载联网搜索来源 favicon。
 - **已实现**：TipTap 与按需加载的 CodeMirror 6 源码表面共享同一份 Markdown 草稿、flush 和保存协议。
-- **部分实现**：主导航「新任务」与文档 AI 侧栏复用同一 TaskPage、流式协议和消息历史；界面只提供自动/研究/写作/问答创作模式，独立任务自动使用 Chat、工作区任务默认使用 Agent，并按模型事实派生思考、原生联网与工具能力。支持显式当前文档草稿/图片附件、来源、工具状态、停止、重试、文件引用跳转、任务/运行事件恢复和 Markdown 渲染 Diff 审批。
+- **部分实现**：主导航「新任务」与文档 AI 侧栏复用同一 TaskPage、流式协议和消息历史；界面只提供自动/研究/写作/问答创作模式，并支持显式当前文档草稿/图片附件、来源、工具状态、停止、重试、文件引用跳转、任务/运行事件恢复和 Markdown 渲染 Diff 审批。当前独立任务仍使用 Chat、工作区任务使用 Agent；统一 Agent runtime 与每轮动态模式属于下一阶段迁移。
 - **部分实现**：Agent 的只读范围、工具访问路径和失败状态使用独立可见语义；建议、权限请求和 Diff 仍需可审查界面。
 
 ### 主进程与核心层
@@ -47,15 +52,18 @@ Markdown 是正文事实源。SQLite 保存工作区登记、可重建索引和�
 - **已实现**：SQLite 随主进程生命周期打开和关闭，渲染层不持有连接。
 - **已实现**：AI 模型目录请求经类型化 IPC 进入主进程，具备 URL 校验、总超时、响应体上限和错误脱敏。
 - **规划**：采集、全文索引、权限、Diff 与审计通过核心服务暴露窄接口。
+- **规划（探索）**：当前混合基线由主进程领域服务协调内容库根目录、Inbox、项目创建、文档移动与 SQLite；模型只获得稳定 ID 和受限相对路径。领域工具必须保持后端无关，以便与数据库或完全外部工作区候选比较。
 - **规划**：所有出站请求记录目标、目的和数据范围。
 
 ### Agent 与 Skills
 
 - **已实现**：`AgentRuntime` 泛型端口已承载 AI SDK `ToolLoopAgent` 的类型化 `UIMessageChunk` 异步流、取消信号和审批事件；产品运行链路不再绕过独立端口。
+- **规划**：统一运行时遵守 AI SDK 标准优先：使用 `ToolLoopAgent`、call options / `prepareCall`、`prepareStep`、`stopWhen`、`toolApproval`、`InferAgentUIMessage`、`useChat` 与生命周期回调；Tessera 只维护 Electron transport、持久化恢复、领域资源和权限适配，`AgentRuntime` 保持薄端口。
 - **部分实现**：`@tessera/ai` 独立封装 OpenAI 兼容、Anthropic 兼容、DeepSeek、Grok 与 OpenRouter。已实现普通对话、供应商已验证的原生联网、受限工作区读写工具循环、AI SDK 标准工具审批和只读研究子 Agent；MCP、Shell 与 durable 自动续跑尚未接入。
+- **规划**：所有任务收敛到 `ToolLoopAgent`；`toolChoice = auto` 允许零工具直接回答，每轮策略根据用户意图、显式资源、已验证模型能力和权限决定 Skill 与工具集合。
 - **已实现**：Agent 工作区根目录只存在于主进程闭包；Markdown 列表、读取、搜索、当前文档和经批准写入统一执行真实路径、符号链接、文件类型、版本冲突与资源上限校验。Agent 只能获得请求期路由验证通过的供应商原生搜索，删除、重命名、Shell 和任意 MCP 保持不可达。
-- **部分实现**：`packages/skills` 已实现标准 `SKILL.md` 校验、内置/用户级/工作区级描述、权限声明和内置渐进式加载注册表；研究与写作正文只在当前任务选中后通过 AI SDK `instructions` 注入 Chat/Agent。用户级与工作区级发现、安装和版本仍待实现。
-- **已实现**：Skill 只描述工作流和所需资源，不提升任务权限；具体工具仍由 Chat/Agent 模式、模型能力、主进程边界与人工审批共同决定。
+- **部分实现**：`packages/skills` 已实现标准 `SKILL.md` 校验、内置/用户级/工作区级描述、权限声明和内置渐进式加载注册表；研究与写作正文当前按任务选择注入，目标迁移为按 `task_run` 动态选择和固化。用户级与工作区级发现、安装和版本仍待实现。
+- **已实现**：Skill 只描述工作流和所需资源，不提升任务权限；具体工具由运行策略、显式资源、模型能力、主进程边界与人工审批共同决定。
 - **规划**：Agent 对文件的修改以文本补丁提出，批准后由核心层写入。
 
 ## 已实现的数据流
@@ -105,6 +113,8 @@ Markdown 是正文事实源。SQLite 保存工作区登记、可重建索引和�
 ## 相关文档
 
 - [产品边界](product.md)
+- [统一创作 Agent 与内容存储探索](architecture/unified-creation-agent.md)
+- [任务会话与导航](architecture/task-navigation.md)
 - [编辑器与 Markdown](architecture/editor.md)
 - [本地数据库](architecture/database.md)
 - [本地版本历史与 Git 工作区支持](architecture/local-version-history-and-git-workspaces.md)

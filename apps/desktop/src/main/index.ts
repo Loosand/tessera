@@ -1,8 +1,8 @@
 /**
  * [INPUT]: Electron 生命周期、共享 IPC 契约、AI Chat/Agent/Skill 配置、Agent 变更服务、模型服务、safeStorage 与 Tessera 核心服务
- * [OUTPUT]: 受限工作区条目/Agent 工具、Skill 校验后的 SQLite 可恢复后台 AI 运行、Diff 审批、持久化 AI 配置/任务会话、关闭保存握手和桌面窗口
+ * [OUTPUT]: 受限工作区/MCP Agent 工具、Skill 校验后的 SQLite 可恢复后台 AI 运行、Diff/MCP 审批、持久化 AI/MCP 配置与任务会话、关闭保存握手和桌面窗口
  * [POS]: Electron 主进程入口与平台安全边界
- * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/database.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
+ * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/database.md、docs/architecture/mcp.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -59,12 +59,14 @@ import {
   app,
   clipboard,
   dialog,
+  safeStorage,
   shell,
 } from "electron"
 import { AgentChangeError, type AgentChangeService, createAgentChangeService } from "./agent-change-service"
 import { parseAiChatStreamEvent } from "./ai-chat-event"
 import { type DesktopAiService, createDesktopAiService } from "./ai-service"
 import { handleDesktopInvoke, onDesktopSend } from "./ipc-contract"
+import { McpConfigError, type McpService, createMcpService } from "./mcp-service"
 import { createReadonlyWorkspaceAgentTools } from "./read-only-agent-tools"
 import { type DesktopTaskService, createDesktopTaskService } from "./task-service"
 
@@ -88,6 +90,7 @@ let databaseClient: DatabaseClient | null = null
 let desktopAiService: DesktopAiService | null = null
 let desktopTaskService: DesktopTaskService | null = null
 let agentChangeService: AgentChangeService | null = null
+let mcpService: McpService | null = null
 let appQuitApproved = false
 let appQuitRequested = false
 
@@ -129,9 +132,20 @@ function requireAgentChangeService(): AgentChangeService {
   return agentChangeService
 }
 
+function requireMcpService(): McpService {
+  if (!mcpService) throw new McpConfigError("MCP 服务尚未就绪。")
+  return mcpService
+}
+
 function notifyAiProviderConfigsChanged() {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.webContents.isDestroyed()) window.webContents.send(IPC_CHANNELS.aiProviderConfigsChanged)
+  }
+}
+
+function notifyMcpServersChanged() {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.webContents.isDestroyed()) window.webContents.send(IPC_CHANNELS.mcpServersChanged)
   }
 }
 
@@ -153,8 +167,10 @@ async function streamAiTask(
     rootPath: workspace.rootPath,
     ...(input.currentDocumentPath ? { currentDocumentPath: input.currentDocumentPath } : {}),
   })
+  const externalTools = await requireMcpService().createAgentTools(options.abortSignal)
   return streamAiAgent(input, {
     ...options,
+    externalTools,
     workspaceName: workspace.name,
     tools: {
       ...readonlyTools,
@@ -636,6 +652,39 @@ function registerIpcHandlers() {
       }
     }
   })
+  handleDesktopInvoke(IPC_CHANNELS.mcpServerList, () => requireMcpService().listServers())
+  handleDesktopInvoke(IPC_CHANNELS.mcpServerSave, async (_event, input) => {
+    try {
+      return { ok: true, server: await requireMcpService().saveServer(input) }
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof McpConfigError ? error.message : "保存 MCP 服务器失败。",
+      }
+    }
+  })
+  handleDesktopInvoke(IPC_CHANNELS.mcpServerDelete, async (_event, serverId) => {
+    try {
+      await requireMcpService().deleteServer(serverId)
+      return { ok: true }
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof McpConfigError ? error.message : "删除 MCP 服务器失败。",
+      }
+    }
+  })
+  handleDesktopInvoke(IPC_CHANNELS.mcpServerTest, async (_event, serverId) => {
+    try {
+      const result = await requireMcpService().testServer(serverId)
+      return { ok: true, ...result }
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof McpConfigError ? error.message : "检测 MCP 服务器失败。",
+      }
+    }
+  })
   handleDesktopInvoke(IPC_CHANNELS.aiChatStart, async (event, input) => {
     try {
       if (activeAiChats.has(input.requestId)) {
@@ -677,6 +726,10 @@ function registerIpcHandlers() {
         configId: input.configId,
         providerId: input.providerId,
         modelId: input.modelId,
+        mode: input.mode,
+        skillId: input.skillId,
+        reasoning: input.reasoning,
+        webSearch: input.webSearch,
         startedAt: new Date(),
       })
 

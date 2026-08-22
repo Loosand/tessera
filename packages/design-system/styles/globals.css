@@ -37,6 +37,12 @@
   --code-background: #f6f7f8;
   --code-border: #e5e8eb;
   --selection: rgb(55 123 189 / 18%);
+  --capability-context: #7357c7;
+  --capability-reasoning: #8a63c7;
+  --capability-tool: #c46b1a;
+  --capability-web: #377bbd;
+  --capability-vision: #25875a;
+  --capability-structured: #8a5a1f;
   --sidebar: #fafafa;
   --sidebar-foreground: var(--foreground);
   --sidebar-primary: var(--primary);
@@ -75,6 +81,12 @@
   --code-background: #212121;
   --code-border: #343434;
   --selection: rgb(121 184 243 / 24%);
+  --capability-context: #a78bfa;
+  --capability-reasoning: #c4a7e7;
+  --capability-tool: #f0a45d;
+  --capability-web: #79b8f3;
+  --capability-vision: #65c995;
+  --capability-structured: #d6a45e;
   --sidebar: #141414;
   --sidebar-foreground: var(--foreground);
   --sidebar-primary: var(--primary);
@@ -111,6 +123,12 @@
   --color-link: var(--link);
   --color-code-background: var(--code-background);
   --color-code-border: var(--code-border);
+  --color-capability-context: var(--capability-context);
+  --color-capability-reasoning: var(--capability-reasoning);
+  --color-capability-tool: var(--capability-tool);
+  --color-capability-web: var(--capability-web);
+  --color-capability-vision: var(--capability-vision);
+  --color-capability-structured: var(--capability-structured);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);

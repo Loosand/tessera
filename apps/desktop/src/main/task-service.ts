@@ -1,6 +1,6 @@
 /**
- * [INPUT]: SQLite 任务仓储、显式可空 Skill/工作区归属、等待输入状态的跨进程任务输入与主进程当前工作区
- * [OUTPUT]: 任务列表/读取/保存/重命名/删除、等待输入恢复、工作区归属校验、版本化消息校验与运行前 mode/Skill/工作区授权
+ * [INPUT]: SQLite 任务仓储、可逐轮变化的显式可空 Skill、工作区归属、等待输入状态的跨进程任务输入与主进程当前工作区
+ * [OUTPUT]: 任务列表/读取/保存/重命名/删除、等待输入恢复、工作区归属校验、版本化消息校验与运行前 mode/逐轮 Skill/工作区授权
  * [POS]: Electron 主进程中的通用 Chat/Agent 任务会话领域服务
  * [DOC]: docs/architecture/database.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -257,7 +257,6 @@ export function createDesktopTaskService(client: DatabaseClient): DesktopTaskSer
       }
       const existing = findTaskSession(client, id)
       if (existing?.mode && existing.mode !== mode) throw new Error("任务创建后不能切换模式。")
-      if (existing && existing.skillId !== skillId) throw new Error("任务创建后不能切换 Skill。")
       if (existing && existing.workspaceId !== requestedWorkspaceId) {
         throw new Error("任务创建后不能更改绑定的工作区。")
       }
@@ -287,9 +286,7 @@ export function createDesktopTaskService(client: DatabaseClient): DesktopTaskSer
       const record = findTaskSession(client, validateTaskId(taskId))
       if (!record) throw new Error("请先创建任务再发送消息。")
       if (record.mode !== validateTaskMode(mode)) throw new Error("任务运行模式与已保存会话不一致。")
-      if (skillId !== undefined && record.skillId !== validateTaskSkillId(skillId)) {
-        throw new Error("任务 Skill 与已保存会话不一致。")
-      }
+      if (skillId !== undefined) validateTaskSkillId(skillId)
       if (record.mode === "agent" && record.workspaceId !== workspace?.id) {
         throw new Error("请先打开这个 Agent 任务绑定的工作区。")
       }

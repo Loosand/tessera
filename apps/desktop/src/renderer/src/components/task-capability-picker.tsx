@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 当前创作模式与任务锁定边界
+ * [INPUT]: 当前逐轮创作模式与生成状态
  * [OUTPUT]: 只暴露自动、研究、写作与问答意图的紧凑模式选择器
  * [POS]: task-composer 底部工具栏中的按需能力入口
  * [DOC]: design.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
@@ -28,7 +28,6 @@ import React, { useState } from "react"
 type TaskCapabilityPickerProps = Readonly<{
   running: boolean
   skillId: TaskSkillId
-  skillLocked: boolean
   onSkillChange: (skillId: TaskSkillId) => void
 }>
 
@@ -70,12 +69,7 @@ function skillLabel(skillId: TaskSkillId) {
   return TASK_SKILL_OPTIONS.find((option) => option.id === skillId)?.displayName ?? "自动"
 }
 
-export function TaskCapabilityPicker({
-  running,
-  skillId,
-  skillLocked,
-  onSkillChange,
-}: TaskCapabilityPickerProps) {
+export function TaskCapabilityPicker({ running, skillId, onSkillChange }: TaskCapabilityPickerProps) {
   const [open, setOpen] = useState(false)
   const currentSkillLabel = skillLabel(skillId)
 
@@ -127,7 +121,7 @@ export function TaskCapabilityPicker({
                   className="h-auto min-h-11 w-full justify-start gap-2 rounded-lg px-2 py-1.5 text-left font-normal data-[selected=true]:bg-muted/65"
                   data-selected={selected || undefined}
                   aria-pressed={selected}
-                  disabled={skillLocked || running}
+                  disabled={running}
                   onClick={() => {
                     onSkillChange(option.id)
                     setOpen(false)

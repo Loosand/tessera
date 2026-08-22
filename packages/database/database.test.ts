@@ -25,6 +25,12 @@ import { openDatabase } from "./client"
 import { DATABASE_MIGRATIONS, applyDatabaseMigrations } from "./migrations"
 import { foundationMigration } from "./migrations/0000-foundation"
 import { taskSessionsMigration } from "./migrations/0002-task-sessions"
+import {
+  deleteMcpServerConfigRecord,
+  findMcpServerConfigRecord,
+  listMcpServerConfigRecords,
+  upsertMcpServerConfigRecord,
+} from "./mcp-server-config-repository"
 import { appendTaskRunEvent, findLatestTaskRun, finishTaskRun, startTaskRun } from "./task-run-repository"
 import {
   deleteTaskSession,
@@ -56,6 +62,7 @@ describe("本地数据库基建", () => {
       "agent_sessions",
       "ai_provider_configs",
       "document_index",
+      "mcp_server_configs",
       "permission_decisions",
       "task_messages",
       "task_run_events",
@@ -367,6 +374,10 @@ describe("本地数据库基建", () => {
       taskId: "run-task",
       providerId: "deepseek",
       modelId: "deepseek-chat",
+      mode: "chat",
+      skillId: "research",
+      reasoning: "high",
+      webSearch: true,
       startedAt: new Date(200),
     })
     appendTaskRunEvent(client, {
@@ -385,6 +396,10 @@ describe("本地数据库基建", () => {
       requestId: "run-request",
       status: "completed",
       lastSequence: 2,
+      mode: "chat",
+      skillId: "research",
+      reasoning: "high",
+      webSearch: true,
       events: [{ sequence: 1 }, { sequence: 2 }],
     })
     client.close()
@@ -423,6 +438,54 @@ describe("本地数据库基建", () => {
 
     deleteAiProviderConfigRecord(client, "openrouter")
     expect(findAiProviderConfigRecord(client, "openrouter")).toBeNull()
+    client.close()
+  })
+
+  test("MCP 服务器配置只持久化密文并支持幂等更新和删除", () => {
+    const client = openDatabase({ path: ":memory:" })
+    upsertMcpServerConfigRecord(client, {
+      id: "filesystem",
+      name: "Filesystem",
+      description: "本地文件服务",
+      transport: "stdio",
+      enabled: false,
+      trusted: true,
+      command: "npx",
+      argsJson: '["-y","@modelcontextprotocol/server-filesystem","/tmp"]',
+      url: null,
+      timeoutMs: 15_000,
+      envCiphertext: "encrypted-env",
+      headersCiphertext: null,
+      disabledToolsJson: '["write_file"]',
+      updatedAt: new Date(100),
+    })
+    upsertMcpServerConfigRecord(client, {
+      id: "filesystem",
+      name: "Filesystem MCP",
+      description: "本地文件服务",
+      transport: "stdio",
+      enabled: true,
+      trusted: true,
+      command: "npx",
+      argsJson: '["-y","@modelcontextprotocol/server-filesystem","/tmp"]',
+      url: null,
+      timeoutMs: 20_000,
+      envCiphertext: "encrypted-env",
+      headersCiphertext: null,
+      disabledToolsJson: "[]",
+      updatedAt: new Date(200),
+    })
+
+    expect(listMcpServerConfigRecords(client)).toHaveLength(1)
+    expect(findMcpServerConfigRecord(client, "filesystem")).toMatchObject({
+      name: "Filesystem MCP",
+      enabled: true,
+      envCiphertext: "encrypted-env",
+      updatedAt: new Date(200),
+    })
+
+    deleteMcpServerConfigRecord(client, "filesystem")
+    expect(findMcpServerConfigRecord(client, "filesystem")).toBeNull()
     client.close()
   })
 
