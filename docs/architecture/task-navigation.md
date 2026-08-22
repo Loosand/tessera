@@ -2,7 +2,7 @@
 
 > 代码源头：`packages/contracts/src/index.ts`、`packages/database/schema.ts`、
 > `packages/database/task-session-repository.ts`、`apps/desktop/src/main/task-service.ts`、
-> `apps/desktop/src/main/read-only-agent-tools.ts`、`packages/skills/src/index.ts`、`packages/ai/src/server/agent-runtime.ts`、
+> `apps/desktop/src/main/read-only-agent-tools.ts`、`apps/desktop/src/main/mcp-service.ts`、`packages/skills/src/index.ts`、`packages/ai/src/server/agent-runtime.ts`、
 > `packages/ai/src/server/task-interaction-tools.ts`、`packages/ai/src/react/use-electron-chat.ts`、`apps/desktop/src/main/index.ts`、
 > `apps/desktop/src/renderer/src/hooks/use-tasks.ts`、`apps/desktop/src/renderer/src/components/app-shell.tsx`、
 > `apps/desktop/src/renderer/src/components/task-page.tsx`、
@@ -10,7 +10,7 @@
 > `apps/desktop/src/renderer/src/components/task-capability-picker.tsx`、
 > `apps/desktop/src/renderer/src/components/chat-parts/`
 >
-> 状态：部分实现。无工作区与工作区任务均已切换 AI SDK `ToolLoopAgent`，逐轮显式 Skill、基础运行策略快照、客户端问题暂停/续跑、研究计划、Markdown Diff 审批、任务运行事件恢复和消息历史已实现；单一动态 Agent 定义、自动意图路由、动态资源关联、项目创建/移动工具、Shell、MCP、真正跨进程续跑与多窗口接管尚未实现。
+> 状态：部分实现。无工作区与工作区任务均已切换 AI SDK `ToolLoopAgent`，并共用类型化 call options / `prepareCall` 动态配置；逐轮显式 Skill、受信任 RunPolicy、资源摘要、客户端问题暂停/续跑、研究计划、Markdown Diff 审批、MCP 逐次审批、任务运行事件恢复和消息历史已实现。自动意图路由、动态资源关联、项目创建/移动工具、Shell、真正跨进程续跑与多窗口接管尚未实现。
 
 ## 地位
 
@@ -47,7 +47,7 @@
 `task_sessions` 保存兼容 mode、下一轮可选 `skill_id` 默认值、可选工作区、标题、状态、等待输入标记与时间；`task_messages` 按序保存应用自有的版本化消息 JSON。由于已发布迁移中的旧状态列带固定 `CHECK`，`waiting-input` 在物理层兼容编码为 `status = running` 加 `waiting_for_input = 1`，仓储读写时统一映射为公开状态；后续迁移不重写用户已有表。
 消息契约保留正文、reasoning、来源、附件、工具状态、审批状态以及助手消息使用的供应商和模型。当前 Markdown 草稿以 `text/markdown` Data URL 作为可见用户附件持久化，单份限制 256 KiB；服务端在模型转换前解码并包入明确的“材料而非系统指令”边界，避免依赖供应商对文本文件的兼容性。图片继续保留原文件 Part。
 模型运行输入使用经主进程校验的完整 `UIMessage` 历史，再由 AI SDK `convertToModelMessages` 转换；工具结果与审批响应可以进入下一轮，应用元数据仍不会自动变成模型正文。
-主进程校验 IPC 请求中的本轮 Skill，但不再要求它等于会话默认值；当前 Skill 正文通过 AI SDK `instructions` 注入，不伪装为用户消息，也不把未选中 Skill 放入模型上下文。`0009-task-run-policy` 在模型调用前保存本轮 mode、Skill、思考和联网策略，旧 run 的新增字段保持未知而不伪造历史。
+主进程校验 IPC 请求中的本轮 Skill，但不再要求它等于会话默认值；当前 Skill 正文通过 AI SDK call options 注入 `instructions`，不伪装为用户消息，也不把未选中 Skill 放入模型上下文。renderer 不再发送联网/推理开关，主进程按持久化模型事实生成实际 RunPolicy；`0009-task-run-policy` 保留可查询兼容列，`0010-task-run-context` 保存完整策略与不含正文/绝对路径的资源摘要，旧 run 的新增字段保持未知而不伪造历史。
 
 目标持久化采用向前兼容迁移：保留已发布的 `task_sessions.mode`、`skill_id` 和 `workspace_id` 供旧任务恢复；新运行把实际策略固化到 `task_runs`，并通过规划中的 `task_resource_bindings` / `artifacts` 记录动态资源。旧列不原地重写，Markdown 正文也不迁入任务数据库。
 
@@ -137,7 +137,7 @@
 
 生成运行归主进程所有，不归 `TaskPage`、React 路由或某次 `ReadableStream` 订阅所有。renderer 离开任务页、组件卸载或 AI SDK 关闭本地响应流时，只移除当前事件订阅；用户点击停止时，Transport 先调用独立的取消 IPC，再停止 AI SDK 本地状态机。任务删除、窗口销毁和应用退出也会中止对应运行。
 
-每个主进程事件都携带 `taskId`、`requestId` 与单调递增的 `sequence`，并追加到该运行的内存事件日志。任务页使用 AI SDK `resume: true`：返回页面时先建立实时订阅，再请求 `resumeAiChat(taskId)` 快照，按序重放快照和请求期间收到的实时事件，并用 sequence 去重，最后继续消费实时增量。
+每个主进程事件都携带 `taskId`、`requestId` 与单调递增的 `sequence`，并追加到该运行的内存事件日志。只有已持久化任务挂载时启用 AI SDK `resume`：返回页面先建立实时订阅，再请求 `resumeAiChat(taskId)` 快照，按序重放快照和请求期间收到的实时事件，并用 sequence 去重，最后继续消费实时增量。尚未首次发送的内存草稿不请求恢复；主进程遇到不存在的任务或没有活动流时正常返回空结果，不进入错误状态。
 
 ```text
 页面 A 开始生成
@@ -153,7 +153,7 @@
 
 ## 工作区 Agent 运行时
 
-- AI SDK `ToolLoopAgent` 通过 `@tessera/agent-runtime` 的泛型 `AgentRuntime` 端口运行；主 Agent 获得共享客户端问题工具，以及四个只读 Markdown 工具、一个需要审批的写工具和一个只读研究子 Agent 工具；研究 Skill 额外获得无副作用的计划展示工具。根路径不进入 IPC、renderer 或模型提示词，结构化交互工具也不扩大文件或网络权限。
+- AI SDK `ToolLoopAgent` 通过 `@tessera/agent-runtime` 的泛型 `AgentRuntime` 端口运行；主 Agent 获得共享客户端问题工具，以及四个只读 Markdown 工具、一个需要审批的写工具、一个只读研究子 Agent 工具和主进程按当前配置注入的 MCP 动态工具；研究 Skill 额外获得无副作用的计划展示工具。根路径和 MCP 秘密不进入 IPC、renderer 或模型提示词，结构化交互工具也不扩大文件或网络权限。
 - 工具只遍历可见的 `.md` / `.markdown`，忽略隐藏目录、`.git`、`.tessera`、`node_modules` 和遍历时遇到的符号链接。
 - 每次直接读取都会重新执行相对路径、真实路径与扩展名校验；`../`、绝对路径、隐藏路径和指向工作区外部的符号链接均不可用。当前文档只作为相对路径提示传入，读取时执行相同校验。
 - 单文件读取上限为 256 KiB；文件列表最多返回 500 项、最多扫描 2,000 项；搜索最多扫描 8 MiB 并返回 100 个匹配，触顶时返回结构化 `truncated`、上限和跳过文件信息。
@@ -164,13 +164,14 @@
 - `write-workspace-document` 使用 AI SDK `toolApproval`。工具 `inputSchema` 保持供应商兼容的顶层 `type: object`，并在运行时继续要求 update 携带读取时的版本与内容哈希；审批请求到达 renderer 前，主进程把路径、基准内容/版本、完整候选内容、模型与工具调用冻结到 SQLite；聊天内可切换渲染后文档和源码 Diff。
 - 批准后的新 turn 携带完整审批 Part；主进程对账冻结提案后，工具再次校验真实路径、内容哈希和磁盘版本并原子替换。拒绝不执行，冲突不覆盖，应用重启不会自动执行待审批写入。
 - `delegate-workspace-research` 按 AI SDK 子 Agent 模式运行独立只读上下文，只把摘要返回主 Agent；子 Agent 没有写工具或审批能力。
-- 删除、重命名、Shell 和 MCP 外部工具仍未注册；它们需要独立权限与配置面，不能借用 Markdown 写审批扩大能力。
+- MCP 工具只来自显式信任且启用的服务器，并经过逐工具禁用清单；每个工具固定使用 AI SDK 标准人工审批，批准后的下一轮再次核对服务器与工具仍启用。MCP annotations 只提示风险，不能自动批准；秘密和输出限制由主进程边界处理，完整设计见 [MCP 服务器与 Agent 工具边界](mcp.md)。
+- 删除、重命名和 Shell 仍未注册；它们需要独立权限与配置面，不能借用 Markdown 写审批或 MCP 信任扩大能力。
 
 ## 后续
 
-- 按[统一创作 Agent 与内容存储探索](unified-creation-agent.md)把当前两套 `ToolLoopAgent` 工具装配收敛为类型化 call options / `prepareCall`，再迁移动态资源关联。
+- 在现有共用 `task-agent.ts` 与受信任 RunPolicy 上增加自动意图识别和规范化动态资源关联；任何扩展继续通过 AI SDK call options / `prepareCall` 收窄，不复制 Agent loop。
 - 以托管内容库 Inbox 作为当前实验实现 Artifact、项目创建和跨工作区文档移动，同时保持领域协议可替换，以便评估数据库与完全外部工作区方案。
 - 记录完成原因、token 用量和每轮耗时。
 - 为长会话增加上下文裁剪或摘要，但不改写持久化的用户原文。
 - 为中断的 Agent 增加桌面 durable 步骤检查点，在不重放已执行副作用的前提下自动续跑。
-- 建设 MCP 服务器配置/权限网关与 Shell 独立审批面；默认保持关闭。
+- 把 MCP Resources / Prompts / OAuth、按任务绑定与运行策略快照接入现有权限网关；建设 Shell 独立审批面，默认保持关闭。

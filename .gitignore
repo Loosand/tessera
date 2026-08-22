@@ -6,6 +6,7 @@ out/
 coverage/
 artifacts/
 *.log
+.devtools/
 
 # 仅限本地的文件。
 /.local

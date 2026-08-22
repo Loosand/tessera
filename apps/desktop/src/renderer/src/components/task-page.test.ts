@@ -34,7 +34,7 @@ describe("任务自动能力策略", () => {
   it("研究模式使用具备深度思考和原生搜索的端点", () => {
     expect(resolveAutomaticTaskExecution("research", "chat", deepSeekModel())).toMatchObject({
       capabilities: { reasoning: "supported" },
-      endpointType: "openai-responses",
+      endpointType: "anthropic-messages",
       issues: [],
       searchRoute: "provider-native",
     })

@@ -1,6 +1,6 @@
 /**
- * [INPUT]: Tessera 对工作区索引、通用任务会话/创作方式、AI 供应商模型事实、MCP 服务器、逐轮执行策略、Agent 运行检查点、变更审批和权限审计的持久化需求
- * [OUTPUT]: Drizzle SQLite 表、索引和可推导行类型，包括可恢复的任务等待输入标记与逐轮 mode/Skill/思考/联网快照（AI Key 与 MCP 凭据仅保存 safeStorage 密文）
+ * [INPUT]: Tessera 对内容库/托管工作区、动态资源、Artifact、项目操作、通用任务会话/创作方式、AI 供应商模型事实、MCP 服务器、用户 Skill、完整逐轮执行策略/资源摘要、AI SDK 生命周期指标、Agent 运行检查点、变更审批和权限审计的持久化需求
+ * [OUTPUT]: Drizzle SQLite 表、索引和可推导行类型，包括不含 Markdown 正文的统一内容控制层、用户 Skill 安装目录、可恢复任务状态、逐轮 RunPolicy/资源上下文摘要与完成原因/Token/耗时指标（AI Key 与 MCP 凭据仅保存 safeStorage 密文）
  * [POS]: 数据库结构的类型事实源；不保存 Markdown 正文
  * [DOC]: docs/architecture/database.md
  *
@@ -15,6 +15,22 @@ import { check, index, integer, sqliteTable, text, uniqueIndex } from "drizzle-o
 
 const createdAt = integer("created_at", { mode: "timestamp_ms" }).notNull().default(sql`(unixepoch() * 1000)`)
 
+export const contentLibraries = sqliteTable(
+  "content_libraries",
+  {
+    id: text("id").primaryKey(),
+    rootPath: text("root_path").notNull(),
+    displayName: text("display_name").notNull(),
+    createdAt,
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    revokedAt: integer("revoked_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [
+    uniqueIndex("content_libraries_root_path_unique").on(table.rootPath),
+    index("content_libraries_updated_idx").on(table.updatedAt),
+  ],
+)
+
 export const workspaces = sqliteTable(
   "workspaces",
   {
@@ -24,8 +40,19 @@ export const workspaces = sqliteTable(
     createdAt,
     lastOpenedAt: integer("last_opened_at", { mode: "timestamp_ms" }).notNull(),
     hiddenAt: integer("hidden_at", { mode: "timestamp_ms" }),
+    storageKind: text("storage_kind", {
+      enum: ["external", "managed-inbox", "managed-project"],
+    })
+      .notNull()
+      .default("external"),
+    contentLibraryId: text("content_library_id").references(() => contentLibraries.id, {
+      onDelete: "set null",
+    }),
   },
-  (table) => [uniqueIndex("workspaces_root_path_unique").on(table.rootPath)],
+  (table) => [
+    uniqueIndex("workspaces_root_path_unique").on(table.rootPath),
+    index("workspaces_content_library_idx").on(table.contentLibraryId, table.storageKind),
+  ],
 )
 
 export const documentIndex = sqliteTable(
@@ -102,7 +129,7 @@ export const taskSessions = sqliteTable(
     mode: text("mode", { enum: ["chat", "agent"] })
       .notNull()
       .default("chat"),
-    skillId: text("skill_id", { enum: ["research", "writing", "question-answering"] }),
+    skillId: text("skill_id"),
     workspaceId: text("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }),
     title: text("title").notNull(),
     status: text("status", {
@@ -152,9 +179,26 @@ export const taskRuns = sqliteTable(
     providerId: text("provider_id").notNull(),
     modelId: text("model_id").notNull(),
     mode: text("mode", { enum: ["chat", "agent"] }),
-    skillId: text("skill_id", { enum: ["research", "writing", "question-answering"] }),
+    skillId: text("skill_id"),
     reasoning: text("reasoning", { enum: ["auto", "none", "low", "medium", "high"] }),
     webSearch: integer("web_search", { mode: "boolean" }),
+    policyJson: text("policy_json"),
+    resourceSummaryJson: text("resource_summary_json"),
+    sdkCallId: text("sdk_call_id"),
+    finishReason: text("finish_reason"),
+    rawFinishReason: text("raw_finish_reason"),
+    inputTokens: integer("input_tokens"),
+    cacheReadTokens: integer("cache_read_tokens"),
+    cacheWriteTokens: integer("cache_write_tokens"),
+    outputTokens: integer("output_tokens"),
+    reasoningTokens: integer("reasoning_tokens"),
+    totalTokens: integer("total_tokens"),
+    stepCount: integer("step_count"),
+    toolCallCount: integer("tool_call_count"),
+    timeToFirstOutputMs: integer("time_to_first_output_ms"),
+    modelDurationMs: integer("model_duration_ms"),
+    toolDurationMs: integer("tool_duration_ms"),
+    durationMs: integer("duration_ms"),
     status: text("status", {
       enum: ["running", "completed", "failed", "cancelled", "interrupted"],
     }).notNull(),
@@ -216,6 +260,84 @@ export const agentChangeProposals = sqliteTable(
   ],
 )
 
+export const taskResourceBindings = sqliteTable(
+  "task_resource_bindings",
+  {
+    id: text("id").primaryKey(),
+    taskId: text("task_id")
+      .notNull()
+      .references(() => taskSessions.id, { onDelete: "cascade" }),
+    runId: text("run_id").references(() => taskRuns.requestId, { onDelete: "cascade" }),
+    resourceType: text("resource_type", {
+      enum: ["attachment", "document", "project"],
+    }).notNull(),
+    resourceId: text("resource_id").notNull(),
+    role: text("role", { enum: ["context", "output", "scope"] }).notNull(),
+    createdAt,
+  },
+  (table) => [
+    uniqueIndex("task_resource_bindings_unique").on(
+      table.taskId,
+      table.runId,
+      table.resourceType,
+      table.resourceId,
+      table.role,
+    ),
+    index("task_resource_bindings_task_created_idx").on(table.taskId, table.createdAt),
+    index("task_resource_bindings_run_idx").on(table.runId),
+  ],
+)
+
+export const artifacts = sqliteTable(
+  "artifacts",
+  {
+    id: text("id").primaryKey(),
+    taskId: text("task_id")
+      .notNull()
+      .references(() => taskSessions.id, { onDelete: "cascade" }),
+    runId: text("run_id")
+      .notNull()
+      .references(() => taskRuns.requestId, { onDelete: "cascade" }),
+    documentId: text("document_id").notNull(),
+    relation: text("relation", { enum: ["created", "imported", "updated"] }).notNull(),
+    status: text("status", { enum: ["active", "missing"] })
+      .notNull()
+      .default("active"),
+    createdAt,
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("artifacts_run_document_relation_unique").on(table.runId, table.documentId, table.relation),
+    index("artifacts_task_updated_idx").on(table.taskId, table.updatedAt),
+    index("artifacts_document_idx").on(table.documentId),
+  ],
+)
+
+export const workspaceOperations = sqliteTable(
+  "workspace_operations",
+  {
+    id: text("id").primaryKey(),
+    taskId: text("task_id")
+      .notNull()
+      .references(() => taskSessions.id, { onDelete: "cascade" }),
+    runId: text("run_id").references(() => taskRuns.requestId, { onDelete: "set null" }),
+    operation: text("operation", {
+      enum: ["create-document", "create-project", "move-documents", "inspect-project"],
+    }).notNull(),
+    status: text("status", { enum: ["applied", "conflict", "failed"] }).notNull(),
+    parametersJson: text("parameters_json").notNull(),
+    resultJson: text("result_json"),
+    recoveryJson: text("recovery_json"),
+    errorMessage: text("error_message"),
+    createdAt,
+    completedAt: integer("completed_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("workspace_operations_task_created_idx").on(table.taskId, table.createdAt),
+    index("workspace_operations_run_idx").on(table.runId),
+  ],
+)
+
 export const aiProviderConfigs = sqliteTable(
   "ai_provider_configs",
   {
@@ -259,8 +381,29 @@ export const mcpServerConfigs = sqliteTable(
   ],
 )
 
+export const userSkillConfigs = sqliteTable(
+  "user_skill_configs",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    description: text("description").notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    fileCount: integer("file_count").notNull(),
+    totalBytes: integer("total_bytes").notNull(),
+    installedAt: integer("installed_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("user_skill_configs_name_unique").on(table.name),
+    index("user_skill_configs_enabled_idx").on(table.enabled),
+    index("user_skill_configs_name_idx").on(table.name),
+  ],
+)
+
 export type Workspace = typeof workspaces.$inferSelect
 export type NewWorkspace = typeof workspaces.$inferInsert
+export type ContentLibrary = typeof contentLibraries.$inferSelect
+export type NewContentLibrary = typeof contentLibraries.$inferInsert
 export type IndexedDocument = typeof documentIndex.$inferSelect
 export type AgentSession = typeof agentSessions.$inferSelect
 export type AgentEventRecord = typeof agentEvents.$inferSelect
@@ -270,7 +413,12 @@ export type TaskMessageRecord = typeof taskMessages.$inferSelect
 export type TaskRun = typeof taskRuns.$inferSelect
 export type TaskRunEventRecord = typeof taskRunEvents.$inferSelect
 export type AgentChangeProposal = typeof agentChangeProposals.$inferSelect
+export type TaskResourceBindingRecord = typeof taskResourceBindings.$inferSelect
+export type ArtifactRecord = typeof artifacts.$inferSelect
+export type WorkspaceOperationRecord = typeof workspaceOperations.$inferSelect
 export type AiProviderConfigRecord = typeof aiProviderConfigs.$inferSelect
 export type NewAiProviderConfigRecord = typeof aiProviderConfigs.$inferInsert
 export type McpServerConfigRecord = typeof mcpServerConfigs.$inferSelect
 export type NewMcpServerConfigRecord = typeof mcpServerConfigs.$inferInsert
+export type UserSkillConfigRecord = typeof userSkillConfigs.$inferSelect
+export type NewUserSkillConfigRecord = typeof userSkillConfigs.$inferInsert

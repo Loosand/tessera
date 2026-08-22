@@ -1,6 +1,6 @@
 /**
  * [INPUT]: SQLite 任务仓储、可逐轮变化的显式可空 Skill、工作区归属、等待输入状态的跨进程任务输入与主进程当前工作区
- * [OUTPUT]: 任务列表/读取/保存/重命名/删除、等待输入恢复、工作区归属校验、版本化消息校验与运行前 mode/逐轮 Skill/工作区授权
+ * [OUTPUT]: 任务列表/必需或可选读取/保存/重命名/删除、等待输入恢复、工作区归属校验、版本化消息校验与运行前 mode/逐轮 Skill/工作区授权
  * [POS]: Electron 主进程中的通用 Chat/Agent 任务会话领域服务
  * [DOC]: docs/architecture/database.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -12,7 +12,6 @@
 
 import {
   AI_PROVIDER_IDS,
-  TASK_SKILL_IDS,
   type TaskMessage,
   type TaskMessagePart,
   type TaskMode,
@@ -23,6 +22,7 @@ import {
   type TaskSkillId,
   type TaskToolState,
   type WorkspaceInfo,
+  isTaskSkillId,
 } from "@tessera/contracts"
 import {
   type DatabaseClient,
@@ -84,8 +84,7 @@ function validateTaskMode(value: unknown): TaskMode {
 }
 
 function validateTaskSkillId(value: unknown): TaskSkillId {
-  if (value === null) return null
-  if (!isStringValue(TASK_SKILL_IDS, value)) throw new Error("任务 Skill 无效。")
+  if (!isTaskSkillId(value)) throw new Error("任务 Skill 无效。")
   return value
 }
 
@@ -225,6 +224,7 @@ export type DesktopTaskService = {
   readonly listRecent: () => TaskSessionSummary[]
   readonly listWorkspace: (workspaceId: string) => TaskSessionSummary[]
   readonly read: (taskId: string) => TaskSessionSnapshot
+  readonly readIfExists: (taskId: string) => TaskSessionSnapshot | null
   readonly rename: (taskId: string, title: string) => TaskSessionSummary
   readonly save: (input: TaskSessionSaveInput, workspace: WorkspaceInfo | null) => TaskSessionSnapshot
 }
@@ -237,6 +237,10 @@ export function createDesktopTaskService(client: DatabaseClient): DesktopTaskSer
       const record = findTaskSession(client, validateTaskId(taskId))
       if (!record) throw new Error("找不到这个任务。")
       return toTaskSnapshot(record)
+    },
+    readIfExists: (taskId) => {
+      const record = findTaskSession(client, validateTaskId(taskId))
+      return record ? toTaskSnapshot(record) : null
     },
     rename: (taskId, title) => {
       const record = renameTaskSession(client, validateTaskId(taskId), validateTaskTitle(title))

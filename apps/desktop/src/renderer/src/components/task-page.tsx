@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 隐式执行模式/创作方式的任务快照、可选工作区/当前文档草稿、页面或侧栏表面、导航回调、AI 模型与 Electron useChat Transport
- * [OUTPUT]: 主任务与文档侧栏共用的首次发送懒创建、显式文档上下文、自动能力策略、流式恢复、Agent Diff 审批和持续保存会话表面
+ * [OUTPUT]: 主任务与文档侧栏共用的首次发送懒创建、显式文档上下文、同源 RunPolicy 预检、流式恢复、Agent Diff 审批和持续保存会话表面
  * [POS]: Tessera 主任务页与文档 AI 侧栏共用的单一对话实现
  * [DOC]: design.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -10,10 +10,14 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import { type AiModelExecution, aiModelExecutionIssueMessage, resolveAiModelExecution } from "@tessera/ai"
+import {
+  type AiModelExecution,
+  type TaskRunPolicyResolution,
+  resolveTaskRunPolicy,
+  taskRunPolicyIssueMessage,
+} from "@tessera/ai"
 import { type UIMessage, hasPendingTaskUserInput, toTaskMessages, useElectronChat } from "@tessera/ai/react"
 import {
-  type AiChatReasoning,
   type DocumentSnapshot,
   REQUEST_USER_INPUT_TOOL_NAME,
   type TaskMessage,
@@ -31,7 +35,12 @@ import {
   MessageScrollerViewport,
 } from "@tessera/design-system/components/ui/message-scroller"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { type AvailableAiModel, useAiModels } from "../hooks/use-ai-models"
+import {
+  type AvailableAiModel,
+  readPreferredAiModelKey,
+  rememberPreferredAiModelKey,
+  useAiModels,
+} from "../hooks/use-ai-models"
 import type { ActiveTask } from "../hooks/use-tasks"
 import { ChatMessage } from "./chat-message"
 import { aiModelKey } from "./model-picker"
@@ -43,7 +52,6 @@ const MAX_IMAGE_BYTES = 8 * 1024 * 1024
 const MAX_CONTEXT_DOCUMENT_BYTES = 256 * 1024
 
 type TaskPageProps = Readonly<{
-  active: boolean
   currentDocument?: DocumentSnapshot | null
   currentDocumentContent?: string | undefined
   defaultAttachCurrentDocument?: boolean
@@ -85,28 +93,22 @@ export function resolveAutomaticTaskExecution(
   mode: ActiveTask["mode"],
   model: AvailableAiModel | undefined,
 ): AiModelExecution | null {
-  if (!model) return null
-  const resolve = (webSearch: boolean) =>
-    resolveAiModelExecution({
-      baseUrl: model.baseUrl,
-      mode,
-      model,
-      providerId: model.providerId,
-      webSearch,
-    })
-  if (skillId === "question-answering") return resolve(false)
-
-  const onlineExecution = resolve(true)
-  if (skillId === "research" || onlineExecution.issues.length === 0) return onlineExecution
-  return resolve(false)
+  return resolveAutomaticTaskRunPolicy(skillId, mode, model)?.execution ?? null
 }
 
-function automaticReasoning(
+export function resolveAutomaticTaskRunPolicy(
   skillId: ActiveTask["skillId"],
-  execution: AiModelExecution | null,
-): AiChatReasoning {
-  if (skillId === "question-answering") return "auto"
-  return execution?.capabilities.reasoning === "supported" ? "high" : "auto"
+  mode: ActiveTask["mode"],
+  model: AvailableAiModel | undefined,
+): TaskRunPolicyResolution | null {
+  if (!model) return null
+  return resolveTaskRunPolicy({
+    baseUrl: model.baseUrl,
+    mode,
+    model,
+    providerId: model.providerId,
+    skillId,
+  })
 }
 
 function taskTitle(prompt: string, images: ComposerImage[]) {
@@ -147,7 +149,6 @@ function shouldOmitRunningAssistantTail(message: UIMessage | undefined) {
 }
 
 export function TaskPage({
-  active,
   currentDocument = null,
   currentDocumentContent,
   defaultAttachCurrentDocument = false,
@@ -163,8 +164,13 @@ export function TaskPage({
   onToggleSidebar,
   onOpenSettings,
 }: TaskPageProps) {
-  const { models, refresh: refreshModels } = useAiModels()
-  const [selectedModelKey, setSelectedModelKey] = useState("")
+  const { loading: modelsLoading, models } = useAiModels()
+  const [selectedModelKey, setSelectedModelKey] = useState(() => {
+    const taskModelKey = lastTaskModelKey(task.messages)
+    if (taskModelKey) return taskModelKey
+    const preferredModelKey = readPreferredAiModelKey()
+    return preferredModelKey || (models[0] ? aiModelKey(models[0]) : "")
+  })
   const [prompt, setPrompt] = useState("")
   const [images, setImages] = useState<ComposerImage[]>([])
   const [documentAttached, setDocumentAttached] = useState(
@@ -175,18 +181,19 @@ export function TaskPage({
     () => models.find((model) => aiModelKey(model) === selectedModelKey),
     [models, selectedModelKey],
   )
-  const execution = useMemo(
-    () => resolveAutomaticTaskExecution(task.skillId, task.mode, selectedModel),
+  const policyResolution = useMemo(
+    () => resolveAutomaticTaskRunPolicy(task.skillId, task.mode, selectedModel),
     [selectedModel, task.mode, task.skillId],
   )
-  const reasoning = automaticReasoning(task.skillId, execution)
-  const webSearch = execution?.searchRoute === "provider-native"
-  const researchReady = execution?.issues.length === 0 && execution.capabilities.reasoning === "supported"
+  const execution = policyResolution?.execution ?? null
+  const researchReady = policyResolution?.issues.length === 0
   const researchNotice =
     task.skillId === "research" && !researchReady
       ? "研究模式需要支持深度思考与联网搜索的模型，请更换模型。"
       : ""
-  const executionNotice = execution?.issues[0] ? aiModelExecutionIssueMessage(execution.issues[0]) : ""
+  const executionNotice = policyResolution?.issues[0]
+    ? taskRunPolicyIssueMessage(policyResolution.issues[0])
+    : ""
   const documentContext =
     documentAttached && currentDocument
       ? { filename: currentDocument.name, relativePath: currentDocument.relativePath }
@@ -201,8 +208,7 @@ export function TaskPage({
     skillId: task.skillId,
     providerId: selectedModel?.providerId ?? "openai-compatible",
     modelId: selectedModel?.id ?? "",
-    reasoning,
-    webSearch,
+    resume: task.persisted,
   })
   const running = chat.status === "submitted" || chat.status === "streaming"
   const waitingForInput = hasPendingTaskUserInput(chat.messages)
@@ -216,15 +222,19 @@ export function TaskPage({
   )
 
   useEffect(() => {
-    if (active) void refreshModels()
-  }, [active, refreshModels])
-
-  useEffect(() => {
     if (selectedModel) return
     const previousModelKey = lastTaskModelKey(task.messages)
     const previousModel = models.find((model) => aiModelKey(model) === previousModelKey)
-    setSelectedModelKey(previousModel ? aiModelKey(previousModel) : models[0] ? aiModelKey(models[0]) : "")
+    const preferredModelKey = readPreferredAiModelKey()
+    const preferredModel = models.find((model) => aiModelKey(model) === preferredModelKey)
+    const nextModel = previousModel ?? preferredModel ?? models[0]
+    setSelectedModelKey(nextModel ? aiModelKey(nextModel) : "")
   }, [models, selectedModel, task.messages])
+
+  const selectModel = useCallback((key: string) => {
+    setSelectedModelKey(key)
+    rememberPreferredAiModelKey(key)
+  }, [])
 
   useEffect(() => {
     if (!selectedModel?.inputModalities?.includes("image")) setImages([])
@@ -384,6 +394,7 @@ export function TaskPage({
       documentContext={documentContext}
       value={prompt}
       images={images}
+      modelLoading={modelsLoading}
       models={models}
       model={selectedModel}
       selectedModelKey={selectedModelKey}
@@ -407,7 +418,7 @@ export function TaskPage({
       }}
       onRemoveDocumentContext={() => setDocumentAttached(false)}
       onRemoveImage={(id) => setImages((current) => current.filter((image) => image.id !== id))}
-      onModelChange={setSelectedModelKey}
+      onModelChange={selectModel}
       onSkillChange={onSkillChange}
       onSubmit={() => void send()}
       onStop={() => void chat.stop()}

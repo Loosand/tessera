@@ -12,11 +12,7 @@
 
 import { createHash } from "node:crypto"
 import type { ExternalAgentTool } from "@tessera/ai/server"
-import type {
-  McpServerConfig,
-  McpServerSaveInput,
-  McpToolSummary,
-} from "@tessera/contracts"
+import type { McpServerConfig, McpServerSaveInput, McpToolSummary } from "@tessera/contracts"
 import {
   type DatabaseClient,
   type McpServerConfigRecord,
@@ -186,8 +182,8 @@ function normalizeInput(input: McpServerSaveInput): McpServerSaveInput {
     args: input.transport === "stdio" ? args : [],
     disabledTools,
     timeoutMs,
-    ...(input.env === undefined ? {} : { env: normalizeSecretMap(input.env, "环境变量") }),
-    ...(input.headers === undefined ? {} : { headers: normalizeSecretMap(input.headers, "请求头") }),
+    ...(input.env === undefined ? {} : { env: normalizeSecretMap(input.env, "环境变量") ?? {} }),
+    ...(input.headers === undefined ? {} : { headers: normalizeSecretMap(input.headers, "请求头") ?? {} }),
   }
 }
 
@@ -245,10 +241,7 @@ function fetchWithHeaders(headers: Record<string, string>) {
 }
 
 async function createSdkMcpClient(server: ResolvedMcpServer): Promise<McpClientAdapter> {
-  const client = new Client(
-    { name: "Tessera", version: app.getVersion() },
-    { capabilities: {} },
-  )
+  const client = new Client({ name: "Tessera", version: app.getVersion() }, { capabilities: {} })
   const transport =
     server.transport === "stdio"
       ? new StdioClientTransport({
@@ -314,6 +307,7 @@ async function createSdkMcpClient(server: ResolvedMcpServer): Promise<McpClientA
         cursor = result.nextCursor
         if (!cursor) break
       }
+      if (cursor) throw new Error("MCP 工具列表超过 20 页安全上限。")
       return tools
     },
     callTool: async (name, input, signal) => {
@@ -325,16 +319,15 @@ async function createSdkMcpClient(server: ResolvedMcpServer): Promise<McpClientA
       if (result.isError) {
         const content = Array.isArray(result.content) ? result.content : []
         const message = content
-          .filter(
-            (part): part is { text: string; type: "text" } =>
-              Boolean(
-                part &&
-                  typeof part === "object" &&
-                  "type" in part &&
-                  part.type === "text" &&
-                  "text" in part &&
-                  typeof part.text === "string",
-              ),
+          .filter((part): part is { text: string; type: "text" } =>
+            Boolean(
+              part &&
+                typeof part === "object" &&
+                "type" in part &&
+                part.type === "text" &&
+                "text" in part &&
+                typeof part.text === "string",
+            ),
           )
           .map((part) => part.text)
           .join("\n")
@@ -352,7 +345,11 @@ async function createSdkMcpClient(server: ResolvedMcpServer): Promise<McpClientA
 function mcpToolId(serverId: string, toolName: string) {
   const serverHash = createHash("sha256").update(serverId).digest("hex").slice(0, 10)
   const toolHash = createHash("sha256").update(toolName).digest("hex").slice(0, 6)
-  const safeName = toolName.replace(/[^a-z\d_-]+/giu, "_").replace(/^_+|_+$/gu, "").slice(0, 48) || "tool"
+  const safeName =
+    toolName
+      .replace(/[^a-z\d_-]+/giu, "_")
+      .replace(/^_+|_+$/gu, "")
+      .slice(0, 48) || "tool"
   return `mcp__${serverHash}__${safeName}__${toolHash}`
 }
 
@@ -368,6 +365,7 @@ export function createMcpService({
     string,
     { error?: string; serverName?: string; serverVersion?: string; state: McpServerConfig["status"] }
   >()
+  let closed = false
 
   const notify = () => onChanged?.()
   const setRuntime = (
@@ -408,10 +406,23 @@ export function createMcpService({
   const redactError = (error: unknown, server: ResolvedMcpServer) => {
     let message = error instanceof Error ? error.message : "连接失败"
     const secretValues = [...Object.values(server.env), ...Object.values(server.headers)]
-      .filter((value) => value.length >= 3)
+      .filter(Boolean)
       .sort((left, right) => right.length - left.length)
     for (const secret of secretValues) message = message.replaceAll(secret, "[已隐藏]")
     return message
+  }
+
+  const redactOutput = (output: unknown, server: ResolvedMcpServer) => {
+    let serialized = JSON.stringify(output)
+    if (serialized === undefined) return null
+    const secretValues = [...Object.values(server.env), ...Object.values(server.headers)]
+      .filter(Boolean)
+      .sort((left, right) => right.length - left.length)
+    for (const secret of secretValues) {
+      const escapedSecret = JSON.stringify(secret).slice(1, -1)
+      serialized = serialized.replaceAll(escapedSecret, "[已隐藏]")
+    }
+    return JSON.parse(serialized) as unknown
   }
 
   const requireRecord = (serverId: string) => {
@@ -421,6 +432,7 @@ export function createMcpService({
   }
 
   const getClient = async (record: McpServerConfigRecord) => {
+    if (closed) throw new McpConfigError("MCP 服务已经关闭。")
     if (!record.trusted) throw new McpConfigError("连接 MCP 服务器前必须确认信任。")
     const fingerprint = serverFingerprint(record)
     const current = connections.get(record.id)
@@ -453,11 +465,17 @@ export function createMcpService({
 
   const listToolsForRecord = async (record: McpServerConfigRecord) => {
     const mcpClient = await getClient(record)
-    return mcpClient.listTools()
+    const disabledTools = new Set(parseStringArray(record.disabledToolsJson, "禁用工具"))
+    return (await mcpClient.listTools()).map((tool) => ({
+      ...tool,
+      serverId: record.id,
+      enabled: !disabledTools.has(tool.name),
+    }))
   }
 
   return {
-    listServers: () => listMcpServerConfigRecords(client).map((record) => publicServer(record, runtime.get(record.id))),
+    listServers: () =>
+      listMcpServerConfigRecords(client).map((record) => publicServer(record, runtime.get(record.id))),
     saveServer: async (rawInput) => {
       const input = normalizeInput(rawInput)
       const existing = findMcpServerConfigRecord(client, input.id)
@@ -490,7 +508,8 @@ export function createMcpService({
         disabledToolsJson: JSON.stringify(input.disabledTools),
         updatedAt,
       } as const
-      const changed = !existing || serverFingerprint({ ...existing, ...record }) !== serverFingerprint(existing)
+      const changed =
+        !existing || serverFingerprint({ ...existing, ...record }) !== serverFingerprint(existing)
       upsertMcpServerConfigRecord(client, record)
       if (changed || !input.enabled) await closeConnection(input.id)
       if (!input.enabled) runtime.delete(input.id)
@@ -512,8 +531,6 @@ export function createMcpService({
       } finally {
         if (!record.enabled) {
           await closeConnection(serverId)
-          runtime.delete(serverId)
-          notify()
         }
       }
     },
@@ -534,7 +551,8 @@ export function createMcpService({
               description: tool.description ?? `调用 ${record.name} 提供的 MCP 工具 ${tool.name}`,
               inputSchema: tool.inputSchema,
               execute: async (input, context) => {
-                if (signal.aborted || context.signal.aborted) throw new DOMException("MCP 调用已取消", "AbortError")
+                if (signal.aborted || context.signal.aborted)
+                  throw new DOMException("MCP 调用已取消", "AbortError")
                 const latest = requireRecord(record.id)
                 if (!latest.enabled || !latest.trusted) throw new McpConfigError("这个 MCP 服务器已经停用。")
                 if (parseStringArray(latest.disabledToolsJson, "禁用工具").includes(tool.name)) {
@@ -543,7 +561,8 @@ export function createMcpService({
                 const mcpClient = await getClient(latest)
                 const resolved = resolveRecord(latest)
                 try {
-                  return await mcpClient.callTool(tool.name, input, context.signal)
+                  const output = await mcpClient.callTool(tool.name, input, context.signal)
+                  return redactOutput(output, resolved)
                 } catch (error) {
                   throw new McpConfigError(redactError(error, resolved).slice(0, 500))
                 }
@@ -553,7 +572,9 @@ export function createMcpService({
       })
     },
     close: async () => {
-      await Promise.allSettled([...connections.keys()].map((serverId) => closeConnection(serverId)))
+      closed = true
+      const serverIds = new Set([...connections.keys(), ...pendingConnections.keys()])
+      await Promise.allSettled([...serverIds].map((serverId) => closeConnection(serverId)))
       connections.clear()
       runtime.clear()
     },

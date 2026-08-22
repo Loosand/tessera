@@ -1,8 +1,8 @@
 /**
- * [INPUT]: AI SDK UIMessage、当前回复状态、客户端问答结果、变更预览/审批、文件跳转与重新生成回调
- * [OUTPUT]: 用户文本/图片/文档附件与按原始 Part 顺序组合的助手回复、问答/研究计划、搜索轨迹、工具审查及轻量消息操作
+ * [INPUT]: AI SDK UIMessage、当前回复状态、客户端问答结果、reasoning 生命周期/摘要、变更预览/审批、文件跳转与重新生成回调
+ * [OUTPUT]: 用户文本/图片/文档附件与按原始 Part 顺序组合的助手回复、思考阶段/摘要、问答/研究计划、搜索轨迹、工具审查及轻量消息操作
  * [POS]: task-page 的 Chat/Agent 消息协调层
- * [DOC]: design.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
+ * [DOC]: design.md、docs/architecture/ai-observability.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -16,6 +16,7 @@ import { Copy01Icon, File02Icon, Refresh01Icon } from "@tessera/design-system/co
 import { LoadingState } from "@tessera/design-system/components/loading-state"
 import { Button } from "@tessera/design-system/components/ui/button"
 import { Icon } from "@tessera/design-system/components/ui/icon"
+import React from "react"
 import { ReasoningPart } from "./chat-parts/reasoning-part"
 import { ResearchPlanPart, isResearchPlanToolPart } from "./chat-parts/research-plan-part"
 import { SourcePart } from "./chat-parts/source-part"
@@ -46,6 +47,10 @@ export function chatMessagePartKey(messageId: string, index: number) {
   return `${messageId}-part-${index}`
 }
 
+export function shouldRenderReasoningBody(part: { text: string }) {
+  return part.text.trim().length > 0
+}
+
 export function ChatMessage({
   isLast,
   loadAgentChangePreview,
@@ -60,9 +65,14 @@ export function ChatMessage({
   const files = message.parts.filter((part) => part.type === "file")
   const imageFiles = files.filter((file) => file.mediaType.startsWith("image/"))
   const documentFiles = files.filter((file) => !file.mediaType.startsWith("image/"))
-  const hasReasoning = message.parts.some((part) => part.type === "reasoning")
   const assistantStreaming = running && isLast
   const firstWebSearchIndex = message.parts.findIndex(isWebSearchToolPart)
+  const firstEmptyReasoningIndex = message.parts.findIndex(
+    (part) => part.type === "reasoning" && !shouldRenderReasoningBody(part),
+  )
+  const hasReasoningBody = message.parts.some(
+    (part) => part.type === "reasoning" && shouldRenderReasoningBody(part),
+  )
   let lastTextPartIndex = -1
   let lastReasoningPartIndex = -1
   for (let index = message.parts.length - 1; index >= 0; index -= 1) {
@@ -75,6 +85,7 @@ export function ChatMessage({
     }
     if (lastTextPartIndex !== -1 && lastReasoningPartIndex !== -1) break
   }
+  const hasReasoning = message.parts.some((part) => part.type === "reasoning")
 
   if (message.role === "user") {
     return (
@@ -123,13 +134,12 @@ export function ChatMessage({
       {message.parts.map((part, index) => {
         const partKey = chatMessagePartKey(message.id, index)
         if (part.type === "reasoning") {
-          return (
-            <ReasoningPart
-              key={partKey}
-              part={part}
-              streaming={assistantStreaming && index === lastReasoningPartIndex && part.state !== "done"}
-            />
-          )
+          const hasBody = shouldRenderReasoningBody(part)
+          if (!hasBody && (hasReasoningBody || index !== firstEmptyReasoningIndex)) return null
+          const streaming = hasBody
+            ? assistantStreaming && index === lastReasoningPartIndex && part.state !== "done"
+            : assistantStreaming
+          return <ReasoningPart key={partKey} part={part} streaming={streaming} />
         }
         if (part.type === "text") {
           return (

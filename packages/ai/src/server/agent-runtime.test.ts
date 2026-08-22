@@ -1,8 +1,8 @@
 /**
- * [INPUT]: 工作区文档写入输入 Schema 与 AI SDK 的 Zod 到 JSON Schema 转换
- * [OUTPUT]: DeepSeek 等供应商可接受的根对象 Schema 和 create/update 条件校验回归
+ * [INPUT]: 工作区文档写入输入 Schema、外部 MCP 工具与 AI SDK Schema/审批适配
+ * [OUTPUT]: DeepSeek 等供应商可接受的根对象 Schema、create/update 条件校验和 MCP 强制审批回归
  * [POS]: @tessera/ai/server 工作区 Agent 工具协议单元测试
- * [DOC]: docs/architecture/task-navigation.md
+ * [DOC]: docs/architecture/mcp.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -12,7 +12,7 @@
 
 import { zodSchema } from "ai"
 import { describe, expect, it } from "vitest"
-import { workspaceDocumentChangeInputSchema } from "./agent-runtime"
+import { createExternalAgentToolSet, workspaceDocumentChangeInputSchema } from "./agent-runtime"
 
 const validBaseContentHash = "a".repeat(64)
 
@@ -57,5 +57,24 @@ describe("工作区 Agent 写入工具 Schema", () => {
         baseContentHash: validBaseContentHash,
       }).success,
     ).toBe(true)
+  })
+})
+
+describe("外部 MCP Agent 工具", () => {
+  it("不论服务器 annotations 都固定要求人工审批", () => {
+    const tools = createExternalAgentToolSet(
+      [
+        {
+          id: "mcp__test__search",
+          title: "Test / search",
+          description: "搜索外部数据",
+          inputSchema: { type: "object", properties: {} },
+          execute: async () => ({ ok: true }),
+        },
+      ],
+      new AbortController().signal,
+    )
+
+    expect(tools.mcp__test__search?.needsApproval).toBe(true)
   })
 })

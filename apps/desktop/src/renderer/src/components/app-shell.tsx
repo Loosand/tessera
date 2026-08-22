@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 应用信息、useWorkspace 文档会话与隐式 Chat/Agent、创作模式的 useTasks 任务导航状态
- * [OUTPUT]: 首页/Skill/任务/工作区保活视图、主任务与文档侧栏共享会话、跨工作区恢复、源码行导航和文档主区域
+ * [INPUT]: 应用信息、useWorkspace 文档会话与隐式 Chat/Agent、内置/用户创作 Skill 的 useTasks 任务导航状态
+ * [OUTPUT]: 首页/用户 Skill 管理/任务/工作区保活视图、主任务与文档侧栏共享会话、跨工作区恢复、源码行导航和文档主区域
  * [POS]: Tessera 桌面端的顶层产品壳层
  * [DOC]: design.md、docs/architecture.md、docs/architecture/editor.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -10,7 +10,7 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import type { AppInfo, BuiltInTaskSkillId, TaskSessionSummary } from "@tessera/contracts"
+import type { AppInfo, TaskSessionSummary, TaskSkillId } from "@tessera/contracts"
 import { AnimatePresence, m, useReducedMotion } from "motion/react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { type DefaultEditorMode, useAppPreferences } from "../hooks/use-app-preferences"
@@ -259,7 +259,7 @@ export function AppShell({ appInfo }: AppShellProps) {
   }, [flushPendingEdits])
 
   const createSkillTask = useCallback(
-    (skillId: BuiltInTaskSkillId) => {
+    (skillId: Exclude<TaskSkillId, null | "question-answering">) => {
       flushPendingEdits()
       setAgentOpen(false)
       startNewTask(null, skillId)
@@ -492,7 +492,6 @@ export function AppShell({ appInfo }: AppShellProps) {
                   >
                     <TaskPage
                       key={activeTask.id}
-                      active
                       currentDocument={activeDocument}
                       currentDocumentContent={draftContent}
                       defaultAttachCurrentDocument
@@ -518,7 +517,6 @@ export function AppShell({ appInfo }: AppShellProps) {
             {view === "workspace" && agentOpen ? null : (
               <TaskPage
                 key={activeTask.id}
-                active={view === "task"}
                 currentDocument={activeDocument}
                 currentDocumentContent={draftContent}
                 task={activeTask}

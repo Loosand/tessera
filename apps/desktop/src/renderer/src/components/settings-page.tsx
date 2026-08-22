@@ -1,8 +1,8 @@
 /**
- * [INPUT]: 应用信息、工作区摘要、界面偏好、设置导航操作与共享 Motion 参数
- * [OUTPUT]: 带连续选中态的可搜索分类、统一宽度的常规设置内容和独立供应商工作区
+ * [INPUT]: 应用信息、工作区摘要、界面偏好、AI/MCP/开发期日志安全桥、设置导航操作与共享 Motion 参数
+ * [OUTPUT]: 带连续选中态的可搜索分类、统一宽度的常规设置内容、官方 AI SDK 日志入口和独立供应商/MCP 工作区
  * [POS]: 桌面应用的产品级设置视图
- * [DOC]: design.md、docs/architecture/ai-providers.md
+ * [DOC]: design.md、docs/architecture/ai-providers.md、docs/architecture/ai-observability.md、docs/architecture/mcp.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -16,6 +16,9 @@ import type {
   AiProviderConnectionInput,
   AiProviderSaveInput,
   AppInfo,
+  McpServerConfig,
+  McpServerSaveInput,
+  McpServerTestResult,
   WorkspaceInfo,
 } from "@tessera/contracts"
 import {
@@ -25,8 +28,10 @@ import {
   InformationCircleIcon,
   KeyboardIcon,
   Link01Icon,
+  Plug01Icon,
   Search01Icon,
   Settings01Icon,
+  SourceCodeIcon,
   Sun01Icon,
 } from "@tessera/design-system/components/icons"
 import { SettingRow } from "@tessera/design-system/components/setting-row"
@@ -41,9 +46,19 @@ import type { AppPreferences, UpdateAppPreference } from "../hooks/use-app-prefe
 import { motionSprings } from "../motion"
 import { AppearanceSettings } from "./appearance-settings"
 import { EditorSettings } from "./editor-settings"
+import { McpSettings } from "./mcp-settings"
 import { ShortcutsSettings } from "./shortcuts-settings"
 
-type SettingsSectionId = "general" | "appearance" | "editor" | "shortcuts" | "ai" | "providers" | "about"
+type SettingsSectionId =
+  | "general"
+  | "appearance"
+  | "editor"
+  | "shortcuts"
+  | "ai"
+  | "providers"
+  | "mcp"
+  | "developer"
+  | "about"
 
 type SettingsPageProps = Readonly<{
   appInfo: AppInfo | undefined
@@ -100,6 +115,22 @@ const SETTINGS_NAVIGATION: SettingsNavigationItem[] = [
     icon: Link01Icon,
   },
   {
+    id: "mcp",
+    label: "MCP",
+    description: "外部工具服务器与权限",
+    icon: Plug01Icon,
+  },
+  ...(import.meta.env.DEV
+    ? [
+        {
+          id: "developer" as const,
+          label: "开发者",
+          description: "AI 运行日志与诊断",
+          icon: SourceCodeIcon,
+        },
+      ]
+    : []),
+  {
     id: "about",
     label: "关于",
     description: "版本与运行环境",
@@ -136,6 +167,37 @@ async function deleteAiProviderConfig(configId: string): Promise<void> {
 
 function subscribeToAiProviderConfigChanges(listener: () => void) {
   return window.tessera?.onAiProviderConfigsChanged(listener) ?? (() => {})
+}
+
+async function listMcpServers(): Promise<McpServerConfig[]> {
+  const desktopApi = window.tessera
+  if (!desktopApi) throw new Error("桌面安全桥尚未就绪，请重新打开应用。")
+  return desktopApi.listMcpServers()
+}
+
+async function saveMcpServer(input: McpServerSaveInput): Promise<McpServerConfig> {
+  const desktopApi = window.tessera
+  if (!desktopApi) throw new Error("桌面安全桥尚未就绪，请重新打开应用。")
+  const result = await desktopApi.saveMcpServer(input)
+  if (!result.ok) throw new Error(result.error)
+  return result.server
+}
+
+async function deleteMcpServer(serverId: string): Promise<void> {
+  const desktopApi = window.tessera
+  if (!desktopApi) throw new Error("桌面安全桥尚未就绪，请重新打开应用。")
+  const result = await desktopApi.deleteMcpServer(serverId)
+  if (!result.ok) throw new Error(result.error)
+}
+
+async function testMcpServer(serverId: string): Promise<McpServerTestResult> {
+  const desktopApi = window.tessera
+  if (!desktopApi) return { ok: false, error: "桌面安全桥尚未就绪，请重新打开应用。" }
+  return desktopApi.testMcpServer(serverId)
+}
+
+function subscribeToMcpServerChanges(listener: () => void) {
+  return window.tessera?.onMcpServersChanged(listener) ?? (() => {})
 }
 
 function GeneralSettings({
@@ -186,6 +248,50 @@ function AboutSettings({ appInfo }: Pick<SettingsPageProps, "appInfo">) {
         control={<span className="text-[13px] text-muted-foreground">{appInfo?.platform ?? "—"}</span>}
       />
     </SettingSection>
+  )
+}
+
+function DeveloperSettings() {
+  const [opening, setOpening] = useState(false)
+  const [status, setStatus] = useState<string | null>(null)
+
+  const openAiLogs = async () => {
+    const desktopApi = window.tessera
+    if (!desktopApi) {
+      setStatus("桌面安全桥尚未就绪，请重新打开应用。")
+      return
+    }
+
+    setOpening(true)
+    setStatus(null)
+    try {
+      const result = await desktopApi.openAiDevtools()
+      setStatus(result.ok ? "已在浏览器打开 AI SDK DevTools。" : result.error)
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "打开 AI 运行日志失败。")
+    } finally {
+      setOpening(false)
+    }
+  }
+
+  return (
+    <div className="space-y-8">
+      <SettingSection
+        title="AI 运行日志"
+        description="使用 AI SDK 官方 DevTools 查看每次 Agent 运行、模型步骤、工具调用、Token 与耗时。"
+      >
+        <SettingRow
+          title="AI SDK DevTools"
+          description="日志仅保存在本机开发目录，不在生产包启用；其中可能包含对话与工具输入。"
+          control={
+            <Button variant="outline" size="sm" disabled={opening} onClick={() => void openAiLogs()}>
+              {opening ? "正在启动…" : "打开日志"}
+            </Button>
+          }
+        />
+        {status ? <p className="text-xs leading-5 text-muted-foreground">{status}</p> : null}
+      </SettingSection>
+    </div>
   )
 }
 
@@ -298,7 +404,23 @@ export function SettingsPage({
           />
         </div>
 
-        <div className={activeSection === "providers" ? "hidden" : "min-h-0 flex-1 overflow-y-auto"}>
+        <div className={activeSection === "mcp" ? "min-h-0 flex-1" : "hidden"}>
+          <McpSettings
+            deleteServer={deleteMcpServer}
+            listServers={listMcpServers}
+            saveServer={saveMcpServer}
+            subscribeToChanges={subscribeToMcpServerChanges}
+            testServer={testMcpServer}
+          />
+        </div>
+
+        <div
+          className={
+            activeSection === "providers" || activeSection === "mcp"
+              ? "hidden"
+              : "min-h-0 flex-1 overflow-y-auto"
+          }
+        >
           <article className="mx-auto w-full max-w-300 px-[clamp(20px,5vw,64px)] pt-10 pb-24">
             <p className="text-[11px] font-medium tracking-[0.08em] text-muted-foreground uppercase">设置</p>
             <h1 className="mt-2 text-2xl font-medium tracking-[-0.02em]">{activeNavigation.label}</h1>
@@ -311,8 +433,9 @@ export function SettingsPage({
                 <AiSettings />
               </div>
 
-              {activeSection === "ai" || activeSection === "providers" ? null : activeSection ===
-                "general" ? (
+              {activeSection === "ai" ||
+              activeSection === "providers" ||
+              activeSection === "mcp" ? null : activeSection === "general" ? (
                 <GeneralSettings
                   workspace={workspace}
                   documentCount={documentCount}
@@ -324,6 +447,8 @@ export function SettingsPage({
                 <EditorSettings preferences={preferences} onUpdatePreference={onUpdatePreference} />
               ) : activeSection === "shortcuts" ? (
                 <ShortcutsSettings />
+              ) : activeSection === "developer" ? (
+                <DeveloperSettings />
               ) : (
                 <AboutSettings appInfo={appInfo} />
               )}

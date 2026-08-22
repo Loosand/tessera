@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 包含真实查询、重复工具结果与 URL 来源的 AI SDK 消息 Part，以及 favicon URL 派生规则
- * [OUTPUT]: 联网搜索轨迹聚合、去重、安全呈现与网站图标回退的回归验证
+ * [INPUT]: 包含标准 action/sources、旧结果数组与 URL 来源的 AI SDK 消息 Part，以及 favicon URL 派生规则
+ * [OUTPUT]: 跨供应商联网检索轨迹聚合、去重、安全呈现与网站图标回退的回归验证
  * [POS]: web-search-part 的数据适配与渲染单元测试
  * [DOC]: design.md、docs/architecture/ai-providers.md
  *
@@ -53,6 +53,34 @@ const parts = [
   },
 ] as UIMessage["parts"]
 
+const responsesWebSearchParts = [
+  {
+    type: "tool-web_search",
+    toolCallId: "search-2",
+    state: "output-available",
+    input: {},
+    output: {
+      action: {
+        type: "search",
+        queries: ["Celeste Madeline character", "Celeste Madeline story", "ws_call_id=call_00_internal"],
+      },
+      sources: [{ type: "url", url: "https://example.com/search-source" }],
+    },
+  },
+  {
+    type: "tool-web_search",
+    toolCallId: "search-3",
+    state: "output-available",
+    input: {},
+    output: {
+      action: {
+        type: "openPage",
+        url: "https://celestegame.example/wiki/Madeline#ws_call_id=call_01_internal",
+      },
+    },
+  },
+] as UIMessage["parts"]
+
 describe("联网搜索轨迹", () => {
   it("从工具与来源 Part 聚合真实查询并按 URL 去重", () => {
     const trace = collectWebSearchTrace(parts)
@@ -64,6 +92,26 @@ describe("联网搜索轨迹", () => {
       "https://example.com/profile",
       "https://music.example.org/artist",
     ])
+  })
+
+  it("读取 AI SDK Responses webSearch 的标准 output.action 与 output.sources", () => {
+    const trace = collectWebSearchTrace(responsesWebSearchParts)
+
+    expect(trace.searchCount).toBe(2)
+    expect(trace.queries).toEqual(["Celeste Madeline character", "Celeste Madeline story"])
+    expect(trace.results.map((result) => result.url)).toEqual([
+      "https://example.com/search-source",
+      "https://celestegame.example/wiki/Madeline",
+    ])
+  })
+
+  it("在空 input 的 provider-executed 搜索中仍呈现真实查询与打开页面", () => {
+    const markup = renderToStaticMarkup(<WebSearchPart parts={responsesWebSearchParts} streaming={false} />)
+
+    expect(markup).toContain("已搜索 2 次 · 2 个来源")
+    expect(markup).toContain("Celeste Madeline character")
+    expect(markup).toContain("celestegame.example")
+    expect(markup).not.toContain("ws_call_id")
   })
 
   it("呈现查询、来源计数和安全链接，不泄露加密续轮数据", () => {

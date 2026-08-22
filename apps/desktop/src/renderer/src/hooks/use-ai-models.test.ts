@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 不同启用、密钥与模型状态的供应商配置
- * [OUTPUT]: 任务页可用模型筛选规则的回归验证
- * [POS]: 渲染层 AI 模型状态适配器的单元测试
+ * [INPUT]: 不同启用、密钥与模型状态的供应商配置，以及可控的 SQLite 配置窄桥
+ * [OUTPUT]: 任务页可用模型筛选与应用级 stale-while-revalidate 快照的回归验证
+ * [POS]: 渲染层应用级 AI 模型状态适配器的单元测试
  * [DOC]: docs/architecture/ai-providers.md
  *
  * [PROTOCOL]:
@@ -10,9 +10,9 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import type { AiProviderConfig, AiProviderConfiguredModel, AiProviderModel } from "@tessera/contracts"
-import { describe, expect, it } from "vitest"
-import { mergeModelsForTaskRefresh, selectAvailableAiModels } from "./use-ai-models"
+import type { AiProviderConfig, AiProviderConfiguredModel } from "@tessera/contracts"
+import { describe, expect, it, vi } from "vitest"
+import { createAiModelStore, selectAvailableAiModels } from "./use-ai-models"
 
 const model = (id: string, enabled = true): AiProviderConfiguredModel => ({
   contextWindow: null,
@@ -35,14 +35,6 @@ const config = (overrides: Partial<AiProviderConfig> = {}): AiProviderConfig => 
   ...overrides,
 })
 
-const discoveredModel = (id: string): AiProviderModel => ({
-  contextWindow: null,
-  id,
-  maxOutputTokens: null,
-  name: id,
-  ownedBy: null,
-})
-
 describe("任务页可用模型", () => {
   it("只暴露已配置密钥、已启用供应商中的已启用模型", () => {
     const available = selectAvailableAiModels([
@@ -61,24 +53,42 @@ describe("任务页可用模型", () => {
     ])
   })
 
-  it("任务页首次主动发现目录时启用第一个模型", () => {
-    expect(
-      mergeModelsForTaskRefresh(config({ models: [] }), [
-        discoveredModel("deepseek-chat"),
-        discoveredModel("deepseek-reasoner"),
-      ]).map(({ enabled, id }) => ({ enabled, id })),
-    ).toEqual([
-      { enabled: true, id: "deepseek-chat" },
-      { enabled: false, id: "deepseek-reasoner" },
-    ])
-  })
+  it("重读 SQLite 时继续提供应用级旧快照，且多个订阅者不会重复加载", async () => {
+    let resolveRevalidation: ((configs: AiProviderConfig[]) => void) | undefined
+    const listAiProviderConfigs = vi
+      .fn<() => Promise<AiProviderConfig[]>>()
+      .mockResolvedValueOnce([config({ models: [model("cached-model")] })])
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveRevalidation = resolve
+          }),
+      )
+    const store = createAiModelStore(() => ({
+      listAiProviderConfigs,
+      onAiProviderConfigsChanged: () => () => {},
+    }))
 
-  it("不会覆盖用户已经保存的模型启停选择", () => {
-    expect(
-      mergeModelsForTaskRefresh(
-        config({ models: [model("deepseek-chat", false), model("deepseek-reasoner", false)] }),
-        [discoveredModel("deepseek-chat"), discoveredModel("deepseek-reasoner")],
-      ).every((candidate) => !candidate.enabled),
-    ).toBe(true)
+    const unsubscribeFirst = store.subscribe(() => {})
+    await vi.waitFor(() => expect(store.getSnapshot().initialized).toBe(true))
+    const unsubscribeSecond = store.subscribe(() => {})
+    expect(listAiProviderConfigs).toHaveBeenCalledOnce()
+
+    const revalidation = store.revalidate()
+    expect(store.getSnapshot()).toMatchObject({
+      loading: false,
+      refreshing: true,
+      models: [expect.objectContaining({ id: "cached-model" })],
+    })
+
+    resolveRevalidation?.([config({ models: [model("updated-model")] })])
+    await revalidation
+    expect(store.getSnapshot()).toMatchObject({
+      loading: false,
+      refreshing: false,
+      models: [expect.objectContaining({ id: "updated-model" })],
+    })
+    unsubscribeSecond()
+    unsubscribeFirst()
   })
 })

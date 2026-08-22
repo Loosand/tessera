@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 内置 Skill 注册表、侧栏状态与按 Skill 创建任务回调
- * [OUTPUT]: 可搜索、选择和检查权限声明的本地 Skill 管理页
- * [POS]: 一级导航中的 Skill 管理与任务入口
+ * [INPUT]: 内置 Skill 注册表、用户 Skill 单目录导入/扫描安装 Hook、侧栏状态与按 Skill 创建任务回调
+ * [OUTPUT]: 支持单目录导入、递归扫描预览/批量安装、搜索、选择、启停、删除和权限检查的本地 Skill 管理页
+ * [POS]: 一级导航中的 Skill 安装管理与任务入口
  * [DOC]: design.md、docs/architecture/skill-system.md
  *
  * [PROTOCOL]:
@@ -10,32 +10,66 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import type { BuiltInTaskSkillId } from "@tessera/contracts"
+import type {
+  BuiltInTaskSkillId,
+  UserSkillConfig,
+  UserSkillScan,
+  UserSkillScanCandidateStatus,
+  UserTaskSkillId,
+} from "@tessera/contracts"
 import {
   AiWebBrowsingIcon,
   BookOpen01Icon,
   CheckmarkCircle02Icon,
+  Delete02Icon,
   Edit02Icon,
+  FolderAddIcon,
+  FolderSearchIcon,
+  InformationCircleIcon,
   PanelLeftOpenIcon,
   Search01Icon,
   Shield01Icon,
   SourceCodeIcon,
 } from "@tessera/design-system/components/icons"
 import { Button } from "@tessera/design-system/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@tessera/design-system/components/ui/dialog"
 import { Icon } from "@tessera/design-system/components/ui/icon"
 import { Input } from "@tessera/design-system/components/ui/input"
-import { type BuiltInSkillDescriptor, type SkillPermission, listBuiltInSkills } from "@tessera/skills"
-import React, { useState } from "react"
+import { Switch } from "@tessera/design-system/components/ui/switch"
+import { type SkillPermission, listBuiltInSkills } from "@tessera/skills"
+import React, { useEffect, useMemo, useState } from "react"
+import { useUserSkills } from "../hooks/use-user-skills"
+
+type SelectableSkillId = BuiltInTaskSkillId | UserTaskSkillId
 
 type SkillManagementPageProps = Readonly<{
   sidebarOpen: boolean
   onToggleSidebar: () => void
-  onUseSkill: (skillId: BuiltInTaskSkillId) => void
+  onUseSkill: (skillId: SelectableSkillId) => void
+}>
+
+type CatalogSkill = Readonly<{
+  available: boolean
+  description: string
+  displayName: string
+  enabled: boolean
+  error?: string
+  id: SelectableSkillId
+  kind: "built-in" | "user"
+  name: string
+  permissions: readonly SkillPermission[]
+  root: string
+  shortDescription: string
+  userConfig?: UserSkillConfig
 }>
 
 const BUILT_IN_SKILLS = listBuiltInSkills()
-
-const SKILL_ICONS = {
+const BUILT_IN_ICONS = {
   research: AiWebBrowsingIcon,
   writing: Edit02Icon,
 } satisfies Record<BuiltInTaskSkillId, Parameters<typeof Icon>[0]["icon"]>
@@ -52,7 +86,18 @@ const EFFECT_LABELS: Record<SkillPermission["effect"], string> = {
   deny: "禁止",
 }
 
-function matchesQuery(skill: BuiltInSkillDescriptor, rawQuery: string) {
+const SCAN_STATUS_LABELS: Record<UserSkillScanCandidateStatus, string> = {
+  ready: "可安装",
+  installed: "已安装",
+  conflict: "名称冲突",
+  invalid: "无效",
+}
+
+function skillIcon(skill: CatalogSkill) {
+  return skill.kind === "user" ? BookOpen01Icon : BUILT_IN_ICONS[skill.name as BuiltInTaskSkillId]
+}
+
+function matchesQuery(skill: CatalogSkill, rawQuery: string) {
   const query = rawQuery.trim().toLocaleLowerCase("zh-CN")
   if (!query) return true
   return [skill.displayName, skill.name, skill.description, skill.shortDescription]
@@ -61,103 +106,155 @@ function matchesQuery(skill: BuiltInSkillDescriptor, rawQuery: string) {
     .includes(query)
 }
 
+function formatBytes(bytes: number) {
+  if (bytes < 1_024) return `${bytes} B`
+  if (bytes < 1_048_576) return `${(bytes / 1_024).toFixed(1)} KiB`
+  return `${(bytes / 1_048_576).toFixed(1)} MiB`
+}
+
 function SkillCard({
   active,
   skill,
   onSelect,
+  onToggle,
 }: {
   active: boolean
-  skill: BuiltInSkillDescriptor
+  skill: CatalogSkill
   onSelect: () => void
+  onToggle: (enabled: boolean) => void
 }) {
   return (
-    <button
-      type="button"
-      className="group flex min-h-50 w-full flex-col rounded-xl border border-border bg-background p-4 text-left transition-[border-color,background-color,box-shadow] hover:border-foreground/20 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50 data-[active=true]:border-foreground/25 data-[active=true]:bg-muted/45 data-[active=true]:shadow-xs"
+    <article
+      className="flex min-h-50 flex-col rounded-xl border border-border bg-background transition-[border-color,background-color,box-shadow] hover:border-foreground/20 data-[active=true]:border-foreground/25 data-[active=true]:bg-muted/45 data-[active=true]:shadow-xs"
       data-active={active || undefined}
-      aria-pressed={active}
-      onClick={onSelect}
     >
-      <div className="flex w-full items-start gap-3">
-        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground">
-          <Icon icon={SKILL_ICONS[skill.name]} size={18} />
+      <button
+        type="button"
+        className="flex flex-1 flex-col p-4 text-left focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+        aria-pressed={active}
+        onClick={onSelect}
+      >
+        <span className="flex w-full items-start gap-3">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground">
+            <Icon icon={skillIcon(skill)} size={18} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-2">
+              <span className="truncate text-sm font-semibold">{skill.displayName}</span>
+              <span className="rounded-full border border-border px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground">
+                {skill.kind === "built-in" ? "内置" : "用户"}
+              </span>
+            </span>
+            <span className="mt-0.5 block font-mono text-[10px] text-muted-foreground">${skill.name}</span>
+          </span>
+          {skill.available ? (
+            <Icon icon={CheckmarkCircle02Icon} size={13} className="text-muted-foreground" />
+          ) : (
+            <Icon icon={InformationCircleIcon} size={13} className="text-destructive" />
+          )}
         </span>
-        <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-2">
-            <span className="truncate text-sm font-semibold">{skill.displayName}</span>
-            <span className="rounded-full border border-border px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground">
-              内置
+        <span className="mt-4 block text-xs leading-5 text-muted-foreground">{skill.shortDescription}</span>
+      </button>
+
+      <div className="flex min-h-10 items-center justify-between gap-3 border-t border-border/70 px-4 py-2">
+        <span className="flex flex-wrap gap-1.5">
+          {skill.permissions.length > 0 ? (
+            skill.permissions.slice(0, 2).map((permission) => (
+              <span
+                key={`${permission.action}:${permission.resource}`}
+                className="rounded-md bg-muted px-1.5 py-1 text-[9px] text-muted-foreground"
+              >
+                {PERMISSION_LABELS[permission.action] ?? permission.action}
+              </span>
+            ))
+          ) : (
+            <span className="text-[9px] text-muted-foreground">仅 instructions</span>
+          )}
+        </span>
+        {skill.kind === "user" ? (
+          <Switch
+            size="sm"
+            checked={skill.enabled}
+            disabled={!skill.available && !skill.enabled}
+            aria-label={`${skill.enabled ? "停用" : "启用"}${skill.displayName}`}
+            onCheckedChange={onToggle}
+          />
+        ) : (
+          <span className="text-[9px] text-muted-foreground">已启用</span>
+        )}
+      </div>
+    </article>
+  )
+}
+
+function SkillPermissions({ skill }: { skill: CatalogSkill }) {
+  if (skill.permissions.length === 0) {
+    return (
+      <div className="mt-2 rounded-lg border border-border bg-background px-3 py-3 text-[11px] leading-5 text-muted-foreground">
+        用户 Skill 只注入 instructions，不声明也不会获得新的联网、文件、Shell 或 MCP 权限。
+      </div>
+    )
+  }
+  return (
+    <div className="mt-2 overflow-hidden rounded-lg border border-border bg-background">
+      {skill.permissions.map((permission, index) => (
+        <div
+          key={`${permission.action}:${permission.resource}`}
+          className="flex items-center justify-between gap-3 px-3 py-2.5 text-[11px] data-[border=true]:border-t data-[border=true]:border-border"
+          data-border={index > 0 || undefined}
+        >
+          <span className="min-w-0">
+            <span className="block font-medium">
+              {PERMISSION_LABELS[permission.action] ?? permission.action}
+            </span>
+            <span className="mt-0.5 block truncate font-mono text-[9px] text-muted-foreground">
+              {permission.resource}
             </span>
           </span>
-          <span className="mt-0.5 block font-mono text-[10px] text-muted-foreground">${skill.name}</span>
-        </span>
-        <span className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
-          <Icon icon={CheckmarkCircle02Icon} size={12} />
-          已启用
-        </span>
-      </div>
-
-      <span className="mt-4 block text-xs leading-5 text-muted-foreground">{skill.shortDescription}</span>
-
-      <span className="mt-auto flex flex-wrap gap-1.5 pt-5">
-        {skill.permissions.map((permission) => (
-          <span
-            key={`${permission.action}:${permission.resource}`}
-            className="rounded-md bg-muted px-1.5 py-1 text-[10px] text-muted-foreground"
-          >
-            {PERMISSION_LABELS[permission.action] ?? permission.action}
-          </span>
-        ))}
-      </span>
-    </button>
+          <span className="shrink-0 text-muted-foreground">{EFFECT_LABELS[permission.effect]}</span>
+        </div>
+      ))}
+    </div>
   )
 }
 
 function SkillDetail({
   skill,
+  onDelete,
   onUseSkill,
 }: {
-  skill: BuiltInSkillDescriptor
-  onUseSkill: (skillId: BuiltInTaskSkillId) => void
+  skill: CatalogSkill
+  onDelete: (skill: CatalogSkill) => void
+  onUseSkill: (skillId: SelectableSkillId) => void
 }) {
   return (
     <aside className="rounded-xl border border-border bg-muted/20 p-5">
       <div className="flex items-center gap-3">
         <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-background shadow-xs">
-          <Icon icon={SKILL_ICONS[skill.name]} size={19} />
+          <Icon icon={skillIcon(skill)} size={19} />
         </span>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <h2 className="truncate text-base font-semibold">{skill.displayName}</h2>
           <p className="font-mono text-[10px] text-muted-foreground">${skill.name}</p>
         </div>
+        <span className="rounded-full border border-border bg-background px-2 py-1 text-[9px] text-muted-foreground">
+          {skill.kind === "built-in" ? "内置" : "用户"}
+        </span>
       </div>
 
       <p className="mt-4 text-xs leading-5 text-muted-foreground">{skill.description}</p>
+      {skill.error ? (
+        <p className="mt-3 rounded-lg bg-destructive/10 px-3 py-2 text-[10px] leading-4 text-destructive">
+          {skill.error}
+        </p>
+      ) : null}
 
       <section className="mt-6">
         <h3 className="flex items-center gap-1.5 text-xs font-medium">
           <Icon icon={Shield01Icon} size={14} />
-          权限声明
+          权限边界
         </h3>
-        <div className="mt-2 overflow-hidden rounded-lg border border-border bg-background">
-          {skill.permissions.map((permission, index) => (
-            <div
-              key={`${permission.action}:${permission.resource}`}
-              className="flex items-center justify-between gap-3 px-3 py-2.5 text-[11px] data-[border=true]:border-t data-[border=true]:border-border"
-              data-border={index > 0 || undefined}
-            >
-              <span className="min-w-0">
-                <span className="block font-medium">
-                  {PERMISSION_LABELS[permission.action] ?? permission.action}
-                </span>
-                <span className="mt-0.5 block truncate font-mono text-[9px] text-muted-foreground">
-                  {permission.resource}
-                </span>
-              </span>
-              <span className="shrink-0 text-muted-foreground">{EFFECT_LABELS[permission.effect]}</span>
-            </div>
-          ))}
-        </div>
+        <SkillPermissions skill={skill} />
         <p className="mt-2 text-[10px] leading-4 text-muted-foreground">
           声明只描述所需能力，不会自动授予联网或文件权限。
         </p>
@@ -166,35 +263,233 @@ function SkillDetail({
       <section className="mt-6">
         <h3 className="flex items-center gap-1.5 text-xs font-medium">
           <Icon icon={SourceCodeIcon} size={14} />
-          模型加载
+          加载方式
         </h3>
         <ol className="mt-2 grid gap-2 text-[11px] leading-4 text-muted-foreground">
-          <li>1. 选择器只读取常驻元数据。</li>
-          <li>2. 任务开始时按需校验对应 SKILL.md。</li>
-          <li>3. 仅将当前 Skill 正文注入本轮模型指令。</li>
+          <li>1. 目录中必须有标准 SKILL.md。</li>
+          <li>2. 安装时复制到 Tessera 托管目录并限制文件体积。</li>
+          <li>3. 任务开始前再次校验，只注入当前 Skill 正文。</li>
+          <li>4. 附带脚本不会自动执行。</li>
         </ol>
       </section>
 
       <div className="mt-6 border-t border-border pt-4">
         <div className="mb-3 flex items-center justify-between gap-3 text-[10px] text-muted-foreground">
-          <span>Tessera 内置</span>
-          <span className="truncate font-mono" title={skill.root}>
-            {skill.root}
-          </span>
+          <span>{skill.kind === "built-in" ? "Tessera 内置" : "Tessera 托管"}</span>
+          {skill.userConfig ? (
+            <span>
+              {skill.userConfig.fileCount} 个文件 · {formatBytes(skill.userConfig.totalBytes)}
+            </span>
+          ) : (
+            <span className="truncate font-mono" title={skill.root}>
+              {skill.root}
+            </span>
+          )}
         </div>
-        <Button className="w-full" onClick={() => onUseSkill(skill.name)}>
+        <Button
+          className="w-full"
+          disabled={!skill.enabled || !skill.available}
+          onClick={() => onUseSkill(skill.id)}
+        >
           使用“{skill.displayName}”新建任务
         </Button>
+        {skill.kind === "user" ? (
+          <Button className="mt-2 w-full" variant="destructive" onClick={() => onDelete(skill)}>
+            <Icon icon={Delete02Icon} size={14} />
+            删除用户 Skill
+          </Button>
+        ) : null}
       </div>
     </aside>
   )
 }
 
+function SkillScanDialog({
+  busy,
+  onClose,
+  onInstall,
+  scan,
+}: {
+  busy: boolean
+  onClose: () => void
+  onInstall: (candidateIds: string[]) => void
+  scan: UserSkillScan | null
+}) {
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const readyIds = useMemo(
+    () =>
+      scan?.candidates.filter((candidate) => candidate.status === "ready").map((candidate) => candidate.id) ??
+      [],
+    [scan],
+  )
+
+  useEffect(() => setSelectedIds(readyIds), [readyIds])
+
+  const toggleCandidate = (candidateId: string, checked: boolean) => {
+    setSelectedIds((current) =>
+      checked ? [...current, candidateId] : current.filter((id) => id !== candidateId),
+    )
+  }
+
+  return (
+    <Dialog
+      open={Boolean(scan)}
+      onOpenChange={(open) => {
+        if (!open && !busy) onClose()
+      }}
+    >
+      <DialogContent className="max-h-[76vh] max-w-2xl overflow-hidden p-0" initialFocus={false}>
+        <div className="border-b border-border px-5 py-4">
+          <DialogTitle>扫描到的 Skill</DialogTitle>
+          <DialogDescription>
+            {scan
+              ? `已检查“${scan.rootName}”下 ${scan.scannedDirectoryCount} 个目录；选择要复制到 Tessera 托管目录的项目。`
+              : "扫描只读取目录，不会执行脚本。"}
+          </DialogDescription>
+        </div>
+
+        <div className="max-h-[48vh] overflow-y-auto px-5 py-4">
+          {scan?.truncated ? (
+            <p className="mb-3 rounded-lg bg-destructive/10 px-3 py-2 text-[11px] leading-4 text-destructive">
+              扫描已达到安全上限，结果可能不完整。请缩小目录范围后重新扫描。
+            </p>
+          ) : null}
+          {scan && scan.candidates.length > 0 ? (
+            <div className="grid gap-2">
+              {scan.candidates.map((candidate) => {
+                const selectable = candidate.status === "ready"
+                const checked = selectedIds.includes(candidate.id)
+                return (
+                  <label
+                    key={candidate.id}
+                    className="flex items-start gap-3 rounded-lg border border-border px-3 py-3 data-[selectable=true]:cursor-pointer data-[selectable=true]:hover:bg-muted/40"
+                    data-selectable={selectable || undefined}
+                  >
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 size-4 accent-foreground"
+                      aria-label={`选择 ${candidate.displayName}`}
+                      checked={checked}
+                      disabled={!selectable || busy}
+                      onChange={(event) => toggleCandidate(candidate.id, event.currentTarget.checked)}
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs font-medium">{candidate.displayName}</span>
+                        {candidate.name ? (
+                          <span className="font-mono text-[9px] text-muted-foreground">
+                            ${candidate.name}
+                          </span>
+                        ) : null}
+                        <span
+                          className="rounded-full border px-1.5 py-0.5 text-[9px] text-muted-foreground data-[status=ready]:border-foreground/20 data-[status=ready]:text-foreground"
+                          data-status={candidate.status}
+                        >
+                          {SCAN_STATUS_LABELS[candidate.status]}
+                        </span>
+                      </span>
+                      {candidate.description ? (
+                        <span className="mt-1 block text-[11px] leading-4 text-muted-foreground">
+                          {candidate.description}
+                        </span>
+                      ) : null}
+                      <span className="mt-1 block truncate font-mono text-[9px] text-muted-foreground">
+                        {candidate.relativePath}
+                      </span>
+                      {candidate.error ? (
+                        <span className="mt-1 block text-[10px] leading-4 text-destructive">
+                          {candidate.error}
+                        </span>
+                      ) : null}
+                    </span>
+                  </label>
+                )
+              })}
+            </div>
+          ) : (
+            <div className="rounded-lg border border-dashed border-border px-4 py-10 text-center">
+              <p className="text-sm font-medium">没有发现 SKILL.md</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                请选择包含一个或多个 Skill 目录的上级文件夹。
+              </p>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between gap-3 border-t border-border px-5 py-4">
+          <button
+            type="button"
+            className="text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50"
+            disabled={readyIds.length === 0 || busy}
+            onClick={() => setSelectedIds(selectedIds.length === readyIds.length ? [] : readyIds)}
+          >
+            {selectedIds.length === readyIds.length && readyIds.length > 0 ? "取消全选" : "选择全部可安装项"}
+          </button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" disabled={busy} onClick={onClose}>
+              取消
+            </Button>
+            <Button disabled={selectedIds.length === 0 || busy} onClick={() => onInstall(selectedIds)}>
+              {busy ? "正在安装" : `安装 ${selectedIds.length} 个 Skill`}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 export function SkillManagementPage({ sidebarOpen, onToggleSidebar, onUseSkill }: SkillManagementPageProps) {
   const [query, setQuery] = useState("")
-  const [selectedSkillId, setSelectedSkillId] = useState<BuiltInTaskSkillId>("research")
-  const filteredSkills = BUILT_IN_SKILLS.filter((skill) => matchesQuery(skill, query))
-  const selectedSkill = filteredSkills.find((skill) => skill.name === selectedSkillId) ?? filteredSkills[0]
+  const [selectedSkillId, setSelectedSkillId] = useState<SelectableSkillId>("research")
+  const [pendingAction, setPendingAction] = useState<"install" | "scan" | "batch" | null>(null)
+  const {
+    busy,
+    clearScan,
+    error,
+    install,
+    installScanned,
+    loading,
+    remove,
+    scanDirectory,
+    scanResult,
+    setEnabled,
+    skills: userSkills,
+  } = useUserSkills()
+  const catalog = useMemo<CatalogSkill[]>(
+    () => [
+      ...BUILT_IN_SKILLS.map((skill) => ({
+        available: true,
+        description: skill.description,
+        displayName: skill.displayName,
+        enabled: true,
+        id: skill.name,
+        kind: "built-in" as const,
+        name: skill.name,
+        permissions: skill.permissions,
+        root: skill.root,
+        shortDescription: skill.shortDescription,
+      })),
+      ...userSkills.map((skill) => ({
+        available: skill.available,
+        description: skill.description,
+        displayName: skill.displayName,
+        enabled: skill.enabled,
+        ...(skill.error ? { error: skill.error } : {}),
+        id: skill.id,
+        kind: "user" as const,
+        name: skill.name,
+        permissions: [],
+        root: `user://${skill.name}`,
+        shortDescription: skill.shortDescription,
+        userConfig: skill,
+      })),
+    ],
+    [userSkills],
+  )
+  const filteredSkills = catalog.filter((skill) => matchesQuery(skill, query))
+  const selectedSkill =
+    catalog.find((skill) => skill.id === selectedSkillId) ?? filteredSkills[0] ?? catalog[0]
 
   return (
     <section className="flex h-full min-h-0 flex-col bg-background">
@@ -226,25 +521,52 @@ export function SkillManagementPage({ sidebarOpen, onToggleSidebar, onUseSkill }
             <div>
               <h1 className="text-2xl font-semibold tracking-tight">技能</h1>
               <p className="mt-1 text-sm text-muted-foreground">
-                管理模型可按需加载的本地工作流，并检查它们声明的能力边界。
+                安装自己的本地工作流，并检查它们实际拥有的能力边界。
               </p>
             </div>
-            <label className="relative block w-64 max-w-full" htmlFor="skill-search">
-              <span className="sr-only">搜索技能</span>
-              <Icon
-                icon={Search01Icon}
-                size={14}
-                className="pointer-events-none absolute top-1/2 left-2.5 z-10 -translate-y-1/2 text-muted-foreground"
-              />
-              <Input
-                id="skill-search"
-                type="search"
-                value={query}
-                className="pl-8"
-                placeholder="搜索技能"
-                onChange={(event) => setQuery(event.currentTarget.value)}
-              />
-            </label>
+            <div className="flex max-w-full items-center gap-2">
+              <label className="relative block w-56 max-w-full" htmlFor="skill-search">
+                <span className="sr-only">搜索技能</span>
+                <Icon
+                  icon={Search01Icon}
+                  size={14}
+                  className="pointer-events-none absolute top-1/2 left-2.5 z-10 -translate-y-1/2 text-muted-foreground"
+                />
+                <Input
+                  id="skill-search"
+                  type="search"
+                  value={query}
+                  className="pl-8"
+                  placeholder="搜索技能"
+                  onChange={(event) => setQuery(event.currentTarget.value)}
+                />
+              </label>
+              <Button
+                variant="outline"
+                disabled={busy}
+                onClick={() => {
+                  setPendingAction("scan")
+                  void scanDirectory().finally(() => setPendingAction(null))
+                }}
+              >
+                <Icon icon={FolderSearchIcon} size={14} />
+                {pendingAction === "scan" ? "正在扫描" : "扫描 Skill"}
+              </Button>
+              <Button
+                disabled={busy}
+                onClick={() => {
+                  setPendingAction("install")
+                  void install()
+                    .then((skill) => {
+                      if (skill) setSelectedSkillId(skill.id)
+                    })
+                    .finally(() => setPendingAction(null))
+                }}
+              >
+                <Icon icon={FolderAddIcon} size={14} />
+                {pendingAction === "install" ? "正在导入" : "添加 Skill"}
+              </Button>
+            </div>
           </div>
 
           <section className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-muted/30 px-4 py-3">
@@ -253,16 +575,24 @@ export function SkillManagementPage({ sidebarOpen, onToggleSidebar, onUseSkill }
                 <Icon icon={BookOpen01Icon} size={16} />
               </span>
               <div>
-                <h2 className="text-xs font-medium">已安装 {BUILT_IN_SKILLS.length} 个 Skill</h2>
+                <h2 className="text-xs font-medium">已安装 {catalog.length} 个 Skill</h2>
                 <p className="mt-0.5 text-[10px] text-muted-foreground">
-                  当前内置 Skill 随应用启用，用户级与工作区级安装正在规划。
+                  {loading
+                    ? "正在读取用户 Skill…"
+                    : `${BUILT_IN_SKILLS.length} 个内置 · ${userSkills.length} 个用户 Skill`}
                 </p>
               </div>
             </div>
             <span className="rounded-full border border-border bg-background px-2 py-1 text-[10px] text-muted-foreground">
-              本地基建
+              本地托管
             </span>
           </section>
+
+          {error ? (
+            <p className="mt-3 rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive" role="alert">
+              {error}
+            </p>
+          ) : null}
 
           <div className="mt-6 grid grid-cols-[minmax(0,1fr)_320px] items-start gap-5 max-[900px]:grid-cols-1">
             <section aria-labelledby="installed-skills-title">
@@ -277,25 +607,54 @@ export function SkillManagementPage({ sidebarOpen, onToggleSidebar, onUseSkill }
                 <div className="mt-3 grid grid-cols-2 gap-3 max-[680px]:grid-cols-1">
                   {filteredSkills.map((skill) => (
                     <SkillCard
-                      key={skill.name}
+                      key={skill.id}
                       skill={skill}
-                      active={selectedSkill?.name === skill.name}
-                      onSelect={() => setSelectedSkillId(skill.name)}
+                      active={selectedSkill?.id === skill.id}
+                      onSelect={() => setSelectedSkillId(skill.id)}
+                      onToggle={(enabled) => void setEnabled(skill.id as UserTaskSkillId, enabled)}
                     />
                   ))}
                 </div>
               ) : (
                 <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-12 text-center">
                   <p className="text-sm font-medium">没有匹配的 Skill</p>
-                  <p className="mt-1 text-xs text-muted-foreground">尝试搜索“研究”或“写作”。</p>
+                  <p className="mt-1 text-xs text-muted-foreground">换个关键词，或从本地文件夹添加。</p>
                 </div>
               )}
             </section>
 
-            {selectedSkill ? <SkillDetail skill={selectedSkill} onUseSkill={onUseSkill} /> : null}
+            {selectedSkill ? (
+              <SkillDetail
+                skill={selectedSkill}
+                onUseSkill={onUseSkill}
+                onDelete={(skill) => {
+                  if (!window.confirm(`删除用户 Skill“${skill.displayName}”？托管副本会移到废纸篓。`)) {
+                    return
+                  }
+                  void remove(skill.id as UserTaskSkillId).then((removed) => {
+                    if (removed) setSelectedSkillId("research")
+                  })
+                }}
+              />
+            ) : null}
           </div>
         </div>
       </div>
+      <SkillScanDialog
+        scan={scanResult}
+        busy={busy && pendingAction === "batch"}
+        onClose={clearScan}
+        onInstall={(candidateIds) => {
+          if (!scanResult) return
+          setPendingAction("batch")
+          void installScanned(scanResult.id, candidateIds)
+            .then((result) => {
+              const firstInstalled = result?.ok ? result.skills[0] : null
+              if (firstInstalled) setSelectedSkillId(firstInstalled.id)
+            })
+            .finally(() => setPendingAction(null))
+        }}
+      />
     </section>
   )
 }

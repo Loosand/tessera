@@ -44,6 +44,15 @@ const SEARCH_ENDPOINT_PRIORITY: readonly AiModelEndpointType[] = [
   "openai-chat-completions",
 ]
 
+// DeepSeek Responses 会返回 reasoning token 与加密续轮状态，但当前不会返回可展示的
+// reasoning summary；官方 Anthropic Messages 端点同时支持 thinking、工具续轮和 Web Search。
+const DEEPSEEK_SEARCH_ENDPOINT_PRIORITY: readonly AiModelEndpointType[] = [
+  "anthropic-messages",
+  "openai-responses",
+  "openai-chat-completions",
+  "xai-responses",
+]
+
 const CHAT_ENDPOINT_PRIORITY: readonly AiModelEndpointType[] = [
   "openai-chat-completions",
   "anthropic-messages",
@@ -102,7 +111,7 @@ export function resolveAiModelExecution(input: {
   const binding = input.webSearch
     ? sortedBinding(
         availableBindings.filter((candidate) => candidate.nativeWebSearch === "supported"),
-        SEARCH_ENDPOINT_PRIORITY,
+        input.providerId === "deepseek" ? DEEPSEEK_SEARCH_ENDPOINT_PRIORITY : SEARCH_ENDPOINT_PRIORITY,
       )
     : sortedBinding(availableBindings, CHAT_ENDPOINT_PRIORITY)
   const capabilities = effectiveCapabilities(model, binding)

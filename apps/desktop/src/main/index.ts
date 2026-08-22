@@ -1,8 +1,8 @@
 /**
- * [INPUT]: Electron 生命周期、共享 IPC 契约、AI Chat/Agent/Skill 配置、Agent 变更服务、模型服务、safeStorage 与 Tessera 核心服务
- * [OUTPUT]: 受限工作区/MCP Agent 工具、Skill 校验后的 SQLite 可恢复后台 AI 运行、Diff/MCP 审批、持久化 AI/MCP 配置与任务会话、关闭保存握手和桌面窗口
+ * [INPUT]: Electron 生命周期、共享 IPC 契约、AI Chat/Agent/Skill 配置、AI SDK 开发期日志、用户 Skill 扫描安装服务、Agent 变更服务、模型服务、safeStorage 与 Tessera 核心服务
+ * [OUTPUT]: 受限工作区/MCP Agent 工具、内置/用户 Skill 校验后的 SQLite 可恢复后台 AI 运行、官方 AI SDK 日志入口、Diff/MCP 审批、持久化 AI/MCP/用户 Skill 配置与扫描会话、关闭保存握手和桌面窗口
  * [POS]: Electron 主进程入口与平台安全边界
- * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/database.md、docs/architecture/mcp.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
+ * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/ai-observability.md、docs/architecture/database.md、docs/architecture/mcp.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url"
 import {
   AiProviderConfigError,
   AiProviderConnectionError,
+  type TaskAgentRunMetrics,
   listAiProviderModels,
   streamAiAgent,
   streamAiChat,
@@ -30,6 +31,7 @@ import {
   type DocumentSnapshot,
   type DocumentWriteResult,
   IPC_CHANNELS,
+  type TaskRunResourceSummary,
   type WorkspaceDirectoryEntry,
   type WorkspaceDocumentEntry,
   type WorkspaceEntryKind,
@@ -64,11 +66,13 @@ import {
 } from "electron"
 import { AgentChangeError, type AgentChangeService, createAgentChangeService } from "./agent-change-service"
 import { parseAiChatStreamEvent } from "./ai-chat-event"
+import { registerAiSdkDevtools, startAiSdkDevtoolsViewer, stopAiSdkDevtoolsViewer } from "./ai-devtools"
 import { type DesktopAiService, createDesktopAiService } from "./ai-service"
 import { handleDesktopInvoke, onDesktopSend } from "./ipc-contract"
 import { McpConfigError, type McpService, createMcpService } from "./mcp-service"
 import { createReadonlyWorkspaceAgentTools } from "./read-only-agent-tools"
 import { type DesktopTaskService, createDesktopTaskService } from "./task-service"
+import { UserSkillError, type UserSkillService, createUserSkillService } from "./user-skill-service"
 
 const APP_USER_MODEL_ID = "com.tessera.desktop"
 const MAIN_DIRECTORY = dirname(fileURLToPath(import.meta.url))
@@ -91,6 +95,7 @@ let desktopAiService: DesktopAiService | null = null
 let desktopTaskService: DesktopTaskService | null = null
 let agentChangeService: AgentChangeService | null = null
 let mcpService: McpService | null = null
+let userSkillService: UserSkillService | null = null
 let appQuitApproved = false
 let appQuitRequested = false
 
@@ -137,6 +142,11 @@ function requireMcpService(): McpService {
   return mcpService
 }
 
+function requireUserSkillService(): UserSkillService {
+  if (!userSkillService) throw new UserSkillError("用户 Skill 服务尚未就绪。")
+  return userSkillService
+}
+
 function notifyAiProviderConfigsChanged() {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.webContents.isDestroyed()) window.webContents.send(IPC_CHANNELS.aiProviderConfigsChanged)
@@ -149,11 +159,65 @@ function notifyMcpServersChanged() {
   }
 }
 
+function notifyUserSkillsChanged() {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.webContents.isDestroyed()) window.webContents.send(IPC_CHANNELS.userSkillsChanged)
+  }
+}
+
 function resolveAiChatInput(input: AiChatStartInput) {
   if (!input?.requestId || input.requestId.length > 128 || !/^[\w-]+$/u.test(input.requestId)) {
     throw new AiProviderConfigError("对话请求 ID 无效。")
   }
+  if (
+    input.currentDocumentPath &&
+    (input.currentDocumentPath.length > 1_024 ||
+      isAbsolute(input.currentDocumentPath) ||
+      input.currentDocumentPath.replaceAll("\\", "/").split("/").includes(".."))
+  ) {
+    throw new AiProviderConfigError("当前文档路径无效。")
+  }
   return requireDesktopAiService().resolveChatInput(input)
+}
+
+function summarizeTaskRunResources(
+  input: AiChatStartInput,
+  workspace: WorkspaceInfo | null,
+): TaskRunResourceSummary {
+  return {
+    attachmentCount: input.messages.reduce(
+      (count, message) => count + message.parts.filter((part) => part.type === "file").length,
+      0,
+    ),
+    currentDocumentPath: workspace ? (input.currentDocumentPath ?? null) : null,
+    workspaceId: workspace?.id ?? null,
+    workspaceName: workspace?.name ?? null,
+  }
+}
+
+function taskRunCompletion(
+  metrics: TaskAgentRunMetrics | null,
+  lastType: AiChatStreamChunk["type"] | undefined,
+  durationMs: number,
+) {
+  const completed = lastType === "finish"
+  return {
+    sdkCallId: metrics?.callId ?? null,
+    finishReason: completed ? (metrics?.finishReason ?? null) : lastType === "abort" ? "cancelled" : "error",
+    rawFinishReason: completed ? (metrics?.rawFinishReason ?? null) : null,
+    inputTokens: metrics?.inputTokens ?? null,
+    cacheReadTokens: metrics?.cacheReadTokens ?? null,
+    cacheWriteTokens: metrics?.cacheWriteTokens ?? null,
+    outputTokens: metrics?.outputTokens ?? null,
+    reasoningTokens: metrics?.reasoningTokens ?? null,
+    totalTokens: metrics?.totalTokens ?? null,
+    stepCount: metrics?.stepCount ?? null,
+    toolCallCount: metrics?.toolCallCount ?? null,
+    timeToFirstOutputMs: metrics?.timeToFirstOutputMs ?? null,
+    modelDurationMs: metrics?.modelDurationMs ?? null,
+    toolDurationMs: metrics?.toolDurationMs ?? null,
+    durationMs,
+  }
 }
 
 async function streamAiTask(
@@ -203,7 +267,10 @@ function recoverInterruptedAiRuns(client: DatabaseClient) {
       sequence,
       payloadJson: JSON.stringify(event),
     })
-    finishTaskRun(client, run.requestId, "interrupted")
+    finishTaskRun(client, run.requestId, "interrupted", {
+      finishReason: "interrupted",
+      durationMs: Math.max(0, Date.now() - run.startedAt.getTime()),
+    })
   }
 }
 
@@ -612,6 +679,18 @@ function registerIpcHandlers() {
     })
 
   handleDesktopInvoke(IPC_CHANNELS.appInfo, getAppInfo)
+  handleDesktopInvoke(IPC_CHANNELS.aiDevtoolsOpen, async () => {
+    try {
+      const url = await startAiSdkDevtoolsViewer()
+      await shell.openExternal(url)
+      return { ok: true }
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : "打开 AI 运行日志失败。",
+      }
+    }
+  })
   handleDesktopInvoke(IPC_CHANNELS.aiProviderListConfigs, () => requireDesktopAiService().listConfigs())
   handleDesktopInvoke(IPC_CHANNELS.aiProviderSaveConfig, (_event, input) => {
     try {
@@ -685,6 +764,83 @@ function registerIpcHandlers() {
       }
     }
   })
+  handleDesktopInvoke(IPC_CHANNELS.userSkillList, () => requireUserSkillService().list())
+  handleDesktopInvoke(IPC_CHANNELS.userSkillInstall, async (event) => {
+    try {
+      const window = BrowserWindow.fromWebContents(event.sender)
+      const options: OpenDialogOptions = {
+        title: "选择 Skill 文件夹",
+        buttonLabel: "导入",
+        properties: ["openDirectory"],
+      }
+      const selection = window
+        ? await dialog.showOpenDialog(window, options)
+        : await dialog.showOpenDialog(options)
+      const selectedPath = selection.filePaths[0]
+      if (selection.canceled || !selectedPath) return { ok: true, skill: null }
+      return { ok: true, skill: await requireUserSkillService().install(selectedPath) }
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof UserSkillError ? error.message : "导入 Skill 失败。",
+      }
+    }
+  })
+  handleDesktopInvoke(IPC_CHANNELS.userSkillScan, async (event) => {
+    try {
+      const window = BrowserWindow.fromWebContents(event.sender)
+      const options: OpenDialogOptions = {
+        title: "选择要扫描的 Skill 根目录",
+        buttonLabel: "扫描",
+        properties: ["openDirectory"],
+      }
+      const selection = window
+        ? await dialog.showOpenDialog(window, options)
+        : await dialog.showOpenDialog(options)
+      const selectedPath = selection.filePaths[0]
+      if (selection.canceled || !selectedPath) return { ok: true, scan: null }
+      return { ok: true, scan: await requireUserSkillService().scan(selectedPath) }
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof UserSkillError ? error.message : "扫描 Skill 失败。",
+      }
+    }
+  })
+  handleDesktopInvoke(IPC_CHANNELS.userSkillInstallScanned, async (_event, scanId, candidateIds) => {
+    try {
+      return {
+        ok: true,
+        ...(await requireUserSkillService().installScanned(scanId, candidateIds)),
+      }
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof UserSkillError ? error.message : "批量导入 Skill 失败。",
+      }
+    }
+  })
+  handleDesktopInvoke(IPC_CHANNELS.userSkillSetEnabled, async (_event, skillId, enabled) => {
+    try {
+      return { ok: true, skill: await requireUserSkillService().setEnabled(skillId, enabled) }
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof UserSkillError ? error.message : "更新 Skill 状态失败。",
+      }
+    }
+  })
+  handleDesktopInvoke(IPC_CHANNELS.userSkillDelete, async (_event, skillId) => {
+    try {
+      await requireUserSkillService().delete(skillId)
+      return { ok: true }
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof UserSkillError ? error.message : "删除 Skill 失败。",
+      }
+    }
+  })
   handleDesktopInvoke(IPC_CHANNELS.aiChatStart, async (event, input) => {
     try {
       if (activeAiChats.has(input.requestId)) {
@@ -697,6 +853,7 @@ function registerIpcHandlers() {
       if (previousRun) releaseAiChatRun(previousRun)
       const workspace = activeWorkspaces.get(event.sender.id)?.workspace ?? null
       requireDesktopTaskService().authorizeTurn(input.taskId, input.mode, workspace, input.skillId)
+      const loadedSkill = await requireUserSkillService().load(input.skillId)
       if (input.mode === "agent") {
         requireAgentChangeService().reconcileDecisions(input.taskId, input.messages)
       }
@@ -704,8 +861,10 @@ function registerIpcHandlers() {
       if (!databaseClient) throw new AiProviderConfigError("本地任务数据库尚未就绪。")
       const runDatabase = databaseClient
       const abortController = new AbortController()
+      const runStartedAt = new Date()
       const webContentsId = event.sender.id
       let sequence = 0
+      let runMetrics: TaskAgentRunMetrics | null = null
       const run: ActiveAiChat = {
         active: true,
         abortController,
@@ -726,11 +885,13 @@ function registerIpcHandlers() {
         configId: input.configId,
         providerId: input.providerId,
         modelId: input.modelId,
-        mode: input.mode,
-        skillId: input.skillId,
-        reasoning: input.reasoning,
-        webSearch: input.webSearch,
-        startedAt: new Date(),
+        mode: runtimeInput.runPolicy.mode,
+        skillId: runtimeInput.runPolicy.skillId,
+        reasoning: runtimeInput.runPolicy.reasoning,
+        webSearch: runtimeInput.runPolicy.webSearch,
+        policyJson: JSON.stringify(runtimeInput.runPolicy),
+        resourceSummaryJson: JSON.stringify(summarizeTaskRunResources(input, workspace)),
+        startedAt: runStartedAt,
       })
 
       const pendingToolInputs = new Map<string, { input: unknown; toolName: string }>()
@@ -771,7 +932,14 @@ function registerIpcHandlers() {
         if (!event.sender.isDestroyed()) event.sender.send(IPC_CHANNELS.aiChatEvent, streamEvent)
       }
 
-      void streamAiTask(runtimeInput, workspace, { abortSignal: abortController.signal, onChunk: emit })
+      void streamAiTask(runtimeInput, workspace, {
+        abortSignal: abortController.signal,
+        onChunk: emit,
+        onRunMetrics: (metrics) => {
+          runMetrics = metrics
+        },
+        ...(loadedSkill ? { skill: loadedSkill } : {}),
+      })
         .catch(async (error) => {
           const lastType = run.events.at(-1)?.chunk.type
           if (lastType === "finish" || lastType === "abort" || lastType === "error") return
@@ -788,6 +956,7 @@ function registerIpcHandlers() {
             runDatabase,
             input.requestId,
             lastType === "finish" ? "completed" : lastType === "abort" ? "cancelled" : "failed",
+            taskRunCompletion(runMetrics, lastType, Math.max(0, Date.now() - runStartedAt.getTime())),
           )
           if (activeAiChats.get(input.requestId) === run) activeAiChats.delete(input.requestId)
           if (aiChatRunsByTask.get(input.taskId) !== run) return
@@ -801,7 +970,6 @@ function registerIpcHandlers() {
   })
   handleDesktopInvoke(IPC_CHANNELS.aiChatResume, (event, taskId) => {
     try {
-      const task = requireDesktopTaskService().read(taskId)
       const run = aiChatRunsByTask.get(taskId)
       if (run && run.webContentsId === event.sender.id) {
         return {
@@ -816,6 +984,8 @@ function registerIpcHandlers() {
           },
         }
       }
+      const task = requireDesktopTaskService().readIfExists(taskId)
+      if (!task) return { ok: true, run: null }
       if (task.status !== "running" || !databaseClient) return { ok: true, run: null }
       const persisted = findLatestTaskRun(databaseClient, taskId)
       if (!persisted) return { ok: true, run: null }
@@ -1119,12 +1289,33 @@ function createWindow(initialWorkspace: WorkspaceInfo | null = null) {
   void window.loadFile(join(MAIN_DIRECTORY, "../renderer/index.html"))
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   app.setAppUserModelId(APP_USER_MODEL_ID)
-  databaseClient = openDatabase({ path: join(app.getPath("userData"), "tessera.sqlite3") })
+  try {
+    await registerAiSdkDevtools()
+  } catch (error) {
+    console.warn("AI SDK DevTools 注册失败。", error)
+  }
+  const userDataPath = app.getPath("userData")
+  databaseClient = openDatabase({ path: join(userDataPath, "tessera.sqlite3") })
   desktopAiService = createDesktopAiService(databaseClient)
   desktopTaskService = createDesktopTaskService(databaseClient)
   agentChangeService = createAgentChangeService(databaseClient)
+  mcpService = createMcpService({
+    client: databaseClient,
+    onChanged: notifyMcpServersChanged,
+    secretStorage: {
+      isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
+      encrypt: (value) => safeStorage.encryptString(value).toString("base64"),
+      decrypt: (value) => safeStorage.decryptString(Buffer.from(value, "base64")),
+    },
+  })
+  userSkillService = createUserSkillService({
+    client: databaseClient,
+    rootPath: userDataPath,
+    onChanged: notifyUserSkillsChanged,
+    trashDirectory: (path) => shell.trashItem(path),
+  })
   recoverInterruptedAiRuns(databaseClient)
   registerIpcHandlers()
   createWindow(restoreMostRecentWorkspace())
@@ -1148,14 +1339,18 @@ app.on("before-quit", (event) => {
 })
 
 app.on("will-quit", () => {
+  stopAiSdkDevtoolsViewer()
   for (const chat of activeAiChats.values()) chat.abortController.abort("应用已退出")
   for (const chat of aiChatRunsByTask.values()) releaseAiChatRun(chat)
   for (const webContentsId of activeWorkspaces.keys()) closeWorkspaceSession(webContentsId)
+  void mcpService?.close()
   databaseClient?.close()
   databaseClient = null
   desktopAiService = null
   desktopTaskService = null
   agentChangeService = null
+  mcpService = null
+  userSkillService = null
 })
 
 app.on("window-all-closed", () => {

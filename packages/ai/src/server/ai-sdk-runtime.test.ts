@@ -82,6 +82,19 @@ describe("AI SDK 供应商适配", () => {
     expect(runtime.tools?.web_search).toMatchObject({ args: { maxUses: 15 } })
   })
 
+  it("强制把 DeepSeek Responses 自定义模型按推理模型请求摘要", () => {
+    const runtime = createAiSdkChatRuntime({
+      configId: "deepseek",
+      providerId: "deepseek",
+      baseUrl: "https://api.deepseek.com",
+      endpointType: "openai-responses",
+      modelId: "deepseek-v4-flash",
+      apiKey: "test-key",
+    })
+
+    expect(runtime.providerOptions).toEqual({ openai: { forceReasoning: true } })
+  })
+
   it("把异常搜索额度约束到运行时安全范围", () => {
     const runtime = createAiSdkChatRuntime(
       {

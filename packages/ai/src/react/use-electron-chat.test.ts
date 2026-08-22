@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 合成 Electron IPC 正文/工具增量事件与 AI SDK React Chat 状态机
- * [OUTPUT]: Transport 按顺序消费与恢复 reasoning、正文和工具 Part，并保留任务消息的回归验证
+ * [OUTPUT]: Transport 按顺序消费与恢复 reasoning、正文和工具 Part，跳过未持久化草稿恢复，并保留任务消息的回归验证
  * [POS]: use-electron-chat Transport 的流式集成测试
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -79,8 +79,6 @@ describe("ElectronChatTransport", () => {
       skillId: "research",
       providerId: "openai-compatible",
       modelId: "test-model",
-      reasoning: "auto",
-      webSearch: false,
     }))
     let id = 0
     const chat = new Chat<UIMessage>({
@@ -323,8 +321,6 @@ describe("ElectronChatTransport", () => {
       skillId: null,
       providerId: "deepseek",
       modelId: "deepseek-v4-flash",
-      reasoning: "auto",
-      webSearch: false,
     }))
     const abortController = new AbortController()
     const stream = await transport.sendMessages({
@@ -412,8 +408,7 @@ describe("ElectronChatTransport", () => {
       skillId: null,
       providerId: "deepseek",
       modelId: "deepseek-v4-flash",
-      reasoning: "auto",
-      webSearch: false,
+      resume: true,
     }))
 
     const stream = await transport.reconnectToStream({ chatId: "chat-resume" })
@@ -434,5 +429,28 @@ describe("ElectronChatTransport", () => {
       type: "start",
       messageMetadata: { modelId: "deepseek-v4-flash", providerId: "deepseek" },
     })
+  })
+
+  it("未持久化草稿不会请求恢复生成流", async () => {
+    const resumeAiChat = vi.fn(async () => ({ ok: true as const, run: null }))
+    const bridge: ElectronChatBridge = {
+      cancelAiChat: vi.fn(),
+      onAiChatEvent: () => () => {},
+      resumeAiChat,
+      startAiChat: async () => ({ ok: true }),
+    }
+    const transport = new ElectronChatTransport(() => ({
+      bridge,
+      chatId: "draft-task",
+      configId: "deepseek",
+      mode: "chat",
+      skillId: null,
+      providerId: "deepseek",
+      modelId: "deepseek-v4-flash",
+      resume: false,
+    }))
+
+    await expect(transport.reconnectToStream({ chatId: "draft-task" })).resolves.toBeNull()
+    expect(resumeAiChat).not.toHaveBeenCalled()
   })
 })

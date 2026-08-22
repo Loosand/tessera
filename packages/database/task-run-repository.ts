@@ -1,6 +1,6 @@
 /**
- * [INPUT]: Drizzle 数据库实例、含逐轮 mode/Skill/思考/联网快照的任务运行元数据与按序序列化的 AI SDK UIMessageChunk 事件
- * [OUTPUT]: 带实际执行策略的任务运行创建、事件追加、结束、崩溃中断标记、恢复读取与清理
+ * [INPUT]: Drizzle 数据库实例、含完整 RunPolicy/资源摘要的任务运行元数据、AI SDK 生命周期完成指标与按序序列化的 UIMessageChunk 事件
+ * [OUTPUT]: 带实际执行策略、可见资源摘要、完成原因、Token/缓存与耗时指标的任务运行创建、事件追加、结束、崩溃中断标记、恢复读取与清理
  * [POS]: Electron 主进程持久化 AI 运行检查点的数据库边界
  * [DOC]: docs/architecture/database.md、docs/architecture/task-navigation.md
  *
@@ -18,7 +18,14 @@ export type TaskRunStatus = TaskRun["status"]
 
 export type TaskRunInput = Pick<
   TaskRun,
-  "requestId" | "taskId" | "configId" | "providerId" | "modelId" | "startedAt"
+  | "requestId"
+  | "taskId"
+  | "configId"
+  | "providerId"
+  | "modelId"
+  | "policyJson"
+  | "resourceSummaryJson"
+  | "startedAt"
 > & {
   readonly mode: NonNullable<TaskRun["mode"]>
   readonly reasoning: NonNullable<TaskRun["reasoning"]>
@@ -27,6 +34,29 @@ export type TaskRunInput = Pick<
 }
 
 export type TaskRunEventInput = Pick<TaskRunEventRecord, "requestId" | "sequence" | "payloadJson">
+
+export type TaskRunCompletionInput = Readonly<
+  Partial<
+    Pick<
+      TaskRun,
+      | "sdkCallId"
+      | "finishReason"
+      | "rawFinishReason"
+      | "inputTokens"
+      | "cacheReadTokens"
+      | "cacheWriteTokens"
+      | "outputTokens"
+      | "reasoningTokens"
+      | "totalTokens"
+      | "stepCount"
+      | "toolCallCount"
+      | "timeToFirstOutputMs"
+      | "modelDurationMs"
+      | "toolDurationMs"
+      | "durationMs"
+    >
+  >
+>
 
 export function startTaskRun(client: DatabaseClient, input: TaskRunInput) {
   client.db
@@ -41,6 +71,8 @@ export function startTaskRun(client: DatabaseClient, input: TaskRunInput) {
       skillId: input.skillId,
       reasoning: input.reasoning,
       webSearch: input.webSearch,
+      policyJson: input.policyJson,
+      resourceSummaryJson: input.resourceSummaryJson,
       status: "running",
       lastSequence: 0,
       startedAt: input.startedAt,
@@ -74,12 +106,13 @@ export function finishTaskRun(
   client: DatabaseClient,
   requestId: string,
   status: Exclude<TaskRunStatus, "running">,
+  completion: TaskRunCompletionInput = {},
 ) {
   const now = new Date()
   return (
     client.db
       .update(taskRuns)
-      .set({ status, updatedAt: now, completedAt: now })
+      .set({ ...completion, status, updatedAt: now, completedAt: now })
       .where(eq(taskRuns.requestId, requestId))
       .run().changes > 0
   )

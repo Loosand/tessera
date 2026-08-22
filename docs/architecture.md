@@ -2,7 +2,7 @@
 
 > 代码源头：`apps/desktop/src/main/index.ts`、`apps/desktop/src/preload/index.ts`、
 > `packages/agent-runtime/src/index.ts`、`packages/ai/src/index.ts`、`packages/ai/src/server/index.ts`、`packages/skills/src/index.ts`、
-> `packages/database/client.ts`
+> `packages/database/client.ts`、`apps/desktop/src/main/user-skill-service.ts`
 >
 > 状态：部分实现。
 
@@ -42,7 +42,7 @@ SQLite 控制层”作为可逆实验基线，同时保留数据库正文和完�
 - **已实现**：平台操作只通过 `packages/contracts` 定义的预加载接口调用。
 - **已实现**：渲染层 CSP 保持脚本与主动连接同源，只额外允许以无 Referer 的 HTTPS 图片请求加载联网搜索来源 favicon。
 - **已实现**：TipTap 与按需加载的 CodeMirror 6 源码表面共享同一份 Markdown 草稿、flush 和保存协议。
-- **部分实现**：主导航「新任务」与文档 AI 侧栏复用同一 TaskPage、流式协议和消息历史；界面只提供自动/研究/写作/问答创作模式，并支持显式当前文档草稿/图片附件、来源、工具状态、停止、重试、文件引用跳转、任务/运行事件恢复和 Markdown 渲染 Diff 审批。当前独立任务仍使用 Chat、工作区任务使用 Agent；统一 Agent runtime 与每轮动态模式属于下一阶段迁移。
+- **部分实现**：主导航「新任务」与文档 AI 侧栏复用同一 TaskPage、流式协议和消息历史；界面只提供自动/研究/写作/问答创作方式，并支持显式当前文档草稿/图片附件、来源、工具状态、停止、重试、文件引用跳转、任务/运行事件恢复和 Markdown 渲染 Diff 审批。所有任务已使用共用动态配置的 AI SDK Agent，旧 Chat/Agent 字段只暂存内部资源作用域；自动意图识别和动态资源关联仍待实现。
 - **部分实现**：Agent 的只读范围、工具访问路径和失败状态使用独立可见语义；建议、权限请求和 Diff 仍需可审查界面。
 
 ### 主进程与核心层
@@ -51,6 +51,8 @@ SQLite 控制层”作为可逆实验基线，同时保留数据库正文和完�
 - **已实现**：窗口级会话管理文件监听、外部修改冲突、最近工作区和关闭前保存握手。
 - **已实现**：SQLite 随主进程生命周期打开和关闭，渲染层不持有连接。
 - **已实现**：AI 模型目录请求经类型化 IPC 进入主进程，具备 URL 校验、总超时、响应体上限和错误脱敏。
+- **部分实现**：MCP 配置经类型化 IPC 进入主进程；stdio、Streamable HTTP 与 SSE 连接、工具发现/逐项停用、safeStorage 秘密隔离和连接池已实现，Resources、Prompts、OAuth 与运行日志待实现。
+- **已实现**：用户可以经系统目录选择器导入单个标准 `SKILL.md` 目录，或受限递归扫描上级目录、预览有效/重复/已安装项后批量导入；扫描绝对路径只存在于短时主进程会话。主进程限制文件类型/体积并原子复制到应用托管目录，SQLite 保存启用状态，删除使用系统废纸篓。用户 Skill 只注入 instructions，不执行附带脚本或扩大权限。
 - **规划**：采集、全文索引、权限、Diff 与审计通过核心服务暴露窄接口。
 - **规划（探索）**：当前混合基线由主进程领域服务协调内容库根目录、Inbox、项目创建、文档移动与 SQLite；模型只获得稳定 ID 和受限相对路径。领域工具必须保持后端无关，以便与数据库或完全外部工作区候选比较。
 - **规划**：所有出站请求记录目标、目的和数据范围。
@@ -58,11 +60,11 @@ SQLite 控制层”作为可逆实验基线，同时保留数据库正文和完�
 ### Agent 与 Skills
 
 - **已实现**：`AgentRuntime` 泛型端口已承载 AI SDK `ToolLoopAgent` 的类型化 `UIMessageChunk` 异步流、取消信号和审批事件；产品运行链路不再绕过独立端口。
-- **规划**：统一运行时遵守 AI SDK 标准优先：使用 `ToolLoopAgent`、call options / `prepareCall`、`prepareStep`、`stopWhen`、`toolApproval`、`InferAgentUIMessage`、`useChat` 与生命周期回调；Tessera 只维护 Electron transport、持久化恢复、领域资源和权限适配，`AgentRuntime` 保持薄端口。
-- **部分实现**：`@tessera/ai` 独立封装 OpenAI 兼容、Anthropic 兼容、DeepSeek、Grok 与 OpenRouter。已实现普通对话、供应商已验证的原生联网、受限工作区读写工具循环、AI SDK 标准工具审批和只读研究子 Agent；MCP、Shell 与 durable 自动续跑尚未接入。
-- **规划**：所有任务收敛到 `ToolLoopAgent`；`toolChoice = auto` 允许零工具直接回答，每轮策略根据用户意图、显式资源、已验证模型能力和权限决定 Skill 与工具集合。
-- **已实现**：Agent 工作区根目录只存在于主进程闭包；Markdown 列表、读取、搜索、当前文档和经批准写入统一执行真实路径、符号链接、文件类型、版本冲突与资源上限校验。Agent 只能获得请求期路由验证通过的供应商原生搜索，删除、重命名、Shell 和任意 MCP 保持不可达。
-- **部分实现**：`packages/skills` 已实现标准 `SKILL.md` 校验、内置/用户级/工作区级描述、权限声明和内置渐进式加载注册表；研究与写作正文当前按任务选择注入，目标迁移为按 `task_run` 动态选择和固化。用户级与工作区级发现、安装和版本仍待实现。
+- **部分实现**：统一运行时遵守 AI SDK 标准优先：已使用 `ToolLoopAgent`、类型化 call options / `prepareCall`、`activeTools`、`stopWhen`、工具 `needsApproval` 与 `useChat`；`prepareStep`、`InferAgentUIMessage` 和完整生命周期观测仍待接入。Tessera 只维护 Electron transport、持久化恢复、领域资源和权限适配，`AgentRuntime` 保持薄端口。
+- **部分实现**：`@tessera/ai` 独立封装 OpenAI 兼容、Anthropic 兼容、DeepSeek、Grok 与 OpenRouter。已实现普通对话、供应商已验证的原生联网、受限工作区读写工具循环、AI SDK 标准工具审批、只读研究子 Agent，以及主进程注入的 MCP 动态工具；Shell 与 durable 自动续跑尚未接入。
+- **部分实现**：所有任务已收敛到 `ToolLoopAgent`，`toolChoice = auto` 允许零工具直接回答；主进程 RunPolicy 已按显式创作方式、内部作用域和已验证模型能力决定 Skill、联网、推理、工具作用域与预算，用户 turn 自动意图、规范化资源关系和更细权限输入仍待实现。
+- **已实现**：Agent 工作区根目录只存在于主进程闭包；Markdown 列表、读取、搜索、当前文档和经批准写入统一执行真实路径、符号链接、文件类型、版本冲突与资源上限校验。Agent 只能获得请求期路由验证通过的供应商原生搜索，以及用户显式信任、启用并逐次批准的 MCP 工具；删除、重命名和 Shell 保持不可达。
+- **部分实现**：`packages/skills` 已实现标准 `SKILL.md` 校验、内置/用户级/工作区级描述、权限声明和内置渐进式加载注册表；研究、写作及已启用用户 Skill 的正文按本轮选择经 call options 注入并固化到 `task_run`。用户目录手动扫描已实现，用户 turn 自动选择、工作区级自动发现、更新与版本仍待实现。
 - **已实现**：Skill 只描述工作流和所需资源，不提升任务权限；具体工具由运行策略、显式资源、模型能力、主进程边界与人工审批共同决定。
 - **规划**：Agent 对文件的修改以文本补丁提出，批准后由核心层写入。
 
@@ -104,7 +106,7 @@ SQLite 控制层”作为可逆实验基线，同时保留数据库正文和完�
 | `core` | 平台无关的应用服务与领域编排 |
 | `ai` | 模型供应商目录、AI SDK 适配边界与可复用 React 界面 |
 | `agent-runtime` | 可替换 Agent 运行时端口 |
-| `skills` | `SKILL.md` 描述、作用域、权限契约、内置注册表和渐进式加载 |
+| `skills` | `SKILL.md` 描述、作用域、权限契约、内置注册表和用户描述符构造 |
 | `database` | SQLite 连接、迁移、索引与运行状态 |
 | `design-system` | 语义 token、交互原语和共享组件 |
 

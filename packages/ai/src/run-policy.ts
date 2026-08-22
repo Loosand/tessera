@@ -1,0 +1,103 @@
+/**
+ * [INPUT]: 本轮显式创作方式、内部任务作用域、供应商连接与已归一化模型事实
+ * [OUTPUT]: 受信任主进程和渲染层预检共用的实际端点、联网、推理、工具作用域与资源上限 RunPolicy
+ * [POS]: 模型请求期路由之后、AI SDK ToolLoopAgent 动态配置之前的单一策略事实源
+ * [DOC]: docs/architecture/unified-creation-agent.md、docs/architecture/ai-providers.md、docs/architecture/task-navigation.md
+ *
+ * [PROTOCOL]:
+ * 1. 文件契约变化时更新本 Header。
+ * 2. 成员或职责变化时同步最近的 .folder.md。
+ * 3. 行为变化时同步 [DOC] 指向的文档。
+ */
+
+import type { AiProviderId, AiProviderModel, TaskMode, TaskRunPolicy, TaskSkillId } from "@tessera/contracts"
+import {
+  type AiModelExecution,
+  type AiModelExecutionIssue,
+  aiModelExecutionIssueMessage,
+  resolveAiModelExecution,
+} from "./model-routing"
+
+export type TaskRunPolicyIssue = AiModelExecutionIssue | "research-reasoning-unavailable"
+
+export type TaskRunPolicyResolution = {
+  execution: AiModelExecution
+  issues: TaskRunPolicyIssue[]
+  policy: TaskRunPolicy
+}
+
+const TASK_TIMEOUT_MS = 120_000
+const MAX_OUTPUT_TOKENS = 4_096
+
+function resolveToolScope(mode: TaskMode, skillId: TaskSkillId): TaskRunPolicy["toolScope"] {
+  if (mode === "chat") return "conversation"
+  if (skillId === "question-answering") return "workspace-read"
+  return "workspace-write"
+}
+
+function resolveLimits(mode: TaskMode, skillId: TaskSkillId): TaskRunPolicy["limits"] {
+  const maxSteps = skillId === "research" ? 8 : skillId === "writing" ? 6 : mode === "agent" ? 8 : 4
+  return {
+    maxOutputTokens: MAX_OUTPUT_TOKENS,
+    maxSteps,
+    maxTotalTokens: mode === "agent" ? 80_000 : 40_000,
+    timeoutMs: TASK_TIMEOUT_MS,
+  }
+}
+
+export function resolveTaskRunPolicy(input: {
+  baseUrl: string
+  mode: TaskMode
+  model: AiProviderModel
+  providerId: AiProviderId
+  skillId: TaskSkillId
+}): TaskRunPolicyResolution {
+  const resolve = (webSearch: boolean) =>
+    resolveAiModelExecution({
+      baseUrl: input.baseUrl,
+      mode: input.mode,
+      model: input.model,
+      providerId: input.providerId,
+      webSearch,
+    })
+
+  let execution: AiModelExecution
+  if (input.skillId === "question-answering") {
+    execution = resolve(false)
+  } else {
+    const onlineExecution = resolve(true)
+    execution =
+      input.skillId === "research" || onlineExecution.issues.length === 0 ? onlineExecution : resolve(false)
+  }
+
+  const issues: TaskRunPolicyIssue[] = [...execution.issues]
+  if (input.skillId === "research" && execution.capabilities.reasoning !== "supported") {
+    issues.push("research-reasoning-unavailable")
+  }
+  const reasoning =
+    input.skillId === "research"
+      ? "high"
+      : input.skillId !== "question-answering" && execution.capabilities.reasoning === "supported"
+        ? "high"
+        : "auto"
+
+  return {
+    execution,
+    issues,
+    policy: {
+      limits: resolveLimits(input.mode, input.skillId),
+      mode: input.mode,
+      reasoning,
+      skillId: input.skillId,
+      toolScope: resolveToolScope(input.mode, input.skillId),
+      webSearch: execution.searchRoute === "provider-native",
+    },
+  }
+}
+
+export function taskRunPolicyIssueMessage(issue: TaskRunPolicyIssue): string {
+  if (issue === "research-reasoning-unavailable") {
+    return "研究模式需要支持深度思考的模型，请更换模型或改用自动模式。"
+  }
+  return aiModelExecutionIssueMessage(issue)
+}

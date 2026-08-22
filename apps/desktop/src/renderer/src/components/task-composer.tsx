@@ -48,6 +48,7 @@ type TaskComposerProps = {
   readonly documentContext: ComposerDocumentContext | null
   readonly images: readonly ComposerImage[]
   readonly model: AvailableAiModel | undefined
+  readonly modelLoading: boolean
   readonly models: readonly AvailableAiModel[]
   readonly notice: string
   readonly onAddImages: (files: FileList) => void
@@ -74,6 +75,7 @@ export function TaskComposer({
   documentContext,
   images,
   model,
+  modelLoading,
   models,
   notice,
   onAddImages,
@@ -242,6 +244,7 @@ export function TaskComposer({
 
           <div className="flex min-w-0 shrink-0 items-center gap-1">
             <ModelPicker
+              loading={modelLoading}
               model={model}
               models={models}
               selectedModelKey={selectedModelKey}

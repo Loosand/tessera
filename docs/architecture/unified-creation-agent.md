@@ -7,9 +7,10 @@
 > `apps/desktop/src/renderer/src/hooks/use-tasks.ts`、
 > `apps/desktop/src/renderer/src/components/task-page.tsx`
 >
-> 状态：交互方向已确认、内容存储方案处于探索阶段。统一 TaskPage、所有任务的 AI SDK `ToolLoopAgent`、工作区 Markdown
-> 读写、当前文档附件、联网搜索、逐轮显式 Skill、基础运行策略快照、Diff 审批与运行事件已经存在；单一动态
-> Agent 定义、自动意图路由、动态资源和领域工具仍为规划。托管内容库混合方案仅作为当前实验基线，不排除数据库正文或完全开放外部工作区。
+> 状态：交互方向已确认、内容存储方案处于探索阶段。统一 TaskPage、所有任务的 AI SDK `ToolLoopAgent`、共用
+> `callOptionsSchema` / `prepareCall` 动态配置、受信任 RunPolicy、工作区 Markdown 读写、当前文档附件、联网搜索、
+> 逐轮显式 Skill、完整策略/资源摘要快照、Diff 审批与运行事件已经存在；自动意图路由、规范化动态资源关系和
+> 项目/文档领域工具仍为规划。托管内容库混合方案仅作为当前实验基线，不排除数据库正文或完全开放外部工作区。
 
 ## 地位
 
@@ -63,7 +64,9 @@
 
 ### 每轮策略解析
 
-每次用户提交都先由受信任的运行策略解析器生成 `RunPolicy`。输入仅包括：
+每次用户提交都先由受信任的运行策略解析器生成 `RunPolicy`。当前第一版已经以主进程持久化的模型事实、显式创作
+方式和内部工作区作用域生成端点、联网、推理、工具作用域及预算；renderer 只做同源预检，不再通过 IPC 决定联网
+或思考强度。后续自动意图识别继续补充用户 turn、动态资源和权限输入。完整输入边界为：
 
 - 用户对下一轮的显式创作模式提示；
 - 当前会话历史和已持久化工具结果；
@@ -79,7 +82,7 @@
 Task + User Turn + Visible Resources + Model Facts + Permissions
                          |
                          v
-                  resolveRunPolicy()
+                resolveTaskRunPolicy()
                          |
                          v
           ToolLoopAgent(toolChoice = auto)
@@ -103,7 +106,7 @@ Task、Run 和 AI SDK step 不能共用一个状态语义。
 | 每轮动态配置 | `callOptionsSchema` + `prepareCall` | 把已解析 `RunPolicy` 作为类型化 options 传入 |
 | 每步收窄工具/模型 | `prepareStep`、`activeTools`、`stopWhen` | 预算、权限上限和领域完成条件；不得在 step 中扩大授权 |
 | 受限工具 | `tool()`、`inputSchema`、`contextSchema`、`toolsContext` | 主进程领域服务、路径/记录校验和稳定资源 ID |
-| 动态审批 | `toolApproval`，必要时由 `prepareCall` 返回本轮策略 | 审批 UI、SQLite 冻结、版本复核和本地审计 |
+| 动态审批 | 工具 `needsApproval` / `toolApproval`，必要时由 `prepareCall` 返回本轮策略 | 审批 UI、SQLite 冻结、版本复核和本地审计 |
 | 对话消息 | `UIMessage`、`InferAgentUIMessage`、`convertToModelMessages` | 应用元数据 schema、持久化和旧版本迁移 |
 | React 会话状态 | `useChat` 与标准 Tool Part 状态 | Tessera 视觉组件和任务导航 |
 | UI 流 | Agent `stream()` / UI message stream 与标准 chunk | Electron 主进程事件持久化、恢复和 IPC 背压 |
@@ -159,10 +162,10 @@ run 加载写作 Skill；过去的 run 保留当时实际策略，不被回写�
 | --- | --- | --- |
 | Task | 一条可以持续推进的对话 | SQLite 会话和版本化消息 |
 | Run | 一次用户提交触发的执行 | SQLite 运行、策略快照和有序事件 |
-| Workspace / Project | 一个长期项目容器 | 已登记的本地目录 |
-| Document | 可继续编辑和交付的内容 | Markdown 文件 |
-| Artifact | Agent 在某个 run 创建或修改的产物关系 | 稳定 ID、文件相对路径、创建 run 和工作区关联 |
-| Resource Binding | 当前对话可以使用的材料与作用域 | Task/Run 到文档、工作区、附件的关系 |
+| Workspace / Project | 一个长期项目容器 | 已登记的本地目录；公共 `ProjectRef` 不暴露后端位置 |
+| Document | 可继续编辑和交付的内容 | Markdown 文件；公共 `DocumentRef` 只使用稳定 ID 和项目关系 |
+| Artifact | Agent 在某个 run 创建或修改的产物关系 | 已定义 `ArtifactRef` 契约；持久化表与工具仍规划 |
+| Resource Binding | 当前对话可以使用的材料与作用域 | 已定义 `ResourceBinding` 契约；当前 run 先保存摘要，规范化关系仍规划 |
 | Operation | 创建、移动、重命名或写入动作 | 主进程文件操作 + SQLite 审计 |
 
 ### 当前混合基线的内容层与控制层
@@ -235,7 +238,8 @@ Markdown / 图片 / 附件             Task / Run / Message
 | 修改现有 Markdown | 必须展示候选渲染和源码 Diff，批准后复核版本再写入 |
 | 在内容库内新建项目 | 用户明确要求或选择推荐方案后执行，显示目标并记录结果 |
 | 移动/重命名文件 | 明确指令或确认过的结构化选项才执行；先检查冲突，显示来源和目标并保留恢复信息 |
-| 删除、覆盖、内容库外写入、Shell/MCP | 使用独立高风险权限面；未实现前保持不可达 |
+| 删除、覆盖、内容库外写入、Shell | 使用独立高风险权限面；未实现前保持不可达 |
+| MCP 工具 | 只注册用户显式信任、启用且未逐项停用的工具；每次调用仍人工批准，不继承内容库权限 |
 
 结构化问题只用于会改变核心结果、且无法安全推断的选择。用户已经说“建立单独项目”时，不应再次询问是否真的要
 建立项目；项目名称或位置只有在多个候选同样合理且会影响本地组织时才询问一次。
@@ -245,7 +249,7 @@ Markdown / 图片 / 附件             Task / Run / Message
 - 输入框不显示 Chat/Agent、联网、工具调用或思考档位开关；只保留附件、创作模式、模型和发送。
 - 创作模式默认不选或显示“自动”，选择只影响下一轮，发送后仍可继续切换。
 - 运行过程按真实事件折叠为活动时间线：思考、搜索、读取、提问、创建文档、创建项目、移动文档和验证结构。
-- 供应商没有返回可展示 reasoning 文本时，不渲染重复的空“思考完成”块；工具活动由工具 Part 表达。
+- 供应商没有返回可展示 reasoning 文本时，将同一回复内的空 reasoning 生命周期聚合为一个紧凑“思考中 / 思考完成”阶段，不显示占位正文或无效展开按钮；非空 reasoning 仍按原始 Part 展示，工具活动由工具 Part 表达。
 - 文档创建后自动进入对话 + Artifact 的左右协作视图；关闭侧栏不丢失会话、运行或附件关系。
 - 文件操作结果使用面向用户的对象名称和相对位置，不把 API schema、数据库表名或绝对路径作为主要文案。
 - 错误应说明哪个动作没有完成以及文件当前真实位置，不能只显示模型或工具内部异常。
@@ -274,10 +278,11 @@ Markdown / 图片 / 附件             Task / Run / Message
 
 1. **AI SDK 能力审计**：基于锁定版本建立需求到 `ToolLoopAgent`、`prepareCall`、`prepareStep`、`toolApproval`、
    `InferAgentUIMessage`、`ChatTransport` 和生命周期回调的映射；删除重复抽象的设计，不先写新框架。
-2. **统一运行入口（已完成基础切换）**：独立任务已经通过 `ToolLoopAgent`；无资源时只注册对话、可用联网和
-   结构化交互工具，允许零工具回答。下一步用 call options 合并当前两套 Agent 定义。
-3. **按 run 保存策略（部分实现）**：创作模式可逐轮切换，`task_runs` 已保存实际 mode、Skill、思考与联网；
-   下一步通过类型化 call options / `prepareCall` 固化工具集合与资源快照，旧任务继续保持兼容。
+2. **统一运行入口（已完成基础切换）**：所有任务都通过 `ToolLoopAgent`，并共用 `task-agent.ts` 的类型化 call
+   options / `prepareCall`；无资源时只注册对话、可用联网和结构化交互工具，允许零工具回答。
+3. **按 run 保存策略与指标（已实现基础闭环）**：创作模式可逐轮切换，主进程生成类型化 RunPolicy；`task_runs` 同时
+   保存兼容查询列、完整 `policy_json`、不含正文/绝对路径的 `resource_summary_json`，以及 AI SDK 生命周期提供的完成原因、
+   Token/缓存、步骤/工具计数和耗时汇总，旧任务继续保持未知值兼容。下一步把摘要升级为规范化动态资源关系。
 4. **动态资源绑定**：引入 Task/Run 到 Workspace、当前文档和附件的关系；文档侧栏与完整任务页继续复用
    同一 Task。
 5. **领域工具**：实现 `create-document`、`create-workspace`、`move-documents` 和结构验证的主进程应用服务、
@@ -309,5 +314,5 @@ Markdown / 图片 / 附件             Task / Run / Message
 - 不同时把数据库正文和 Markdown 正文都声明为权威副本。
 - 不让 Agent 通过自然语言自动获得任意文件系统权限。
 - 不因为统一运行时而强制每轮深度思考、联网或调用工具。
-- 不在第一版开放递归删除、任意 Shell、任意 MCP 或跨设备协同写入。
+- 不在第一版开放递归删除、任意 Shell 或跨设备协同写入；MCP 只通过独立服务器信任、逐工具开关与逐次审批接入，不能绕过资源边界。
 - 不为复刻某个外部产品长期保存页面级对比；本文只记录 Tessera 已确认的交互原则、当前实现事实和待验证的存储问题。

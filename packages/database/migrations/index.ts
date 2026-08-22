@@ -21,6 +21,10 @@ import { taskSkillsMigration } from "./0006-task-skills"
 import { taskWaitingInputMigration } from "./0007-task-waiting-input"
 import { mcpServersMigration } from "./0008-mcp-servers"
 import { taskRunPolicyMigration } from "./0009-task-run-policy"
+import { taskRunContextMigration } from "./0010-task-run-context"
+import { userSkillsMigration } from "./0011-user-skills"
+import { taskRunObservabilityMigration } from "./0012-task-run-observability"
+import { unifiedContentDomainMigration } from "./0013-unified-content-domain"
 import type { DatabaseMigration } from "./types"
 
 export type { DatabaseMigration } from "./types"
@@ -36,6 +40,10 @@ export const DATABASE_MIGRATIONS = [
   taskWaitingInputMigration,
   mcpServersMigration,
   taskRunPolicyMigration,
+  taskRunContextMigration,
+  userSkillsMigration,
+  taskRunObservabilityMigration,
+  unifiedContentDomainMigration,
 ] as const satisfies readonly DatabaseMigration[]
 
 export type DatabaseMigrationId = (typeof DATABASE_MIGRATIONS)[number]["id"]

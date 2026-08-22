@@ -20,6 +20,7 @@ import React, { useMemo, useState } from "react"
 import type { AvailableAiModel } from "../hooks/use-ai-models"
 
 type ModelPickerProps = Readonly<{
+  loading: boolean
   model: AvailableAiModel | undefined
   models: readonly AvailableAiModel[]
   onModelChange: (key: string) => void
@@ -85,7 +86,7 @@ function modelDisplayName(model: AvailableAiModel) {
     .join(" ")
 }
 
-export function ModelPicker({ model, models, onModelChange, selectedModelKey }: ModelPickerProps) {
+export function ModelPicker({ loading, model, models, onModelChange, selectedModelKey }: ModelPickerProps) {
   const [open, setOpen] = useState(false)
   const modelsByProvider = useMemo(() => {
     const groups = new Map<string, AvailableAiModel[]>()
@@ -113,7 +114,9 @@ export function ModelPicker({ model, models, onModelChange, selectedModelKey }: 
         }
       >
         {model ? <AiModelIcon modelId={model.id} size={16} /> : null}
-        <span className="truncate">{model ? modelDisplayName(model) : "未配置模型"}</span>
+        <span className="truncate">
+          {model ? modelDisplayName(model) : loading ? "正在加载模型" : "未配置模型"}
+        </span>
         <Icon icon={ArrowDown01Icon} size={12} className="text-muted-foreground" />
       </PopoverTrigger>
 

@@ -1,6 +1,6 @@
 /**
- * [INPUT]: AI SDK web_search Tool Part、同消息 URL 来源、回复流式状态与 HTTPS favicon 资源
- * [OUTPUT]: 聚合真实查询、搜索状态、网站图标和去重来源的可展开联网搜索轨迹
+ * [INPUT]: AI SDK provider-executed web_search Tool Part、同消息 URL 来源、回复流式状态与 HTTPS favicon 资源
+ * [OUTPUT]: 兼容标准 action/sources 与旧结果数组、聚合真实查询和打开页面的可展开联网检索轨迹
  * [POS]: ChatMessage 内替代通用工具行与尾部来源胶囊的搜索过程单元
  * [DOC]: design.md、docs/architecture/ai-providers.md
  *
@@ -55,13 +55,63 @@ function inputQuery(part: ToolMessagePart) {
   return typeof query === "string" ? query.trim() : ""
 }
 
+function cleanQuery(value: unknown) {
+  if (typeof value !== "string") return ""
+  const query = value.trim()
+  return query.startsWith("ws_call_id=") ? "" : query
+}
+
 function safeWebUrl(value: unknown) {
   if (typeof value !== "string") return null
   try {
     const url = new URL(value)
-    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : null
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null
+    if (url.hash.startsWith("#ws_call_id=")) url.hash = ""
+    return url.toString()
   } catch {
     return null
+  }
+}
+
+function collectQueries(queries: Set<string>, value: unknown) {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const query = cleanQuery(item)
+      if (query) queries.add(query)
+    }
+    return
+  }
+
+  const query = cleanQuery(value)
+  if (query) queries.add(query)
+}
+
+function collectOutput(output: unknown, queries: Set<string>, results: Map<string, WebSearchResult>) {
+  if (Array.isArray(output)) {
+    for (const value of output) {
+      const result = resultFromUnknown(value)
+      if (result) mergeResult(results, result)
+    }
+    return
+  }
+  if (!isUnknownRecord(output)) return
+
+  const action = output.action
+  if (isUnknownRecord(action)) {
+    if (action.type === "search") {
+      collectQueries(queries, action.queries)
+      collectQueries(queries, action.query)
+    } else if (action.type === "openPage" || action.type === "findInPage") {
+      const url = safeWebUrl(action.url)
+      if (url) mergeResult(results, { url })
+    }
+  }
+
+  if (!Array.isArray(output.sources)) return
+  for (const source of output.sources) {
+    if (!isUnknownRecord(source) || source.type !== "url") continue
+    const url = safeWebUrl(source.url)
+    if (url) mergeResult(results, { url })
   }
 }
 
@@ -102,12 +152,7 @@ export function collectWebSearchTrace(parts: readonly MessagePart[]): WebSearchT
       if (query) queries.add(query)
       if (part.state === "input-streaming" || part.state === "input-available") working = true
       if (part.state === "output-error") errorText ||= part.errorText
-      if (part.state === "output-available" && Array.isArray(part.output)) {
-        for (const value of part.output) {
-          const result = resultFromUnknown(value)
-          if (result) mergeResult(results, result)
-        }
-      }
+      if (part.state === "output-available") collectOutput(part.output, queries, results)
       continue
     }
 

@@ -1,6 +1,6 @@
 /**
- * [INPUT]: Electron safeStorage、SQLite 数据库客户端和跨进程 AI 配置/Chat/Agent 输入
- * [OUTPUT]: 不暴露密钥的配置读写、模型目录连接解析与按实际端点收窄能力的运行时输入
+ * [INPUT]: Electron safeStorage、SQLite 数据库客户端和不含客户端能力开关的跨进程任务输入
+ * [OUTPUT]: 不暴露密钥的配置读写、模型目录连接解析与由受信任 RunPolicy 收窄的运行时输入
  * [POS]: 桌面主进程内的平台安全存储、数据库仓储和 @tessera/ai 领域层适配器
  * [DOC]: docs/architecture/ai-providers.md、docs/architecture/ai-chat-agent-todo.md
  *
@@ -15,9 +15,9 @@ import {
   AiProviderConfigError,
   type AiProviderConfigService,
   type AiProviderConfigStore,
-  aiModelExecutionIssueMessage,
   createAiProviderConfigService,
-  resolveAiModelExecution,
+  resolveTaskRunPolicy,
+  taskRunPolicyIssueMessage,
 } from "@tessera/ai/server"
 import type {
   AiChatStartInput,
@@ -87,29 +87,22 @@ export function createDesktopAiService(client: DatabaseClient): DesktopAiService
       if (!config.apiKeyConfigured) throw new AiProviderConfigError("请先为这个供应商保存 API Key。")
       const model = config.models.find((candidate) => candidate.id === input.modelId)
       if (!model?.enabled) throw new AiProviderConfigError("所选模型未启用，请在供应商设置中检查模型列表。")
-      const execution = resolveAiModelExecution({
+      const resolution = resolveTaskRunPolicy({
         baseUrl: config.baseUrl,
         mode: input.mode,
         model,
         providerId: config.providerId,
-        webSearch: input.webSearch,
+        skillId: input.skillId,
       })
-      const issue = execution.issues[0]
+      const issue = resolution.issues[0]
       if (issue) {
-        throw new AiProviderConfigError(aiModelExecutionIssueMessage(issue))
-      }
-      if (
-        input.reasoning !== "auto" &&
-        input.reasoning !== "none" &&
-        execution.capabilities.reasoning !== "supported"
-      ) {
-        throw new AiProviderConfigError("所选模型没有已验证的可控思考能力。")
+        throw new AiProviderConfigError(taskRunPolicyIssueMessage(issue))
       }
       if (
         input.messages.some((message) =>
           message.parts.some((part) => part.type === "file" && part.mediaType.startsWith("image/")),
         ) &&
-        !execution.model.inputModalities?.includes("image")
+        !resolution.execution.model.inputModalities?.includes("image")
       ) {
         throw new AiProviderConfigError("所选模型不支持图片输入。")
       }
@@ -120,8 +113,15 @@ export function createDesktopAiService(client: DatabaseClient): DesktopAiService
         baseUrl: config.baseUrl,
         apiKey: "",
       })
-      if (!execution.endpointType) throw new AiProviderConfigError("当前模型没有可用的生成端点。")
-      return { ...input, ...connection, endpointType: execution.endpointType }
+      if (!resolution.execution.endpointType) {
+        throw new AiProviderConfigError("当前模型没有可用的生成端点。")
+      }
+      return {
+        ...input,
+        ...connection,
+        endpointType: resolution.execution.endpointType,
+        runPolicy: resolution.policy,
+      }
     },
   }
 }

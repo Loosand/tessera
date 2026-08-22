@@ -55,6 +55,8 @@ async function fixture() {
     skillId: "writing",
     reasoning: "high",
     webSearch: false,
+    policyJson: null,
+    resourceSummaryJson: null,
     startedAt: new Date(),
   })
   const service = createAgentChangeService(client)

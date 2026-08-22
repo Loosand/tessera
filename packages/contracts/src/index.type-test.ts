@@ -1,8 +1,8 @@
 /**
- * [INPUT]: DesktopApiContract 及其泛型查询工具
- * [OUTPUT]: 编译期类型等价与错误用例，防止 IPC 方法关系退化
+ * [INPUT]: DesktopApiContract、统一 RunPolicy、用户 Skill 标识、后端无关内容引用及其泛型查询工具
+ * [OUTPUT]: 编译期类型等价与错误用例，防止 IPC 方法关系和内容领域边界退化
  * [POS]: contracts 包的零运行时类型回归测试
- * [DOC]: docs/architecture.md
+ * [DOC]: docs/architecture.md、docs/architecture/mcp.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -13,7 +13,9 @@
 import type { IPC_CHANNELS } from "./index"
 import type {
   AI_PROVIDER_IDS,
+  AiChatStartInput,
   AiProviderId,
+  ArtifactRef,
   DesktopApiArguments,
   DesktopApiChannel,
   DesktopApiContract,
@@ -23,7 +25,12 @@ import type {
   DesktopApiReturn,
   DocumentSnapshot,
   IpcChannel,
+  McpServerConfig,
   OperationResult,
+  ResourceBinding,
+  TaskRunPolicy,
+  TaskSkillId,
+  UserTaskSkillId,
 } from "./index"
 
 type Equal<Left, Right> = (<Value>() => Value extends Left ? 1 : 2) extends <Value>() => Value extends Right
@@ -43,7 +50,18 @@ export type DesktopApiContractTypeTests = [
   Expect<Equal<Extract<DesktopApiMethodByKind<"send">, "cancelAiChat">, "cancelAiChat">>,
   Expect<Equal<Extract<DesktopApiMethodByKind<"subscribe">, "onAiChatEvent">, "onAiChatEvent">>,
   Expect<Equal<DesktopApiMethodByChannel<typeof IPC_CHANNELS.documentRead, "invoke">, "readDocument">>,
+  Expect<Equal<DesktopApiReturn<"listMcpServers">, Promise<McpServerConfig[]>>>,
+  Expect<Equal<DesktopApiChannel<"testMcpServer">, typeof IPC_CHANNELS.mcpServerTest>>,
+  Expect<Equal<Extract<DesktopApiMethodByKind<"subscribe">, "onMcpServersChanged">, "onMcpServersChanged">>,
+  Expect<Equal<DesktopApiChannel<"installUserSkill">, typeof IPC_CHANNELS.userSkillInstall>>,
+  Expect<Equal<DesktopApiChannel<"scanUserSkills">, typeof IPC_CHANNELS.userSkillScan>>,
+  Expect<Equal<DesktopApiChannel<"installScannedUserSkills">, typeof IPC_CHANNELS.userSkillInstallScanned>>,
+  Expect<Equal<Extract<TaskSkillId, UserTaskSkillId>, UserTaskSkillId>>,
   Expect<Equal<Extract<OperationResult, { ok: true }>["ok"], true>>,
+  Expect<Equal<Extract<keyof AiChatStartInput, "reasoning" | "webSearch">, never>>,
+  Expect<Equal<TaskRunPolicy["toolScope"], "conversation" | "workspace-read" | "workspace-write">>,
+  Expect<Equal<ArtifactRef["relation"], "created" | "imported" | "updated">>,
+  Expect<Equal<ResourceBinding["role"], "context" | "output" | "scope">>,
 ]
 
 // @ts-expect-error readDocument 只能接收一个相对路径参数。

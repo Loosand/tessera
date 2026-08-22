@@ -11,6 +11,7 @@
  */
 
 import type { UIMessage } from "@tessera/ai/react"
+import React from "react"
 
 type MessagePart = UIMessage["parts"][number]
 type SourceMessagePart = Extract<MessagePart, { type: "source-document" | "source-url" }>

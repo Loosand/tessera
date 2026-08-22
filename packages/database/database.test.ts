@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 内存/临时磁盘 SQLite 客户端与前向迁移
- * [OUTPUT]: 迁移幂等性、表结构、工作区最近项、通用任务会话、AI 配置重启恢复和级联删除的回归验证
+ * [OUTPUT]: 迁移幂等性、统一内容控制层、工作区最近项、通用任务会话、AI/MCP 加密配置恢复、任务运行观测指标和级联删除的回归验证
  * [POS]: 数据库包不依赖磁盘状态的基础集成测试
  * [DOC]: docs/architecture/database.md
  *
@@ -22,15 +22,30 @@ import {
   upsertAiProviderConfigRecord,
 } from "./ai-provider-config-repository"
 import { openDatabase } from "./client"
-import { DATABASE_MIGRATIONS, applyDatabaseMigrations } from "./migrations"
-import { foundationMigration } from "./migrations/0000-foundation"
-import { taskSessionsMigration } from "./migrations/0002-task-sessions"
+import {
+  findActiveContentLibrary,
+  findIndexedDocumentById,
+  listManagedWorkspaces,
+  listTaskArtifacts,
+  listTaskResourceBindings,
+  listWorkspaceOperations,
+  moveIndexedDocument,
+  saveArtifact,
+  saveContentLibrary,
+  saveIndexedDocument,
+  saveTaskResourceBinding,
+  saveWorkspaceOperation,
+  setTaskWorkspace,
+} from "./content-domain-repository"
 import {
   deleteMcpServerConfigRecord,
   findMcpServerConfigRecord,
   listMcpServerConfigRecords,
   upsertMcpServerConfigRecord,
 } from "./mcp-server-config-repository"
+import { DATABASE_MIGRATIONS, applyDatabaseMigrations } from "./migrations"
+import { foundationMigration } from "./migrations/0000-foundation"
+import { taskSessionsMigration } from "./migrations/0002-task-sessions"
 import { appendTaskRunEvent, findLatestTaskRun, finishTaskRun, startTaskRun } from "./task-run-repository"
 import {
   deleteTaskSession,
@@ -40,6 +55,13 @@ import {
   renameTaskSession,
   saveTaskSession,
 } from "./task-session-repository"
+import {
+  deleteUserSkillConfigRecord,
+  findUserSkillConfigRecord,
+  listUserSkillConfigRecords,
+  setUserSkillConfigEnabled,
+  upsertUserSkillConfigRecord,
+} from "./user-skill-config-repository"
 import {
   findMostRecentWorkspace,
   findWorkspaceById,
@@ -61,15 +83,161 @@ describe("本地数据库基建", () => {
       "agent_events",
       "agent_sessions",
       "ai_provider_configs",
+      "artifacts",
+      "content_libraries",
       "document_index",
       "mcp_server_configs",
       "permission_decisions",
       "task_messages",
+      "task_resource_bindings",
       "task_run_events",
       "task_runs",
       "task_sessions",
+      "user_skill_configs",
+      "workspace_operations",
       "workspaces",
     ])
+    client.close()
+  })
+
+  test("内容库、Artifact、动态资源与项目操作只保存控制关系", () => {
+    const client = openDatabase({ path: ":memory:" })
+    const now = new Date(100)
+    expect(
+      saveContentLibrary(client, {
+        id: "library-1",
+        rootPath: "/tmp/tessera-library",
+        displayName: "Tessera 内容库",
+        updatedAt: now,
+      }),
+    ).toMatchObject({ id: "library-1", revokedAt: null })
+    saveWorkspace(client, {
+      id: "workspace-inbox",
+      rootPath: "/tmp/tessera-library/未归档",
+      displayName: "未归档",
+      lastOpenedAt: now,
+      contentLibraryId: "library-1",
+      storageKind: "managed-inbox",
+    })
+    saveWorkspace(client, {
+      id: "workspace-project",
+      rootPath: "/tmp/tessera-library/Celeste",
+      displayName: "Celeste",
+      lastOpenedAt: now,
+      contentLibraryId: "library-1",
+      storageKind: "managed-project",
+    })
+    saveTaskSession(client, {
+      id: "task-content",
+      mode: "chat",
+      workspaceId: null,
+      title: "Celeste 研究",
+      status: "completed",
+      updatedAt: now,
+      messagePayloads: [],
+    })
+    startTaskRun(client, {
+      requestId: "run-content",
+      taskId: "task-content",
+      configId: "deepseek",
+      providerId: "deepseek",
+      modelId: "deepseek-v4-flash",
+      mode: "chat",
+      skillId: "writing",
+      reasoning: "high",
+      webSearch: true,
+      policyJson: "{}",
+      resourceSummaryJson: "{}",
+      startedAt: now,
+    })
+    saveIndexedDocument(client, {
+      id: "document-celeste",
+      workspaceId: "workspace-inbox",
+      relativePath: "玛德琳.md",
+      contentHash: "hash-before",
+      sourceModifiedAt: now,
+      indexedAt: now,
+    })
+    saveTaskResourceBinding(client, {
+      id: "binding-output",
+      taskId: "task-content",
+      runId: "run-content",
+      resourceType: "document",
+      resourceId: "document-celeste",
+      role: "output",
+    })
+    saveArtifact(client, {
+      id: "artifact-celeste",
+      taskId: "task-content",
+      runId: "run-content",
+      documentId: "document-celeste",
+      relation: "created",
+      updatedAt: now,
+    })
+    saveWorkspaceOperation(client, {
+      id: "operation-move",
+      taskId: "task-content",
+      runId: "run-content",
+      operation: "move-documents",
+      status: "applied",
+      parametersJson: '{"documentIds":["document-celeste"]}',
+      resultJson: '{"projectId":"workspace-project"}',
+      recoveryJson: '{"projectId":"workspace-inbox"}',
+      errorMessage: null,
+      completedAt: now,
+    })
+    expect(
+      moveIndexedDocument(client, "document-celeste", {
+        workspaceId: "workspace-project",
+        relativePath: "玛德琳.md",
+        contentHash: "hash-after",
+        sourceModifiedAt: new Date(200),
+        indexedAt: new Date(200),
+      }),
+    ).toMatchObject({ workspaceId: "workspace-project", relativePath: "玛德琳.md" })
+    expect(setTaskWorkspace(client, "task-content", "workspace-project")).toBe(true)
+
+    expect(findActiveContentLibrary(client)).toMatchObject({ id: "library-1" })
+    expect(listManagedWorkspaces(client, "library-1")).toHaveLength(2)
+    expect(findIndexedDocumentById(client, "document-celeste")).toMatchObject({
+      workspaceId: "workspace-project",
+      contentHash: "hash-after",
+    })
+    expect(listTaskResourceBindings(client, "task-content")).toMatchObject([
+      { resourceId: "document-celeste", role: "output" },
+    ])
+    expect(listTaskArtifacts(client, "task-content")).toMatchObject([
+      { id: "artifact-celeste", documentId: "document-celeste", status: "active" },
+    ])
+    expect(listWorkspaceOperations(client, "task-content")).toMatchObject([
+      { id: "operation-move", operation: "move-documents", status: "applied" },
+    ])
+    expect(findTaskSession(client, "task-content")?.workspaceId).toBe("workspace-project")
+    client.close()
+  })
+
+  test("可以保存、停用并删除用户 Skill 安装目录", () => {
+    const client = openDatabase({ path: ":memory:" })
+    upsertUserSkillConfigRecord(client, {
+      id: "user:meeting-notes",
+      name: "meeting-notes",
+      description: "整理会议记录",
+      enabled: true,
+      fileCount: 2,
+      totalBytes: 128,
+      installedAt: new Date(100),
+      updatedAt: new Date(100),
+    })
+
+    expect(listUserSkillConfigRecords(client)).toHaveLength(1)
+    expect(findUserSkillConfigRecord(client, "user:meeting-notes")).toMatchObject({
+      enabled: true,
+      name: "meeting-notes",
+    })
+    expect(setUserSkillConfigEnabled(client, "user:meeting-notes", false)).toBe(true)
+    expect(findUserSkillConfigRecord(client, "user:meeting-notes")?.enabled).toBe(false)
+    expect(deleteUserSkillConfigRecord(client, "user:meeting-notes")).toBe(true)
+    expect(listUserSkillConfigRecords(client)).toEqual([])
     client.close()
   })
 
@@ -378,6 +546,25 @@ describe("本地数据库基建", () => {
       skillId: "research",
       reasoning: "high",
       webSearch: true,
+      policyJson: JSON.stringify({
+        limits: {
+          maxOutputTokens: 4_096,
+          maxSteps: 8,
+          maxTotalTokens: 40_000,
+          timeoutMs: 120_000,
+        },
+        mode: "chat",
+        reasoning: "high",
+        skillId: "research",
+        toolScope: "conversation",
+        webSearch: true,
+      }),
+      resourceSummaryJson: JSON.stringify({
+        attachmentCount: 1,
+        currentDocumentPath: "notes/celeste.md",
+        workspaceId: null,
+        workspaceName: null,
+      }),
       startedAt: new Date(200),
     })
     appendTaskRunEvent(client, {
@@ -390,7 +577,23 @@ describe("本地数据库基建", () => {
       sequence: 2,
       payloadJson: JSON.stringify({ sequence: 2, chunk: { type: "text-delta", delta: "恢复" } }),
     })
-    finishTaskRun(client, "run-request", "completed")
+    finishTaskRun(client, "run-request", "completed", {
+      sdkCallId: "sdk-call-1",
+      finishReason: "stop",
+      rawFinishReason: "end_turn",
+      inputTokens: 120,
+      cacheReadTokens: 80,
+      cacheWriteTokens: 10,
+      outputTokens: 30,
+      reasoningTokens: 12,
+      totalTokens: 150,
+      stepCount: 3,
+      toolCallCount: 2,
+      timeToFirstOutputMs: 240,
+      modelDurationMs: 1_600,
+      toolDurationMs: 300,
+      durationMs: 2_100,
+    })
 
     expect(findLatestTaskRun(client, "run-task")).toMatchObject({
       requestId: "run-request",
@@ -400,6 +603,23 @@ describe("本地数据库基建", () => {
       skillId: "research",
       reasoning: "high",
       webSearch: true,
+      policyJson: expect.stringContaining('"toolScope":"conversation"'),
+      resourceSummaryJson: expect.stringContaining('"currentDocumentPath":"notes/celeste.md"'),
+      sdkCallId: "sdk-call-1",
+      finishReason: "stop",
+      rawFinishReason: "end_turn",
+      inputTokens: 120,
+      cacheReadTokens: 80,
+      cacheWriteTokens: 10,
+      outputTokens: 30,
+      reasoningTokens: 12,
+      totalTokens: 150,
+      stepCount: 3,
+      toolCallCount: 2,
+      timeToFirstOutputMs: 240,
+      modelDurationMs: 1_600,
+      toolDurationMs: 300,
+      durationMs: 2_100,
       events: [{ sequence: 1 }, { sequence: 2 }],
     })
     client.close()

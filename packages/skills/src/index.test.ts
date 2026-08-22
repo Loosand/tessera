@@ -11,7 +11,13 @@
  */
 
 import { describe, expect, it } from "vitest"
-import { listBuiltInSkills, loadBuiltInSkill, parseSkillDocument } from "./index"
+import {
+  createUserSkillDescriptor,
+  listBuiltInSkills,
+  loadBuiltInSkill,
+  parseSkillDocument,
+  userSkillId,
+} from "./index"
 
 describe("Skill 注册表", () => {
   it("常驻目录只公开元数据与权限声明", () => {
@@ -52,5 +58,20 @@ describe("SKILL.md 校验", () => {
     expect(() => parseSkillDocument("---\nname: Sample\ndescription: 示例\n---\n\n正文")).toThrow(
       "kebab-case",
     )
+  })
+
+  it("为用户 Skill 生成稳定任务 ID 和无权限描述符", () => {
+    const descriptor = createUserSkillDescriptor({
+      name: "meeting-notes",
+      description: "整理会议记录",
+    })
+
+    expect(userSkillId(descriptor.name)).toBe("user:meeting-notes")
+    expect(descriptor).toMatchObject({
+      displayName: "Meeting Notes",
+      permissions: [],
+      root: "user://meeting-notes",
+      scope: "user",
+    })
   })
 })

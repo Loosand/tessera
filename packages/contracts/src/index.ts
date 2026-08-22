@@ -1,8 +1,8 @@
 /**
- * [INPUT]: Electron 桌面应用当前需要的跨进程数据、生命周期、工作区条目、AI 模型事实/端点绑定、MCP 服务器、任务运行与 Agent 变更审批形状
- * [OUTPUT]: IPC 频道、工作区文件操作、模型与 MCP 配置、任务创作方式/可恢复流式运行、客户端问答/研究计划工具、Agent Diff 审批、关闭握手与可推导的桌面 API 类型契约
+ * [INPUT]: Electron 桌面应用当前需要的跨进程数据、生命周期、工作区条目、AI 模型事实/端点绑定、MCP 服务器、用户 Skill、任务运行策略、内容对象、开发期 AI 日志与 Agent 变更审批形状
+ * [OUTPUT]: IPC 频道、工作区文件操作、模型/MCP/用户 Skill 配置、类型化 RunPolicy、后端无关内容引用、可恢复流式运行、开发期 AI 日志入口、客户端问答/研究计划工具、Agent Diff 审批、关闭握手与可推导的桌面 API 类型契约
  * [POS]: 应用和共享包共同依赖的底层契约入口
- * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
+ * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/ai-observability.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/mcp.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -15,6 +15,7 @@ export const IPC_CHANNELS = {
   appCancelClose: "app:cancel-close",
   appCloseRequested: "app:close-requested",
   appConfirmClose: "app:confirm-close",
+  aiDevtoolsOpen: "ai-devtools:open",
   workspaceCurrent: "workspace:current",
   workspaceSelect: "workspace:select",
   workspaceRecent: "workspace:recent",
@@ -45,6 +46,13 @@ export const IPC_CHANNELS = {
   mcpServerList: "mcp:server-list",
   mcpServerSave: "mcp:server-save",
   mcpServerTest: "mcp:server-test",
+  userSkillsChanged: "skill:user-skills-changed",
+  userSkillDelete: "skill:user-delete",
+  userSkillInstall: "skill:user-install",
+  userSkillInstallScanned: "skill:user-install-scanned",
+  userSkillList: "skill:user-list",
+  userSkillScan: "skill:user-scan",
+  userSkillSetEnabled: "skill:user-set-enabled",
   aiChatCancel: "ai-chat:cancel",
   aiChatEvent: "ai-chat:event",
   aiChatResume: "ai-chat:resume",
@@ -287,8 +295,98 @@ export type TaskMode = "chat" | "agent"
 export const BUILT_IN_TASK_SKILL_IDS = ["research", "writing"] as const
 export type BuiltInTaskSkillId = (typeof BUILT_IN_TASK_SKILL_IDS)[number]
 export const TASK_SKILL_IDS = [...BUILT_IN_TASK_SKILL_IDS, "question-answering"] as const
-export type TaskSkillId = (typeof TASK_SKILL_IDS)[number] | null
+export const USER_TASK_SKILL_PREFIX = "user:" as const
+export type UserTaskSkillId = `${typeof USER_TASK_SKILL_PREFIX}${string}`
+export type TaskSkillId = (typeof TASK_SKILL_IDS)[number] | UserTaskSkillId | null
+
+export function isUserTaskSkillId(value: unknown): value is UserTaskSkillId {
+  return (
+    typeof value === "string" &&
+    value.startsWith(USER_TASK_SKILL_PREFIX) &&
+    /^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(value.slice(USER_TASK_SKILL_PREFIX.length)) &&
+    value.length <= USER_TASK_SKILL_PREFIX.length + 64
+  )
+}
+
+export function isTaskSkillId(value: unknown): value is TaskSkillId {
+  return (
+    value === null ||
+    (typeof value === "string" && TASK_SKILL_IDS.some((skillId) => skillId === value)) ||
+    isUserTaskSkillId(value)
+  )
+}
+
+export type UserSkillConfig = {
+  available: boolean
+  description: string
+  displayName: string
+  enabled: boolean
+  error?: string
+  fileCount: number
+  id: UserTaskSkillId
+  installedAt: number
+  name: string
+  shortDescription: string
+  totalBytes: number
+  updatedAt: number
+}
+
+export type UserSkillScanCandidateStatus = "ready" | "installed" | "conflict" | "invalid"
+
+export type UserSkillScanCandidate = {
+  description: string
+  displayName: string
+  error?: string
+  id: string
+  name: string | null
+  relativePath: string
+  status: UserSkillScanCandidateStatus
+}
+
+export type UserSkillScan = {
+  candidates: UserSkillScanCandidate[]
+  id: string
+  rootName: string
+  scannedDirectoryCount: number
+  truncated: boolean
+}
+
+export type UserSkillInstallResult = OperationResult<{ skill: UserSkillConfig | null }>
+export type UserSkillScanResult = OperationResult<{ scan: UserSkillScan | null }>
+export type UserSkillBatchInstallFailure = {
+  candidateId: string
+  error: string
+}
+export type UserSkillBatchInstallResult = OperationResult<{
+  failures: UserSkillBatchInstallFailure[]
+  skills: UserSkillConfig[]
+}>
+export type UserSkillConfigResult = OperationResult<{ skill: UserSkillConfig }>
+export type UserSkillDeleteResult = OperationResult
 export type TaskSessionStatus = "idle" | "running" | "waiting-input" | "completed" | "failed" | "cancelled"
+
+export type TaskToolScope = "conversation" | "workspace-read" | "workspace-write"
+
+export type TaskRunPolicy = {
+  limits: {
+    maxOutputTokens: number
+    maxSteps: number
+    maxTotalTokens: number
+    timeoutMs: number
+  }
+  mode: TaskMode
+  reasoning: AiChatReasoning
+  skillId: TaskSkillId
+  toolScope: TaskToolScope
+  webSearch: boolean
+}
+
+export type TaskRunResourceSummary = {
+  attachmentCount: number
+  currentDocumentPath: string | null
+  workspaceId: string | null
+  workspaceName: string | null
+}
 
 export const REQUEST_USER_INPUT_TOOL_NAME = "request-user-input" as const
 export const PUBLISH_RESEARCH_PLAN_TOOL_NAME = "publish-research-plan" as const
@@ -433,10 +531,8 @@ export type AiChatStartInput = {
   skillId: TaskSkillId
   modelId: string
   providerId: AiProviderId
-  reasoning: AiChatReasoning
   requestId: string
   taskId: string
-  webSearch: boolean
 }
 
 export type AiChatStreamChunk =
@@ -536,10 +632,45 @@ export type AppInfo = {
   platform: string
 }
 
+export type AiDevtoolsOpenResult = { ok: true } | { ok: false; error: string }
+
 export type WorkspaceInfo = {
   id: string
   name: string
   rootPath: string
+}
+
+/** 后端无关的项目引用；存储适配器负责把稳定 ID 映射到目录或数据库记录。 */
+export type ProjectRef = {
+  id: string
+  name: string
+}
+
+/** 后端无关的可编辑文档引用；正文位置不会穿透到 Agent 工具协议。 */
+export type DocumentRef = {
+  id: string
+  mediaType: "text/markdown"
+  projectId: string | null
+  title: string
+}
+
+/** 一次 Run 与其创建、修改或导入内容之间的稳定产物关系。 */
+export type ArtifactRef = {
+  documentId: string
+  id: string
+  relation: "created" | "imported" | "updated"
+  runId: string
+  taskId: string
+}
+
+/** Task 或 Run 对可见资源的显式关联，不包含绝对路径或正文。 */
+export type ResourceBinding = {
+  id: string
+  resourceId: string
+  resourceType: "attachment" | "document" | "project"
+  role: "context" | "output" | "scope"
+  runId: string | null
+  taskId: string
 }
 
 export type WorkspaceDocumentEntry = {
@@ -608,6 +739,7 @@ type SubscribeMethod<
  */
 export type DesktopApiContract = {
   getAppInfo: InvokeMethod<typeof IPC_CHANNELS.appInfo, [], AppInfo>
+  openAiDevtools: InvokeMethod<typeof IPC_CHANNELS.aiDevtoolsOpen, [], AiDevtoolsOpenResult>
   cancelClose: SendMethod<typeof IPC_CHANNELS.appCancelClose, []>
   confirmClose: SendMethod<typeof IPC_CHANNELS.appConfirmClose, []>
   getCurrentWorkspace: InvokeMethod<typeof IPC_CHANNELS.workspaceCurrent, [], WorkspaceInfo | null>
@@ -690,20 +822,30 @@ export type DesktopApiContract = {
     AiProviderConfigResult
   >
   listMcpServers: InvokeMethod<typeof IPC_CHANNELS.mcpServerList, [], McpServerConfig[]>
-  saveMcpServer: InvokeMethod<
-    typeof IPC_CHANNELS.mcpServerSave,
-    [input: McpServerSaveInput],
-    McpServerResult
-  >
+  saveMcpServer: InvokeMethod<typeof IPC_CHANNELS.mcpServerSave, [input: McpServerSaveInput], McpServerResult>
   deleteMcpServer: InvokeMethod<
     typeof IPC_CHANNELS.mcpServerDelete,
     [serverId: string],
     McpServerDeleteResult
   >
-  testMcpServer: InvokeMethod<
-    typeof IPC_CHANNELS.mcpServerTest,
-    [serverId: string],
-    McpServerTestResult
+  testMcpServer: InvokeMethod<typeof IPC_CHANNELS.mcpServerTest, [serverId: string], McpServerTestResult>
+  listUserSkills: InvokeMethod<typeof IPC_CHANNELS.userSkillList, [], UserSkillConfig[]>
+  installUserSkill: InvokeMethod<typeof IPC_CHANNELS.userSkillInstall, [], UserSkillInstallResult>
+  scanUserSkills: InvokeMethod<typeof IPC_CHANNELS.userSkillScan, [], UserSkillScanResult>
+  installScannedUserSkills: InvokeMethod<
+    typeof IPC_CHANNELS.userSkillInstallScanned,
+    [scanId: string, candidateIds: string[]],
+    UserSkillBatchInstallResult
+  >
+  setUserSkillEnabled: InvokeMethod<
+    typeof IPC_CHANNELS.userSkillSetEnabled,
+    [skillId: UserTaskSkillId, enabled: boolean],
+    UserSkillConfigResult
+  >
+  deleteUserSkill: InvokeMethod<
+    typeof IPC_CHANNELS.userSkillDelete,
+    [skillId: UserTaskSkillId],
+    UserSkillDeleteResult
   >
   startAiChat: InvokeMethod<typeof IPC_CHANNELS.aiChatStart, [input: AiChatStartInput], AiChatStartResult>
   resumeAiChat: InvokeMethod<typeof IPC_CHANNELS.aiChatResume, [taskId: string], AiChatResumeResult>
@@ -725,6 +867,7 @@ export type DesktopApiContract = {
   deleteTask: InvokeMethod<typeof IPC_CHANNELS.taskDelete, [taskId: string], boolean>
   onAiProviderConfigsChanged: SubscribeMethod<typeof IPC_CHANNELS.aiProviderConfigsChanged, []>
   onMcpServersChanged: SubscribeMethod<typeof IPC_CHANNELS.mcpServersChanged, []>
+  onUserSkillsChanged: SubscribeMethod<typeof IPC_CHANNELS.userSkillsChanged, []>
   onAiChatEvent: SubscribeMethod<typeof IPC_CHANNELS.aiChatEvent, [event: AiChatStreamEvent]>
   onWorkspaceChanged: SubscribeMethod<typeof IPC_CHANNELS.workspaceChanged, [event: WorkspaceChangeEvent]>
   onCloseRequested: SubscribeMethod<typeof IPC_CHANNELS.appCloseRequested, []>

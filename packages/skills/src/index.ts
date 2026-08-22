@@ -1,6 +1,6 @@
 /**
- * [INPUT]: Agent 权限效果、任务创作方式/Skill ID、标准 SKILL.md 文件约定与研究/写作内置 Skill 源
- * [OUTPUT]: Skill 描述/权限契约、严格 SKILL.md 解析器，以及元数据常驻、正文按需加载的内置注册表
+ * [INPUT]: Agent 权限效果、内置/用户任务 Skill ID、标准 SKILL.md 文件约定与研究/写作内置 Skill 源
+ * [OUTPUT]: Skill 描述/权限契约、严格 SKILL.md 解析器、用户 Skill 描述符构造，以及元数据常驻、正文按需加载的内置注册表
  * [POS]: Skill 发现、校验、选择和渐进式加载的领域入口
  * [DOC]: docs/architecture.md、docs/architecture/plugin-system.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -13,7 +13,13 @@
 /// <reference path="./raw.d.ts" />
 
 import type { PermissionEffect } from "@tessera/agent-runtime"
-import type { BuiltInTaskSkillId, TaskSkillId } from "@tessera/contracts"
+import {
+  USER_TASK_SKILL_PREFIX,
+  type BuiltInTaskSkillId,
+  type TaskSkillId,
+  type UserTaskSkillId,
+  isUserTaskSkillId,
+} from "@tessera/contracts"
 
 export const SKILL_FILENAME = "SKILL.md"
 export const SKILL_SCOPES = ["built-in", "user", "workspace"] as const
@@ -48,7 +54,7 @@ export type BuiltInSkillDescriptor = SkillDescriptor & {
   readonly scope: "built-in"
 }
 
-type SkillDocument = Readonly<{
+export type SkillDocument = Readonly<{
   description: string
   instructions: string
   name: string
@@ -112,6 +118,38 @@ export function parseSkillDocument(source: string, expectedName?: string): Skill
   return { description, instructions, name }
 }
 
+export function userSkillId(name: string): UserTaskSkillId {
+  const skillId = `${USER_TASK_SKILL_PREFIX}${name}`
+  if (!isUserTaskSkillId(skillId)) throw new Error("用户 Skill ID 无效。")
+  return skillId
+}
+
+export function userSkillDisplayName(name: string) {
+  return name
+    .split("-")
+    .filter(Boolean)
+    .map((part) => `${part[0]?.toLocaleUpperCase("en-US") ?? ""}${part.slice(1)}`)
+    .join(" ")
+}
+
+export function createUserSkillDescriptor(
+  document: Pick<SkillDocument, "description" | "name">,
+): SkillDescriptor {
+  return defineSkill({
+    defaultPrompt: `使用 $${document.name} 完成这个任务。`,
+    name: document.name,
+    description: document.description,
+    displayName: userSkillDisplayName(document.name),
+    root: `user://${document.name}`,
+    scope: "user",
+    shortDescription:
+      document.description.length > 80
+        ? `${document.description.slice(0, 79).trimEnd()}…`
+        : document.description,
+    permissions: [],
+  })
+}
+
 const BUILT_IN_SKILLS = {
   research: {
     descriptor: defineSkill({
@@ -154,7 +192,7 @@ export function listBuiltInSkills(): readonly BuiltInSkillDescriptor[] {
 }
 
 export async function loadBuiltInSkill(skillId: TaskSkillId): Promise<LoadedSkill | null> {
-  if (skillId === null || skillId === "question-answering") return null
+  if (skillId === null || skillId === "question-answering" || isUserTaskSkillId(skillId)) return null
   const registration = BUILT_IN_SKILLS[skillId]
   const document = parseSkillDocument(await registration.loadSource(), registration.descriptor.name)
   if (document.description !== registration.descriptor.description) {

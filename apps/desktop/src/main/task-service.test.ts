@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 内存 SQLite、通用任务会话输入与模拟工作区
- * [OUTPUT]: 无工作区任务、问答行为标记、Agent 工作区约束、任务 mode 不可变、创作模式逐轮切换和重命名/删除的回归验证
+ * [OUTPUT]: 无工作区任务、可选读取、内置/用户 Skill 标记、Agent 工作区约束、任务 mode 不可变、创作模式逐轮切换和重命名/删除的回归验证
  * [POS]: task-service 主进程权限边界的单元测试
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -86,6 +86,23 @@ describe("DesktopTaskService", () => {
         null,
       ),
     ).toMatchObject({ mode: "chat", skillId: "question-answering", workspaceId: null })
+    expect(
+      service.save(
+        {
+          id: "user-skill-task",
+          mode: "chat",
+          skillId: "user:meeting-notes",
+          status: "idle",
+          title: "用户 Skill",
+          messages: [],
+          workspaceId: null,
+        },
+        null,
+      ),
+    ).toMatchObject({ skillId: "user:meeting-notes" })
+    expect(() => service.authorizeTurn("user-skill-task", "chat", null, "user:../escape" as never)).toThrow(
+      "任务 Skill 无效",
+    )
     client.close()
   })
 
@@ -191,6 +208,7 @@ describe("DesktopTaskService", () => {
     expect(service.rename("managed-chat", "新标题").title).toBe("新标题")
     expect(service.read("managed-chat").title).toBe("新标题")
     expect(service.delete("managed-chat")).toBe(true)
+    expect(service.readIfExists("managed-chat")).toBeNull()
     expect(() => service.read("managed-chat")).toThrow("找不到这个任务")
     client.close()
   })

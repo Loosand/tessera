@@ -34,7 +34,7 @@ describe("模型请求期能力解析", () => {
     ).toMatchObject({ endpointType: "openai-chat-completions", issues: [] })
   })
 
-  it("为 DeepSeek V4 原生搜索显式选择 Responses", () => {
+  it("为 DeepSeek V4 原生搜索优先选择可返回 thinking 的 Anthropic Messages", () => {
     expect(
       resolveAiModelExecution({
         baseUrl: "https://api.deepseek.com",
@@ -44,7 +44,7 @@ describe("模型请求期能力解析", () => {
         webSearch: true,
       }),
     ).toMatchObject({
-      endpointType: "openai-responses",
+      endpointType: "anthropic-messages",
       issues: [],
       searchRoute: "provider-native",
     })

@@ -13,6 +13,7 @@
     "./schema": "./schema.ts",
     "./task-session-repository": "./task-session-repository.ts",
     "./task-run-repository": "./task-run-repository.ts",
+    "./user-skill-config-repository": "./user-skill-config-repository.ts",
     "./workspace-repository": "./workspace-repository.ts"
   },
   "scripts": {

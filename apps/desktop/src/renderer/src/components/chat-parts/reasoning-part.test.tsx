@@ -1,8 +1,8 @@
 /**
- * [INPUT]: 长文本与流式状态下的 AI SDK reasoning Part
- * [OUTPUT]: 思考区域限高、独立滚动与可访问状态的回归验证
+ * [INPUT]: 长文本、空摘要与流式状态下的 AI SDK reasoning Part
+ * [OUTPUT]: 思考区域限高、独立滚动、可访问状态与完成态空摘要仅保留阶段外壳的回归验证
  * [POS]: reasoning-part 的布局边界单元测试
- * [DOC]: design.md、docs/architecture/ai-providers.md
+ * [DOC]: design.md、docs/architecture/ai-observability.md、docs/architecture/ai-providers.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -30,5 +30,36 @@ describe("思考过程区域", () => {
     expect(markup).toContain("overflow-y-auto")
     expect(markup).toContain('aria-label="模型思考过程"')
     expect(markup).toContain('aria-busy="true"')
+  })
+
+  it("供应商只返回 reasoning 生命周期时保留阶段外壳但不显示占位正文", () => {
+    const emptyPart = {
+      type: "reasoning",
+      text: "",
+      state: "done",
+    } as Extract<UIMessage["parts"][number], { type: "reasoning" }>
+
+    const markup = renderToStaticMarkup(<ReasoningPart part={emptyPart} streaming={false} />)
+
+    expect(markup).toContain("思考完成")
+    expect(markup).toContain('aria-label="模型思考阶段"')
+    expect(markup).not.toContain("模型未返回可展示的思考文本")
+    expect(markup).not.toContain("正在生成思考过程")
+    expect(markup).not.toContain("aria-expanded")
+  })
+
+  it("流式空生命周期只显示整体思考状态，不提前制造可展开正文", () => {
+    const emptyPart = {
+      type: "reasoning",
+      text: "",
+      state: "streaming",
+    } as Extract<UIMessage["parts"][number], { type: "reasoning" }>
+
+    const markup = renderToStaticMarkup(<ReasoningPart part={emptyPart} streaming />)
+
+    expect(markup).toContain("思考中")
+    expect(markup).toContain('aria-busy="true"')
+    expect(markup).not.toContain("正在生成思考过程")
+    expect(markup).not.toContain("aria-expanded")
   })
 })

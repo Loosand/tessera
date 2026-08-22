@@ -11,6 +11,7 @@
  */
 
 import type { UIMessage } from "@tessera/ai/react"
+import React from "react"
 import { ChatMarkdown } from "./chat-markdown"
 
 type TextMessagePart = Extract<UIMessage["parts"][number], { type: "text" }>

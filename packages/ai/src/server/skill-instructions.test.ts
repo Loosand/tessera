@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 问答空选择与研究/写作内置 Skill
- * [OUTPUT]: AI SDK instructions 只加载当前 Skill 且保留权限边界的回归测试
+ * [INPUT]: 问答空选择、研究/写作内置 Skill 与主进程复核后的用户 Skill
+ * [OUTPUT]: AI SDK instructions 只加载当前 Skill、拒绝未复核用户正文且保留权限边界的回归测试
  * [POS]: Chat/Agent 共用 Skill 指令装配的单元测试
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -11,6 +11,7 @@
  */
 
 import { describe, expect, it } from "vitest"
+import { createUserSkillDescriptor } from "@tessera/skills"
 import { buildTaskSkillInstructions } from "./skill-instructions"
 
 describe("buildTaskSkillInstructions", () => {
@@ -26,5 +27,19 @@ describe("buildTaskSkillInstructions", () => {
     expect(instructions).toContain('<skill name="research">')
     expect(instructions).toContain("不授予新工具、文件、网络或写入权限")
     expect(instructions).not.toContain('<skill name="writing">')
+  })
+
+  it("只接受与用户 Skill ID 匹配的主进程复核正文", async () => {
+    const descriptor = createUserSkillDescriptor({
+      name: "meeting-notes",
+      description: "整理会议记录",
+    })
+    const skill = { ...descriptor, instructions: "先提取决定，再列出行动项。" }
+
+    await expect(buildTaskSkillInstructions("user:meeting-notes")).rejects.toThrow("主进程校验")
+    await expect(buildTaskSkillInstructions("user:other-skill", skill)).rejects.toThrow("主进程校验")
+    await expect(buildTaskSkillInstructions("user:meeting-notes", skill)).resolves.toContain(
+      "用户 Skill「Meeting Notes」（$meeting-notes）",
+    )
   })
 })

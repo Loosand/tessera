@@ -30,11 +30,11 @@
 | 供应商适配 | 部分实现 | `@tessera/ai` 已能创建 OpenAI 兼容、Anthropic 兼容、DeepSeek、Grok 和 OpenRouter 模型；兼容协议允许多条具名连接，官方服务保持单例；DeepSeek 官方 Anthropic Web Search 的已知错误形状差异已在 SDK Schema 前窄归一化。 |
 | 供应商配置 | 部分实现 | API Key 由系统安全存储加密，Base URL、启用状态和手动模型持久化；模型目录是可选能力，404/405 不判定推理连接失效。 |
 | 新任务界面 | 部分实现 | 只暴露可逐轮切换的自动/研究/写作/问答创作方式与模型选择，不显示 Chat/Agent、联网或思考开关；独立任务默认无工作区工具、工作区任务默认带工具的迁移期分流仍存在。已接入流式消息、停止、重试、结构化问题暂停/续跑、研究计划、首次发送懒创建、历史/工具上下文恢复、文件引用跳转和文档 Diff 审批。 |
-| Skill 基建 | 部分实现 | 标准 `SKILL.md` 校验、研究/写作内置注册表、逐轮显式选择、AI SDK `instructions` 渐进式注入和研究专用交互工具已接通；自动意图路由、用户/工作区发现、安装和资源路由待实现。 |
-| Agent 协议 | 部分实现 | 无工作区与工作区任务均使用 AI SDK `ToolLoopAgent`；工作区路径通过统一 `AgentRuntime` 端口运行读写工具、只读研究子 Agent 和当前端点已验证的供应商原生联网工具。两条入口的 Agent 定义/动态 call options 尚待合并，MCP、Shell 与 durable 自动续跑尚未接入。 |
+| Skill 基建 | 部分实现 | 标准 `SKILL.md` 校验、研究/写作内置注册表、用户单个导入与目录扫描批量安装、逐轮显式选择、AI SDK `instructions` 渐进式注入和研究专用交互工具已接通；自动意图路由、工作区自动发现、更新/版本和资源路由待实现。 |
+| Agent 协议 | 部分实现 | 无工作区与工作区任务均使用 AI SDK `ToolLoopAgent`；工作区路径通过统一 `AgentRuntime` 端口运行读写工具、只读研究子 Agent、当前端点已验证的供应商原生联网工具，以及显式信任/启用且逐次审批的 MCP 工具。两条入口的 Agent 定义/动态 call options 尚待合并，Shell 与 durable 自动续跑尚未接入。 |
 | 文档侧栏 | 已实现 | 文档右侧栏直接复用 `TaskPage`、任务 ID、IPC、持久化与恢复链路；当前 Markdown 最新草稿默认显示为可移除附件，发送后在主进程边界转成受限文本上下文。 |
 | 文件读写 | 已实现 | 主进程冻结候选内容，AI SDK 标准 `toolApproval` 暂停写工具；批准后复核路径、内容哈希与磁盘版本并原子写入，拒绝和冲突不改磁盘。 |
-| 会话数据 | 部分实现 | `task_sessions` / `task_messages` 已保存兼容 mode、下一轮 Skill 默认值、可选工作区、版本化消息与可恢复等待输入状态；`task_runs` 已保存本轮 mode、Skill、思考与联网快照。工具/资源快照、Artifact、完成原因、用量与耗时仍待补齐。 |
+| 会话数据 | 部分实现 | `task_sessions` / `task_messages` 已保存兼容 mode、下一轮 Skill 默认值、可选工作区、版本化消息与可恢复等待输入状态；`task_runs` 已保存本轮 mode、Skill、思考、联网、完整 RunPolicy、资源摘要和 AI SDK 生命周期完成原因/用量/耗时汇总。规范化动态资源关系与 Artifact 仍待补齐。 |
 | 内容存储 | 规划（探索） | 当前实现以外部 Markdown 工作区为事实源；下一阶段暂用托管内容库 + SQLite 控制层验证无工作区创作和项目整理，同时与数据库正文、完全外部工作区候选比较。 |
 
 ## 固定边界
@@ -43,7 +43,7 @@
 - 每轮默认只发送用户显式输入、显式附件和当前会话历史，不读取未附加的工作区、当前文档或剪贴板。
 - 当前实际 Skill 通过 AI SDK instructions 注入，只改变执行方法；联网、资源读取与写入能力由本轮作用域、创作方式和请求期模型端点共同解析，Skill 声明本身不授予权限。
 - 当前文件适配器的工作区根目录由主进程注入，模型不得通过参数自行选择或扩大目录；未来数据库适配器也必须使用稳定资源 ID 和相同授权语义。
-- 只读 Agent 不暴露写入、删除、重命名、Shell 或任意网络接口；仅创作方式启用且当前模型端点已验证时，可获得供应商原生联网工具。
+- 只读工作区工具不暴露写入、删除、重命名、Shell 或任意网络接口；仅创作方式启用且当前模型端点已验证时，可获得供应商原生联网工具。MCP 是独立外部能力，只从显式信任/启用的服务器注入并逐次审批，不借用只读工作区授权。
 - 可写 Agent 第一版只创建或更新 Markdown，不删除或重命名文件。
 - 任何 Agent 写入都必须先展示 Diff；批准前不改变磁盘，拒绝后不得继续尝试同一写入。
 - 每次工具调用设置路径、结果大小、步骤数、时间和 token 上限。
@@ -85,6 +85,7 @@
 
 - [ ] 在主进程增加统一的模型解析器，根据配置创建 AI SDK `LanguageModel`。
 - [ ] 对请求日志、IPC 错误和诊断信息做密钥、Authorization Header 与敏感查询参数脱敏。
+- [x] 开发环境使用 AI SDK 官方 Telemetry / DevTools 记录 Agent run、step、tool、usage 与 timing，并通过设置页窄 IPC 按需打开本地 Viewer；生产脱敏日志仍独立规划。
 - [ ] 为缺少密钥、Base URL 非法、模型不存在、供应商超时和限流提供完整的统一错误码；搜索额度耗尽和已知 Web Search 协议校验失败已提供可操作文案。
 
 ### 验收门槛
@@ -106,6 +107,7 @@
 - [ ] 处理重复事件、乱序事件、订阅释放、渲染进程刷新和中途取消，避免消息重复或请求悬挂。
 - [x] 使用合成 `start → text-start → text-delta → text-end → finish` 序列验证 AI SDK React 消费者逐段收到正文，结束后 Part 进入完成状态。
 - [x] 透传供应商明确返回的 `reasoning-start → reasoning-delta → reasoning-end`，按原始 Part 顺序用可折叠、紧凑 Markdown 过程块展示，不合成伪思维链。
+- [x] 供应商只有 reasoning start/end 而没有 delta 时隐藏完成态空块，不用占位文案冒充可展示摘要。
 
 ### 会话与界面
 
@@ -119,7 +121,7 @@
 - [x] 持久化消息内容、reasoning/来源/工具等消息 Part 以及供应商和模型；应用重启后可恢复会话。
 - [x] 使用无服务端副作用的 `request-user-input` 客户端工具只处理核心语义歧义，单次只问一个问题、每个用户请求最多询问一次；持久化等待态，并在回答、跳过或关闭后通过类型化工具输出自动续跑。
 - [x] 研究 Skill 在多步任务前通过 `publish-research-plan` 发布结构化目标、范围、交付物和问题列表，使用专用组件呈现且不扩大工具权限。
-- [ ] 持久化每轮完成原因、token 用量和耗时。
+- [x] 通过 AI SDK `onStepEnd` / `onEnd` 持久化每轮完成原因、输入/输出/推理与缓存读写 token、步骤/工具计数和耗时；取消/中断仍保留状态与可得的已完成步骤指标。
 - [ ] 为长会话预留上下文裁剪或摘要字段，但本阶段不自动改写用户消息。
 
 ### 验收门槛
@@ -152,7 +154,7 @@
 
 - [ ] Agent 能通过多次工具调用回答跨文件问题，并为关键结论给出可验证的文件来源。
 - [x] `../`、绝对路径、工作区外符号链接、超大文件和超量搜索结果均被主进程拒绝或截断为结构化受限结果。
-- [x] 只读运行时没有可达的写入、删除、重命名、Shell 和任意网络接口；供应商原生联网仅由创作方式和已验证端点显式注入。
+- [x] 只读工作区运行时没有可达的写入、删除、重命名、Shell 和任意网络接口；供应商原生联网仅由创作方式和已验证端点显式注入，MCP 通过独立信任与逐次审批边界注入。
 - [ ] 停止 Agent 后，正在执行的工具和后续步骤都能终止，并产生完整的结束事件。
 
 ## M3：可写工作区 Agent
@@ -190,23 +192,24 @@
 
 - [x] 在编码前针对锁定的 AI SDK 版本完成能力矩阵，至少核对 `ToolLoopAgent`、call options / `prepareCall`、`prepareStep`、`stopWhen`、`toolApproval`、typed UI messages、ChatTransport、生命周期和子 Agent；能力矩阵记录在[统一创作 Agent 与内容存储探索](unified-creation-agent.md)，依据 `ai@7.0.73` 随包 docs/source。
 - [x] 让无工作区任务也通过 AI SDK `ToolLoopAgent` 运行；无资源且无需搜索时允许零工具直接生成文本。
-- [ ] 定义 `RunPolicy`，根据本轮创作提示、用户 turn、显式资源、模型能力和权限解析实际 Skill、联网、工具、审批和资源限额；优先通过 `callOptionsSchema` / `prepareCall` 配置同一 Agent，不复制多套 Agent 类。
-- [ ] 把实际 Skill、能力策略和资源快照固化到 `task_runs`；当前已通过 `0009-task-run-policy` 保存 mode、Skill、思考和联网，工具/资源快照仍待实现；保留旧 `task_sessions.mode` / `skill_id` / `workspace_id` 的兼容读取。
+- [x] 定义第一版受信任 `RunPolicy`：主进程按本轮显式创作方式、内部作用域和持久化模型事实解析实际端点、Skill、联网、推理、工具作用域及 step/token/time 上限；renderer 只做同源预检，IPC 不接受 `reasoning` / `webSearch` 命令。无工作区与工作区路径共用 `task-agent.ts` 的 `callOptionsSchema` / `prepareCall`，不复制 Agent loop。
+- [ ] 在第一版 RunPolicy 上增加用户 turn 自动意图识别、动态资源和更细权限/审批输入；任何自动化只能收窄主进程已经确认的资源授权。
+- [x] 把实际 Skill、完整 RunPolicy 和资源摘要固化到 `task_runs`：`0009-task-run-policy` 保存兼容查询列，`0010-task-run-context` 保存 `policy_json` / `resource_summary_json`，旧运行保持未知值；后续以关系表替代仅有摘要的动态资源表达。
 - [x] 允许自动/研究/写作/问答在每轮发送前切换；同一任务可以从普通问答进入研究和写作，旧 run 不被回写。
-- [ ] 使用 `prepareStep` / `activeTools` 处理 step 内收窄和 `stopWhen` 处理循环停止；任何 step 只能缩小 RunPolicy 授权，不能临时扩大资源或工具。
-- [ ] 通过 AI SDK `toolApproval` 表达敏感工具暂停，并用 `prepareCall` 绑定本轮权限策略；Tessera 只持久化审批、Diff 和审计，不自建平行工具状态机。
+- [x] 通过 `prepareCall` 返回 `activeTools`、reasoning、instructions、`stopWhen` 和输出上限，实现逐轮工具/预算收窄；后续只有确需 step 内继续缩小时才增加 `prepareStep`，任何 step 不能扩大 RunPolicy。
+- [x] 通过 AI SDK 工具 `needsApproval` 表达 Markdown 写入与 MCP 暂停；Tessera 只持久化审批、Diff 和审计，不自建平行工具状态机。更细的逐轮审批矩阵后续可由 `prepareCall` 返回 `toolApproval`。
 - [ ] 从 Agent 定义导出 `InferAgentUIMessage`，复用 `convertToModelMessages`、标准 Tool Part 与 `useChat`；应用元数据通过受控 schema 扩展，不复制消息协议。
-- [ ] 使用 AI SDK 生命周期回调记录 step、工具耗时、usage 和 finish reason，再关联现有 `task_run_events`，避免从 UI chunk 反推观测数据。
+- [x] 使用 AI SDK 生命周期回调记录 step、工具耗时、usage 和 finish reason，并按 request ID 关联现有 `task_run_events`；SQLite 保存无正文汇总，开发期细节由官方 DevTools 查看，不从 UI chunk 反推。
 - [ ] 使用同一薄 `AgentRuntime`、消息 Part、暂停/续跑、审批、取消和运行恢复协议，停止为 Chat 和 Agent 维护两条产品链路。
 - [ ] Electron transport 只实现标准 `ChatTransport` 的 IPC/重连差异；由于 `DirectChatTransport` 当前不支持 reconnect，只用于适合的测试，不另写 React chat 状态机。
 
 ### 资源与领域工具
 
-- [ ] 定义后端无关的 Project、Document、Artifact、Resource Binding 和 Operation 契约；工具输入不暴露数据库表或绝对路径。
+- [x] 定义后端无关的 `ProjectRef`、`DocumentRef`、`ArtifactRef` 与 `ResourceBinding` 公共契约；不暴露数据库表、绝对路径或正文。Operation 与领域工具输入随首个内容服务实现补齐。
 - [ ] 实现 `list-workspaces`、`create-document`、`create-workspace`、`move-documents` 和 `inspect-workspace` 的受限应用服务。
 - [ ] 当前混合实验增加用户选择的内容库根目录和可见“未归档”Workspace；保留内容库外普通工作区，不静默搬迁用户目录。
 - [ ] 文档创建后在同一 TaskPage 打开 Artifact 协作视图；项目创建和移动完成后更新资源关联，不复制任务历史。
-- [ ] 创建、移动、重命名执行冲突预检、授权、活动展示、审计和恢复信息；覆盖、删除、Shell 与任意 MCP 继续保持独立高风险边界。
+- [ ] 创建、移动、重命名执行冲突预检、授权、活动展示、审计和恢复信息；覆盖、删除与 Shell 继续保持独立高风险边界；MCP 已使用独立信任和逐次审批，不继承项目操作授权。
 
 ### 存储评审
 
@@ -224,7 +227,7 @@
 ## 横向任务
 
 - [ ] 为模型调用、工具调用和 IPC 事件建立统一错误码，界面文案不暴露密钥或内部堆栈。
-- [ ] 记录首 token 延迟、总耗时、token 用量、工具次数、取消率和失败原因；默认只保存本地。
+- [ ] 首输出延迟、总耗时、token 用量和工具次数已按 run 本地保存；取消率与统一失败原因聚合查询仍待实现。
 - [x] 为路径攻击、审批批准/拒绝、版本冲突、完整工具历史和运行事件持久化建立自动化回归；普通问答与写作质量评测仍需扩充。
 - [ ] 为写作质量建立人工评测集，分别评价事实保持、语气、结构、修改幅度和引用可靠性；不只比较单次演示效果。
 - [ ] 当消息协议、权限模型或数据库事实源变化时，同步 `architecture.md`、相关目录 `.folder.md` 和源文件 `[DOC]`。

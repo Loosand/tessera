@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 当前逐轮创作模式与生成状态
- * [OUTPUT]: 只暴露自动、研究、写作与问答意图的紧凑模式选择器
+ * [INPUT]: 当前逐轮创作模式、生成状态与用户 Skill 目录
+ * [OUTPUT]: 只暴露自动、内置/用户 Skill 与问答意图的紧凑模式选择器
  * [POS]: task-composer 底部工具栏中的按需能力入口
  * [DOC]: design.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -10,11 +10,12 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import type { BuiltInTaskSkillId, TaskSkillId } from "@tessera/contracts"
+import { type BuiltInTaskSkillId, type TaskSkillId, isUserTaskSkillId } from "@tessera/contracts"
 import {
   AiBrain01Icon,
   AiWebBrowsingIcon,
   ArrowDown01Icon,
+  BookOpen01Icon,
   CheckmarkCircle02Icon,
   Edit02Icon,
   Message01Icon,
@@ -23,7 +24,8 @@ import { Button } from "@tessera/design-system/components/ui/button"
 import { Icon } from "@tessera/design-system/components/ui/icon"
 import { Popover, PopoverContent, PopoverTrigger } from "@tessera/design-system/components/ui/popover"
 import { listBuiltInSkills } from "@tessera/skills"
-import React, { useState } from "react"
+import React, { useMemo, useState } from "react"
+import { useUserSkills } from "../hooks/use-user-skills"
 
 type TaskCapabilityPickerProps = Readonly<{
   running: boolean
@@ -31,7 +33,7 @@ type TaskCapabilityPickerProps = Readonly<{
   onSkillChange: (skillId: TaskSkillId) => void
 }>
 
-const TASK_SKILL_OPTIONS = [
+const BASE_TASK_SKILL_OPTIONS = [
   {
     id: null,
     displayName: "自动",
@@ -62,16 +64,30 @@ const SKILL_ICONS = {
 function skillIcon(skillId: TaskSkillId) {
   if (skillId === null) return AiBrain01Icon
   if (skillId === "question-answering") return Message01Icon
+  if (isUserTaskSkillId(skillId)) return BookOpen01Icon
   return SKILL_ICONS[skillId]
-}
-
-function skillLabel(skillId: TaskSkillId) {
-  return TASK_SKILL_OPTIONS.find((option) => option.id === skillId)?.displayName ?? "自动"
 }
 
 export function TaskCapabilityPicker({ running, skillId, onSkillChange }: TaskCapabilityPickerProps) {
   const [open, setOpen] = useState(false)
-  const currentSkillLabel = skillLabel(skillId)
+  const { skills: userSkills } = useUserSkills()
+  const options = useMemo(
+    () => [
+      ...BASE_TASK_SKILL_OPTIONS,
+      ...userSkills
+        .filter((skill) => skill.enabled && skill.available)
+        .map((skill) => ({
+          id: skill.id as TaskSkillId,
+          displayName: skill.displayName,
+          shortDescription: skill.shortDescription,
+        })),
+    ],
+    [userSkills],
+  )
+  const currentSkillLabel =
+    options.find((option) => option.id === skillId)?.displayName ??
+    userSkills.find((skill) => skill.id === skillId)?.displayName ??
+    (skillId?.startsWith("user:") ? "不可用 Skill" : "自动")
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -111,7 +127,7 @@ export function TaskCapabilityPicker({ running, skillId, onSkillChange }: TaskCa
             选择方式
           </h3>
           <div className="grid gap-0.5">
-            {TASK_SKILL_OPTIONS.map((option) => {
+            {options.map((option) => {
               const selected = skillId === option.id
               return (
                 <Button

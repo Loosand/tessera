@@ -1,6 +1,6 @@
 /**
- * [INPUT]: Electron 窄桥、内部任务执行模式/创作方式、显式当前文档、模型选择、版本化历史消息、自动联网/思考策略与 AI SDK React 状态机
- * [OUTPUT]: 可独立验证且支持断开重连的 ElectronChatTransport、等待输入识别、完整 UIMessage 往返、问答/审批后自动续轮与通过类型化 IPC 消费增量事件的 useChat 封装
+ * [INPUT]: Electron 窄桥、任务是否已持久化、内部任务执行作用域/创作方式、显式当前文档、模型选择、版本化历史消息与 AI SDK React 状态机
+ * [OUTPUT]: 不传递能力开关、只为已持久化任务恢复且支持断开重连的 ElectronChatTransport、等待输入识别、完整 UIMessage 往返、问答/审批后自动续轮与类型化 IPC 增量消费
  * [POS]: @tessera/ai/react 中连接桌面渲染层与主进程 Chat/Agent 运行时的 Transport
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -13,7 +13,6 @@
 import { useChat } from "@ai-sdk/react"
 import { REQUEST_USER_INPUT_TOOL_NAME } from "@tessera/contracts"
 import type {
-  AiChatReasoning,
   AiChatStreamEvent,
   AiProviderId,
   DesktopApi,
@@ -49,9 +48,8 @@ export type UseElectronChatOptions = {
   mode: TaskMode
   modelId: string
   providerId: AiProviderId
-  reasoning: AiChatReasoning
+  resume?: boolean
   skillId: TaskSkillId
-  webSearch: boolean
 }
 
 function requestId() {
@@ -287,8 +285,6 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
             skillId: options.skillId,
             providerId: options.providerId,
             modelId: options.modelId,
-            reasoning: options.reasoning,
-            webSearch: options.webSearch,
             messages: toAiChatMessages(messages),
           })
           .then((result) => {
@@ -318,6 +314,7 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
     abortSignal,
   }: Parameters<ChatTransport<UIMessage>["reconnectToStream"]>[0]) {
     const options = this.options()
+    if (options.resume !== true) return null
     const bridge = options.bridge
     if (!bridge) throw new Error("桌面 AI 服务不可用。")
 
@@ -418,13 +415,14 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
 export function useElectronChat(options: UseElectronChatOptions) {
   const latestOptions = useRef(options)
   latestOptions.current = options
+  const resumeOnMount = useRef(options.resume === true).current
   const fallbackChatId = useMemo(() => `task-${requestId()}`, [])
   const transport = useMemo(() => new ElectronChatTransport(() => latestOptions.current), [])
 
   const chat = useChat({
     id: options.chatId ?? fallbackChatId,
     ...(options.initialMessages ? { messages: toUiMessages(options.initialMessages) } : {}),
-    resume: true,
+    resume: resumeOnMount,
     sendAutomaticallyWhen: shouldAutomaticallyContinueTask,
     transport,
     throttle: 24,

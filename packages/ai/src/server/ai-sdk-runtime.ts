@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 类型化供应商连接、请求期模型端点、自动联网策略、搜索额度与 AI SDK 官方供应商适配器
- * [OUTPUT]: 可交给 AI SDK generateText/streamText 的统一 LanguageModel、分层搜索额度与显式支持的原生联网工具
+ * [OUTPUT]: 可交给 AI SDK generateText/streamText 的统一 LanguageModel、端点专属 provider options、分层搜索额度与显式支持的原生联网工具
  * [POS]: @tessera/ai/server 的真实生成模型适配边界
  * [DOC]: docs/architecture/ai-providers.md
  *
@@ -16,7 +16,7 @@ import { createOpenAI } from "@ai-sdk/openai"
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
 import { createXai } from "@ai-sdk/xai"
 import type { AiModelEndpointType, AiProviderConnectionInput } from "@tessera/contracts"
-import type { LanguageModel, ToolSet } from "ai"
+import type { JSONValue, LanguageModel, ToolSet } from "ai"
 
 const DEFAULT_WEB_SEARCH_MAX_USES = 5
 const MAX_WEB_SEARCH_MAX_USES = 20
@@ -33,6 +33,7 @@ export type AiChatRuntimeOptions = {
 
 export type AiSdkChatRuntime = {
   model: LanguageModel
+  providerOptions?: Record<string, Record<string, JSONValue>>
   tools?: ToolSet
 }
 
@@ -127,6 +128,9 @@ export function createAiSdkChatRuntime(
         })
         return {
           model: deepseek.responses(modelId),
+          // DeepSeek 的自定义模型 ID 不在 OpenAI provider 的内置能力表中。
+          // 显式标记后，AI SDK 才会把标准 reasoning effort/summary 写入 Responses 请求。
+          providerOptions: { openai: { forceReasoning: true } },
           ...(webSearch
             ? { tools: { web_search: deepseek.tools.webSearch() as unknown as ToolSet[string] } }
             : {}),

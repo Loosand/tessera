@@ -14,18 +14,27 @@ import { desc, eq, isNull } from "drizzle-orm"
 import type { DatabaseClient } from "./client"
 import { type Workspace, workspaces } from "./schema"
 
-export type WorkspaceRecordInput = Pick<Workspace, "id" | "rootPath" | "displayName" | "lastOpenedAt">
+export type WorkspaceRecordInput = Pick<Workspace, "id" | "rootPath" | "displayName" | "lastOpenedAt"> & {
+  readonly contentLibraryId?: Workspace["contentLibraryId"]
+  readonly storageKind?: Workspace["storageKind"]
+}
 
 export function saveWorkspace(client: DatabaseClient, workspace: WorkspaceRecordInput) {
   client.db
     .insert(workspaces)
-    .values(workspace)
+    .values({
+      ...workspace,
+      contentLibraryId: workspace.contentLibraryId ?? null,
+      storageKind: workspace.storageKind ?? "external",
+    })
     .onConflictDoUpdate({
       target: workspaces.rootPath,
       set: {
         displayName: workspace.displayName,
         lastOpenedAt: workspace.lastOpenedAt,
         hiddenAt: null,
+        contentLibraryId: workspace.contentLibraryId ?? null,
+        storageKind: workspace.storageKind ?? "external",
       },
     })
     .run()
@@ -45,6 +54,10 @@ export function findMostRecentWorkspace(client: DatabaseClient) {
 
 export function findWorkspaceById(client: DatabaseClient, id: string) {
   return client.db.select().from(workspaces).where(eq(workspaces.id, id)).get() ?? null
+}
+
+export function findWorkspaceByRootPath(client: DatabaseClient, rootPath: string) {
+  return client.db.select().from(workspaces).where(eq(workspaces.rootPath, rootPath)).get() ?? null
 }
 
 export function listRecentWorkspaces(client: DatabaseClient, limit = 8) {

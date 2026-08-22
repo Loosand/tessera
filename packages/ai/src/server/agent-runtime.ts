@@ -1,8 +1,8 @@
 /**
- * [INPUT]: 已解析供应商连接、自动联网/思考策略、当前 Skill、完整 AI SDK UIMessage 历史、主进程注入的受限工作区/MCP 能力与中止信号
- * [OUTPUT]: 同时承载供应商原生搜索、工作区读写、强制审批 MCP、Skill instructions 与标准 toolApproval 的受限 AI SDK ToolLoopAgent 增量流
+ * [INPUT]: 已解析供应商连接、自动联网/思考策略、当前 Skill、完整 AI SDK UIMessage 历史、主进程注入的受限工作区/MCP 能力、中止信号与运行指标回调
+ * [OUTPUT]: 同时承载供应商原生搜索、按 RunPolicy 收窄的工作区读写、强制审批 MCP、Skill instructions、标准 needsApproval 与原生生命周期观测的 AI SDK ToolLoopAgent 增量流
  * [POS]: @tessera/ai/server 中可读并可经人工批准修改 Markdown 的工作区 Agent 编排边界
- * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
+ * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/ai-observability.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -12,6 +12,7 @@
 
 import type { AgentRuntime } from "@tessera/agent-runtime"
 import type { AiChatStreamChunk } from "@tessera/contracts"
+import type { LoadedSkill } from "@tessera/skills"
 import { ToolLoopAgent, createAgentUIStream, dynamicTool, isStepCount, jsonSchema, tool } from "ai"
 import type { InferUITools, JSONSchema7, ToolSet, UIMessage } from "ai"
 import { z } from "zod"
@@ -19,19 +20,16 @@ import { createAiSdkChatRuntime } from "./ai-sdk-runtime"
 import {
   type AiChatRuntimeInput,
   publicChunk,
-  reasoningLevel,
   safeErrorMessage,
   toUiMessages,
   webSearchMaxUsesForSkill,
 } from "./chat-runtime"
 import { buildTaskSkillInstructions } from "./skill-instructions"
+import { type TaskAgentRunMetrics, createTaskAgent } from "./task-agent"
 import {
   createTaskInteractionTools,
   hasRequestedUserInputSinceLastUserMessage,
 } from "./task-interaction-tools"
-
-const MAX_AGENT_STEPS = 8
-const MAX_AGENT_TOTAL_TOKENS = 80_000
 
 export type ListWorkspaceFilesInput = Readonly<{
   directory?: string | undefined
@@ -112,6 +110,8 @@ export type AiAgentRuntimeOptions = Readonly<{
   abortSignal: AbortSignal
   externalTools?: readonly ExternalAgentTool[]
   onChunk: (chunk: AiChatStreamChunk) => void | Promise<void>
+  onRunMetrics?: (metrics: TaskAgentRunMetrics) => void
+  skill?: LoadedSkill
   tools: WorkspaceAgentTools
   workspaceName: string
 }>
@@ -119,12 +119,35 @@ export type AiAgentRuntimeOptions = Readonly<{
 export type AiSdkAgentRuntimeRequest = Readonly<{
   externalTools?: readonly ExternalAgentTool[]
   input: AiChatRuntimeInput
+  onRunMetrics?: (metrics: TaskAgentRunMetrics) => void
+  skill?: LoadedSkill
   tools: WorkspaceAgentTools
   workspaceName: string
 }>
 
-function agentInstructions(workspaceName: string, skillInstructions?: string) {
-  const instructions = `你是 Tessera 的工作区 Agent，当前授权范围是工作区「${workspaceName}」中的 Markdown 文档。
+export function createExternalAgentToolSet(
+  externalTools: readonly ExternalAgentTool[],
+  abortSignal: AbortSignal,
+) {
+  return Object.fromEntries(
+    externalTools.map((externalTool) => [
+      externalTool.id,
+      dynamicTool({
+        description: `${externalTool.title}：${externalTool.description}`,
+        inputSchema: jsonSchema(externalTool.inputSchema as JSONSchema7),
+        needsApproval: true,
+        execute: (toolInput, options) =>
+          externalTool.execute(toolInput, {
+            signal: options.abortSignal ?? abortSignal,
+            toolCallId: options.toolCallId,
+          }),
+      }),
+    ]),
+  ) satisfies ToolSet
+}
+
+function agentInstructions(workspaceName: string) {
+  return `你是 Tessera 的工作区 Agent，当前授权范围是工作区「${workspaceName}」中的 Markdown 文档。
 
 规则：
 1. 需要工作区事实时先调用读取工具，不要猜测文件内容。
@@ -136,19 +159,25 @@ function agentInstructions(workspaceName: string, skillInstructions?: string) {
 7. 跨越很多文件、会明显挤占主对话上下文的独立研究可以委派给只读研究子 Agent；简单问题直接使用读取工具。
 8. 不能删除、重命名、运行 Shell 或扩大访问范围；工具返回截断或限制信息时明确说明。
 9. MCP 工具来自用户显式启用的外部服务器，每次执行都必须等待用户批准；不要用多个相似 MCP 调用绕过拒绝。`
-  return skillInstructions ? `${instructions}\n\n${skillInstructions}` : instructions
 }
 
 async function* runAiSdkAgent(
-  { externalTools = [], input, tools: workspaceTools, workspaceName }: AiSdkAgentRuntimeRequest,
+  {
+    externalTools = [],
+    input,
+    onRunMetrics,
+    skill,
+    tools: workspaceTools,
+    workspaceName,
+  }: AiSdkAgentRuntimeRequest,
   abortSignal: AbortSignal,
 ): AsyncIterable<AiChatStreamChunk> {
   const runtime = createAiSdkChatRuntime(input, {
-    webSearch: input.webSearch,
-    webSearchMaxUses: webSearchMaxUsesForSkill(input.skillId),
+    webSearch: input.runPolicy.webSearch,
+    webSearchMaxUses: webSearchMaxUsesForSkill(input.runPolicy.skillId),
   })
   const model = runtime.model
-  const skillInstructions = await buildTaskSkillInstructions(input.skillId)
+  const skillInstructions = await buildTaskSkillInstructions(input.runPolicy.skillId, skill)
   const readonlyTools = {
     "list-workspace-files": tool({
       description: "列出工作区或指定目录中的 Markdown 文件，返回相对路径、大小和更新时间。",
@@ -190,25 +219,11 @@ async function* runAiSdkAgent(
     maxOutputTokens: 2_048,
     stopWhen: isStepCount(5),
   })
-  const mcpTools = Object.fromEntries(
-    externalTools.map((externalTool) => [
-      externalTool.id,
-      dynamicTool({
-        description: `${externalTool.title}：${externalTool.description}`,
-        inputSchema: jsonSchema(externalTool.inputSchema as JSONSchema7),
-        needsApproval: true,
-        execute: (toolInput, options) =>
-          externalTool.execute(toolInput, {
-            signal: options.abortSignal ?? abortSignal,
-            toolCallId: options.toolCallId,
-          }),
-      }),
-    ]),
-  ) satisfies ToolSet
+  const mcpTools = createExternalAgentToolSet(externalTools, abortSignal)
   const tools = {
     ...(runtime.tools ?? {}),
     ...readonlyTools,
-    ...createTaskInteractionTools(input.skillId, {
+    ...createTaskInteractionTools(input.runPolicy.skillId, {
       allowUserInput: !hasRequestedUserInputSinceLastUserMessage(input.messages),
     }),
     "delegate-workspace-research": tool({
@@ -228,6 +243,7 @@ async function* runAiSdkAgent(
       description:
         "创建或更新工作区 Markdown 文档。调用会先展示完整候选内容和 Diff，只有用户明确批准后才执行。",
       inputSchema: workspaceDocumentChangeInputSchema,
+      needsApproval: true,
       execute: (toolInput, options) =>
         workspaceTools.writeWorkspaceDocument(toolInput, {
           signal: options.abortSignal ?? abortSignal,
@@ -236,18 +252,17 @@ async function* runAiSdkAgent(
     }),
     ...mcpTools,
   }
-  const agent = new ToolLoopAgent({
+  const agent = createTaskAgent({
+    baseInstructions: agentInstructions(workspaceName),
     model,
-    instructions: agentInstructions(workspaceName, skillInstructions),
+    ...(onRunMetrics ? { onRunMetrics } : {}),
+    ...(runtime.providerOptions ? { providerOptions: runtime.providerOptions } : {}),
     tools,
-    toolApproval: { "write-workspace-document": "user-approval" },
-    reasoning: reasoningLevel(input.reasoning),
-    maxOutputTokens: 4_096,
-    stopWhen: [
-      isStepCount(MAX_AGENT_STEPS),
-      ({ steps }) =>
-        steps.reduce((total, step) => total + (step.usage.totalTokens ?? 0), 0) >= MAX_AGENT_TOTAL_TOKENS,
-    ],
+    toolGroups: {
+      external: externalTools.map((externalTool) => externalTool.id),
+      workspaceRead: [...Object.keys(readonlyTools), "delegate-workspace-research"],
+      workspaceWrite: ["write-workspace-document"],
+    },
   })
   type AgentUiMessage = UIMessage<unknown, never, InferUITools<typeof tools>>
   const originalMessages = await toUiMessages<AgentUiMessage>(input.messages, { tools })
@@ -256,7 +271,15 @@ async function* runAiSdkAgent(
     uiMessages: originalMessages,
     originalMessages,
     abortSignal,
-    timeout: { totalMs: 120_000, firstChunkMs: 30_000, chunkMs: 45_000 },
+    options: {
+      policy: input.runPolicy,
+      ...(skillInstructions ? { skillInstructions } : {}),
+    },
+    timeout: {
+      totalMs: input.runPolicy.limits.timeoutMs,
+      firstChunkMs: 30_000,
+      chunkMs: 45_000,
+    },
     sendReasoning: true,
     sendSources: true,
     onError: (error) => safeErrorMessage(error, input.apiKey),
@@ -275,10 +298,17 @@ export const aiSdkAgentRuntime: AgentRuntime<AiSdkAgentRuntimeRequest, AiChatStr
 
 export async function streamAiAgent(
   input: AiChatRuntimeInput,
-  { abortSignal, externalTools, onChunk, tools, workspaceName }: AiAgentRuntimeOptions,
+  { abortSignal, externalTools, onChunk, onRunMetrics, skill, tools, workspaceName }: AiAgentRuntimeOptions,
 ): Promise<void> {
   for await (const chunk of aiSdkAgentRuntime.run(
-    { input, tools, workspaceName, ...(externalTools ? { externalTools } : {}) },
+    {
+      input,
+      ...(onRunMetrics ? { onRunMetrics } : {}),
+      tools,
+      workspaceName,
+      ...(externalTools ? { externalTools } : {}),
+      ...(skill ? { skill } : {}),
+    },
     abortSignal,
   )) {
     await onChunk(chunk)

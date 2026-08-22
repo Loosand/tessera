@@ -11,6 +11,7 @@
  */
 
 export * from "./client"
+export * from "./content-domain-repository"
 export * from "./agent-change-repository"
 export * from "./ai-provider-config-repository"
 export * from "./migrations"
@@ -18,4 +19,5 @@ export * from "./mcp-server-config-repository"
 export * from "./schema"
 export * from "./task-session-repository"
 export * from "./task-run-repository"
+export * from "./user-skill-config-repository"
 export * from "./workspace-repository"
