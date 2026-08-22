@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 类型化供应商连接、模型 ID、联网开关、搜索额度与 AI SDK 官方供应商适配器
- * [OUTPUT]: 可交给 AI SDK generateText/streamText 的统一 LanguageModel、协议切换、分层搜索额度、DeepSeek 响应兼容与原生联网工具
+ * [OUTPUT]: 可交给 AI SDK generateText/streamText 的统一 LanguageModel、分层搜索额度与显式支持的原生联网工具
  * [POS]: @tessera/ai/server 的真实生成模型适配边界
  * [DOC]: docs/architecture/ai-providers.md
  *
@@ -16,7 +16,6 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
 import { createXai } from "@ai-sdk/xai"
 import type { AiProviderConnectionInput } from "@tessera/contracts"
 import type { LanguageModel, ToolSet } from "ai"
-import { createDeepSeekAnthropicFetch } from "./deepseek-anthropic-response"
 
 const DEFAULT_WEB_SEARCH_MAX_USES = 5
 const MAX_WEB_SEARCH_MAX_USES = 20
@@ -62,14 +61,6 @@ function normalizedRuntimeInput(input: AiLanguageModelInput) {
   return { apiKey, baseURL, modelId }
 }
 
-function deepSeekAnthropicBaseUrl(baseURL: string) {
-  const url = new URL(baseURL)
-  if (url.hostname !== "api.deepseek.com") {
-    throw new Error("DeepSeek 联网搜索目前只支持官方 API 地址 https://api.deepseek.com。")
-  }
-  return "https://api.deepseek.com/anthropic"
-}
-
 function normalizedWebSearchMaxUses(value: number | undefined) {
   if (value === undefined || !Number.isFinite(value)) return DEFAULT_WEB_SEARCH_MAX_USES
   return Math.min(MAX_WEB_SEARCH_MAX_USES, Math.max(1, Math.trunc(value)))
@@ -100,21 +91,13 @@ export function createAiSdkChatRuntime(
         ...(webSearch ? { tools: { web_search: anthropic.tools.webSearch_20260209({ maxUses }) } } : {}),
       }
     }
-    case "deepseek": {
-      if (!webSearch) return { model: createDeepSeek({ apiKey, baseURL })(modelId) }
-
-      const deepSeekAnthropic = createAnthropic({
-        apiKey,
-        baseURL: deepSeekAnthropicBaseUrl(baseURL),
-        fetch: createDeepSeekAnthropicFetch(),
-      })
-      return {
-        model: deepSeekAnthropic(modelId),
-        tools: {
-          web_search: deepSeekAnthropic.tools.webSearch_20250305({ maxUses }),
-        },
+    case "deepseek":
+      if (webSearch) {
+        throw new Error(
+          "DeepSeek 原生 API 当前未接入联网搜索工具；请关闭联网搜索，或改用已显式配置且支持原生搜索的供应商连接。",
+        )
       }
-    }
+      return { model: createDeepSeek({ apiKey, baseURL })(modelId) }
     case "grok": {
       const xai = createXai({ apiKey, baseURL })
       return {

@@ -28,7 +28,7 @@ describe("模型能力归一化", () => {
     ).toEqual({
       imageInput: "supported",
       reasoning: "supported",
-      search: "supported",
+      search: "unsupported",
       toolUse: "supported",
     })
   })

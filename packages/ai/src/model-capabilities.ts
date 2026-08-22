@@ -38,7 +38,6 @@ function builtinCapabilities(providerId: AiProviderId, modelId: string): AiModel
   const isOpenAiMultimodal = /(^|\/)(?:gpt-4o|gpt-4\.1|gpt-5|o[134](?:-|$))/u.test(id)
   const isOpenAiReasoning = /(^|\/)(?:gpt-5|o[134](?:-|$))/u.test(id)
   const isDeepSeekReasoning = /(?:reasoner|deepseek-r1|deepseek-v(?:3\.1|4))/u.test(id)
-  const isDeepSeekV4 = /(?:^|\/)deepseek-v4(?:-|$)/u.test(id)
 
   if (isClaude) {
     return {
@@ -62,7 +61,7 @@ function builtinCapabilities(providerId: AiProviderId, modelId: string): AiModel
     return {
       imageInput: /(?:vision|vl|ocr)/u.test(id) ? "supported" : "unsupported",
       reasoning: supportedWhen(isDeepSeekReasoning),
-      search: providerId === "deepseek" && isDeepSeekV4 ? "supported" : "unsupported",
+      search: "unsupported",
       toolUse: supportedWhen(/chat|reasoner|v3|v4/u.test(id)),
     }
   }
