@@ -18,6 +18,7 @@ import {
   matchesAiProvider,
   mergeDiscoveredAiProviderModels,
   setAllAiProviderModelsEnabled,
+  updateAiProviderModelProfile,
 } from "./provider-catalog"
 
 describe("AI 供应商设置模型", () => {
@@ -41,6 +42,14 @@ describe("AI 供应商设置模型", () => {
       grok: false,
       openrouter: false,
     })
+  })
+
+  it("供应商定义显式声明可用生成端点", () => {
+    expect(AI_PROVIDER_DEFINITIONS.find((provider) => provider.id === "deepseek")?.endpointTypes).toEqual([
+      "openai-chat-completions",
+      "openai-responses",
+      "anthropic-messages",
+    ])
   })
 
   it("初始化时不假定任何供应商已配置", () => {
@@ -154,87 +163,71 @@ describe("AI 供应商设置模型", () => {
   it("手动模型会修剪空白并拒绝重复", () => {
     const first = appendAiProviderModel([], "  model-a  ", "openai-compatible")
     expect(first).toEqual([
-      {
+      expect.objectContaining({
         id: "model-a",
         enabled: true,
-        name: null,
-        ownedBy: null,
-        contextWindow: null,
-        maxOutputTokens: null,
+        modelType: "chat",
+        inputModalities: ["text"],
+        outputModalities: ["text"],
         capabilities: {
-          imageInput: "unknown",
+          functionCall: "unknown",
           reasoning: "unknown",
-          search: "unsupported",
-          toolUse: "unknown",
+          structuredOutput: "unknown",
         },
-        capabilitySource: "builtin",
-      },
+      }),
     ])
     expect(appendAiProviderModel(first, "model-a", "openai-compatible")).toEqual(first)
   })
 
   it("同步多个模型时保留已有开关并默认停用新模型", () => {
-    expect(
-      mergeDiscoveredAiProviderModels(
-        [
-          {
-            id: "model-a",
-            enabled: false,
-            name: null,
-            ownedBy: null,
-            contextWindow: null,
-            maxOutputTokens: null,
-          },
-        ],
-        [
-          {
-            id: "model-a",
-            name: "Model A",
-            ownedBy: "vendor",
-            contextWindow: 128_000,
-            maxOutputTokens: 16_000,
-          },
-          {
-            id: " model-b ",
-            name: null,
-            ownedBy: null,
-            contextWindow: null,
-            maxOutputTokens: null,
-          },
-        ],
-        "openai-compatible",
-      ),
-    ).toEqual([
-      {
+    const merged = mergeDiscoveredAiProviderModels(
+      [
+        {
+          id: "model-a",
+          enabled: false,
+          name: null,
+          ownedBy: null,
+          contextWindow: null,
+          maxOutputTokens: null,
+        },
+      ],
+      [
+        {
+          id: "model-a",
+          name: "Model A",
+          ownedBy: "vendor",
+          contextWindow: 128_000,
+          maxOutputTokens: 16_000,
+        },
+        {
+          id: " model-b ",
+          name: null,
+          ownedBy: null,
+          contextWindow: null,
+          maxOutputTokens: null,
+        },
+      ],
+      "openai-compatible",
+    )
+    expect(merged).toEqual([
+      expect.objectContaining({
         id: "model-a",
         enabled: false,
         name: "Model A",
         ownedBy: "vendor",
         contextWindow: 128_000,
         maxOutputTokens: 16_000,
-        capabilities: {
-          imageInput: "unknown",
-          reasoning: "unknown",
-          search: "unsupported",
-          toolUse: "unknown",
-        },
-        capabilitySource: "builtin",
-      },
-      {
+        modelType: "chat",
+      }),
+      expect.objectContaining({
         id: "model-b",
         enabled: false,
         name: null,
         ownedBy: null,
         contextWindow: null,
         maxOutputTokens: null,
-        capabilities: {
-          imageInput: "unknown",
-          reasoning: "unknown",
-          search: "unsupported",
-          toolUse: "unknown",
-        },
-        capabilitySource: "builtin",
-      },
+        modelType: "chat",
+      }),
     ])
   })
 
@@ -255,6 +248,53 @@ describe("AI 供应商设置模型", () => {
 
     expect(models).toHaveLength(1)
     expect(models[0]?.enabled).toBe(true)
+  })
+
+  it("用户逐字段覆盖在后续目录同步中保持最高优先级", () => {
+    const initial = appendAiProviderModel([], "deepseek-v4-flash", "deepseek")
+    const customized = updateAiProviderModelProfile(
+      initial,
+      "deepseek-v4-flash",
+      {
+        capabilities: {
+          functionCall: "unsupported",
+          reasoning: "supported",
+          structuredOutput: "supported",
+        },
+        contextWindow: 512_000,
+        inputModalities: ["text"],
+        maxInputTokens: 400_000,
+        maxOutputTokens: 64_000,
+        modelType: "chat",
+        name: "团队版 DeepSeek",
+        outputModalities: ["text"],
+      },
+      "deepseek",
+    )
+    const [merged] = mergeDiscoveredAiProviderModels(
+      customized,
+      [
+        {
+          contextWindow: 1_048_576,
+          id: "deepseek-v4-flash",
+          maxOutputTokens: 393_216,
+          name: "DeepSeek V4 Flash",
+          ownedBy: "deepseek",
+        },
+      ],
+      "deepseek",
+    )
+
+    expect(merged).toMatchObject({
+      capabilities: { functionCall: "unsupported" },
+      contextWindow: 512_000,
+      inputModalities: ["text"],
+      maxInputTokens: 400_000,
+      maxOutputTokens: 64_000,
+      name: "团队版 DeepSeek",
+    })
+    expect(merged?.capabilitySources?.functionCall).toBe("custom")
+    expect(merged?.fieldSources?.contextWindow).toBe("custom")
   })
 
   it("首次同步四百个模型时全部保持未启用", () => {

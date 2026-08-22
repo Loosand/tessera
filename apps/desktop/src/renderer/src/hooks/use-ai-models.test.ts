@@ -53,6 +53,7 @@ describe("任务页可用模型", () => {
 
     expect(available).toEqual([
       expect.objectContaining({
+        baseUrl: "https://api.deepseek.com/v1",
         id: "deepseek-chat",
         providerId: "deepseek",
         providerName: "DeepSeek",

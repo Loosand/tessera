@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 内存 SQLite、通用任务会话输入与模拟工作区
- * [OUTPUT]: Chat 空工作区、Agent 工作区约束、任务 mode/Skill 不可变和重命名/删除的回归验证
+ * [OUTPUT]: Chat 空工作区、问答行为标记、Agent 工作区约束、任务 mode/创作方式不可变和重命名/删除的回归验证
  * [POS]: task-service 主进程权限边界的单元测试
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -60,6 +60,20 @@ describe("DesktopTaskService", () => {
         { type: "text", text: "结论" },
       ],
     })
+    expect(
+      service.save(
+        {
+          id: "question-answering-task",
+          mode: "chat",
+          skillId: "question-answering",
+          status: "idle",
+          title: "问答",
+          messages: [],
+          workspaceId: null,
+        },
+        null,
+      ),
+    ).toMatchObject({ mode: "chat", skillId: "question-answering", workspaceId: null })
     client.close()
   })
 

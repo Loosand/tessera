@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 首批 AI API 供应商元数据、精选 LobeHub 品牌图标、持久化配置与类型化模型发现函数
- * [OUTPUT]: 可恢复配置、兼容协议多连接、加密密钥状态、目录检查与即时持久化的分组模型目录
+ * [OUTPUT]: 可恢复配置、兼容协议多连接、加密密钥状态、目录检查、统一模型编辑与即时持久化的分组模型目录
  * [POS]: @tessera/ai/react 提供的模型供应商管理视图
  * [DOC]: design.md、docs/architecture/ai-providers.md
  *
@@ -20,6 +20,7 @@ import {
   Add01Icon,
   CheckmarkCircle02Icon,
   Delete02Icon,
+  Edit02Icon,
   EyeIcon,
   EyeOffIcon,
   ListViewIcon,
@@ -56,8 +57,10 @@ import {
   matchesAiProvider,
   mergeDiscoveredAiProviderModels,
   setAllAiProviderModelsEnabled,
+  updateAiProviderModelProfile,
 } from "../provider-catalog"
 import { AiModelIcon } from "./ai-model-icon"
+import { ModelEditorDialog } from "./model-editor-dialog"
 
 type ProviderIconProps = { size?: number }
 type LazyProviderIcon = LazyExoticComponent<ComponentType<ProviderIconProps>>
@@ -425,10 +428,18 @@ type ProviderModelGroupProps = {
   label: string
   models: readonly AiProviderModelDraft[]
   onDelete: (modelId: string) => void
+  onEdit: (modelId: string) => void
   onToggle: (modelId: string, enabled: boolean) => void
 }
 
-function ProviderModelGroup({ disabled, label, models, onDelete, onToggle }: ProviderModelGroupProps) {
+function ProviderModelGroup({
+  disabled,
+  label,
+  models,
+  onDelete,
+  onEdit,
+  onToggle,
+}: ProviderModelGroupProps) {
   if (models.length === 0) return null
 
   return (
@@ -451,16 +462,35 @@ function ProviderModelGroup({ disabled, label, models, onDelete, onToggle }: Pro
                   <code className="truncate font-mono text-[10px] text-muted-foreground">{model.id}</code>
                 ) : null}
               </div>
-              {model.ownedBy || model.contextWindow || model.maxOutputTokens ? (
+              {model.ownedBy || model.modelType || model.contextWindow || model.maxOutputTokens ? (
                 <p className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground">
                   {model.ownedBy ? <span>{model.ownedBy}</span> : null}
+                  {model.modelType ? <span>{model.modelType}</span> : null}
                   {model.contextWindow ? <span>上下文 {formatTokenLimit(model.contextWindow)}</span> : null}
                   {model.maxOutputTokens ? (
                     <span>最大输出 {formatTokenLimit(model.maxOutputTokens)}</span>
                   ) : null}
                 </p>
               ) : null}
+              <p className="mt-0.5 flex flex-wrap gap-x-2 text-[9px] text-muted-foreground">
+                {model.inputModalities?.length ? <span>输入 {model.inputModalities.join("/")}</span> : null}
+                {model.capabilities?.functionCall === "supported" ? <span>工具</span> : null}
+                {model.capabilities?.reasoning === "supported" ? <span>推理</span> : null}
+                {model.endpointBindings?.some((binding) => binding.nativeWebSearch === "supported") ? (
+                  <span>原生联网</span>
+                ) : null}
+              </p>
             </div>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="text-muted-foreground"
+              disabled={disabled}
+              aria-label={`编辑模型 ${model.id}`}
+              onClick={() => onEdit(model.id)}
+            >
+              <Icon icon={Edit02Icon} size={14} />
+            </Button>
             <Switch
               checked={model.enabled}
               disabled={disabled}
@@ -500,6 +530,7 @@ function ProviderDetail({
   const [showModelInput, setShowModelInput] = useState(false)
   const [modelInput, setModelInput] = useState("")
   const [modelSearch, setModelSearch] = useState("")
+  const [editingModelId, setEditingModelId] = useState<string | null>(null)
   const deferredModelSearch = useDeferredValue(modelSearch)
   const [notice, setNotice] = useState<ProviderNotice | null>(null)
   const [activeRequest, setActiveRequest] = useState<
@@ -525,6 +556,7 @@ function ProviderDetail({
   const hasModels = draft.models.length > 0
   const allModelsEnabled = hasModels && draft.models.every((model) => model.enabled)
   const allModelsDisabled = hasModels && draft.models.every((model) => !model.enabled)
+  const editingModel = draft.models.find((model) => model.id === editingModelId) ?? null
 
   const persistModels = useCallback(
     async (models: readonly AiProviderModelDraft[], successText: string) => {
@@ -974,6 +1006,7 @@ function ProviderDetail({
                   disabled={activeRequest !== null}
                   label="已启用"
                   models={visibleModelGroups.enabled}
+                  onEdit={setEditingModelId}
                   onToggle={(modelId, enabled) =>
                     void persistModels(
                       draft.models.map((model) => (model.id === modelId ? { ...model, enabled } : model)),
@@ -991,6 +1024,7 @@ function ProviderDetail({
                   disabled={activeRequest !== null}
                   label="未启用"
                   models={visibleModelGroups.disabled}
+                  onEdit={setEditingModelId}
                   onToggle={(modelId, enabled) =>
                     void persistModels(
                       draft.models.map((model) => (model.id === modelId ? { ...model, enabled } : model)),
@@ -1018,6 +1052,18 @@ function ProviderDetail({
           </div>
         </section>
       </div>
+      <ModelEditorDialog
+        model={editingModel}
+        onOpenChange={(open) => {
+          if (!open) setEditingModelId(null)
+        }}
+        onSave={(update) => {
+          if (!editingModelId) return
+          const models = updateAiProviderModelProfile(draft.models, editingModelId, update, provider.id)
+          setEditingModelId(null)
+          void persistModels(models, "模型信息已更新并保存。")
+        }}
+      />
     </section>
   )
 }

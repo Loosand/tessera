@@ -1,5 +1,5 @@
 /**
- * [INPUT]: Electron 窄桥、任务执行模式/Skill、当前文档提示、当前模型选择、含客户端问答/工具审批的版本化历史消息、联网/思考开关与 AI SDK React 状态机
+ * [INPUT]: Electron 窄桥、内部任务执行模式/创作方式、显式当前文档、模型选择、版本化历史消息、自动联网/思考策略与 AI SDK React 状态机
  * [OUTPUT]: 可独立验证且支持断开重连的 ElectronChatTransport、等待输入识别、完整 UIMessage 往返、问答/审批后自动续轮与通过类型化 IPC 消费增量事件的 useChat 封装
  * [POS]: @tessera/ai/react 中连接桌面渲染层与主进程 Chat/Agent 运行时的 Transport
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md

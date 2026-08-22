@@ -28,6 +28,7 @@ describe("Skill 注册表", () => {
 
   it("只在选中后加载并校验 SKILL.md 正文", async () => {
     await expect(loadBuiltInSkill(null)).resolves.toBeNull()
+    await expect(loadBuiltInSkill("question-answering")).resolves.toBeNull()
     await expect(loadBuiltInSkill("research")).resolves.toMatchObject({
       displayName: "研究",
       instructions: expect.stringContaining("# 研究"),

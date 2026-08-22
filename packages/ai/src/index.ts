@@ -1,6 +1,6 @@
 /**
- * [INPUT]: AI 供应商目录、配置模型与跨进程供应商标识
- * [OUTPUT]: 与 UI 框架无关的 AI 领域公开 API 和模型合并能力
+ * [INPUT]: AI 供应商目录、模型事实归一化、请求期端点路由与跨进程供应商标识
+ * [OUTPUT]: 与 UI 框架无关的 AI 领域公开 API、模型合并与有效执行能力解析
  * [POS]: @tessera/ai 根入口
  * [DOC]: docs/architecture.md
  *
@@ -18,9 +18,18 @@ export {
   type AiProviderDrafts,
   type AiProviderId,
   type AiProviderModelDraft,
+  type AiProviderModelProfileUpdate,
   appendAiProviderModel,
   createInitialAiProviderDrafts,
   matchesAiProvider,
   mergeDiscoveredAiProviderModels,
+  updateAiProviderModelProfile,
 } from "./provider-catalog"
 export { createUnknownAiModelCapabilities, resolveAiModelCapabilities } from "./model-capabilities"
+export {
+  type AiModelExecution,
+  type AiModelExecutionIssue,
+  type AiModelSearchRoute,
+  aiModelExecutionIssueMessage,
+  resolveAiModelExecution,
+} from "./model-routing"

@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 跨进程 AI 供应商标识、首批 API 接入范围、模型目录鉴权能力、搜索词与用户维护的模型草稿
- * [OUTPUT]: AI SDK 供应商元数据、默认模型目录策略、界面草稿类型与纯状态转换函数
+ * [INPUT]: 跨进程 AI 供应商标识、首批 API/端点接入范围、模型目录能力、搜索词与用户维护的模型草稿
+ * [OUTPUT]: 供应商/端点元数据、默认模型目录策略、逐字段用户覆盖、界面草稿类型与纯状态转换函数
  * [POS]: @tessera/ai 内与 UI 框架无关的供应商目录和配置模型
  * [DOC]: design.md、docs/architecture/ai-providers.md
  *
@@ -10,7 +10,17 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import type { AiProviderConfig, AiProviderId, AiProviderModel } from "@tessera/contracts"
+import type {
+  AiModelCapabilities,
+  AiModelCapabilityKey,
+  AiModelEndpointType,
+  AiModelModality,
+  AiModelProfileField,
+  AiModelType,
+  AiProviderConfig,
+  AiProviderId,
+  AiProviderModel,
+} from "@tessera/contracts"
 import { resolveAiModelCapabilities } from "./model-capabilities"
 
 export type { AiProviderId } from "@tessera/contracts"
@@ -20,6 +30,7 @@ export type AiProviderDefinition = Readonly<{
   apiKeyPlaceholder: string
   defaultBaseUrl: string
   description: string
+  endpointTypes: readonly AiModelEndpointType[]
   id: AiProviderId
   multiple: boolean
   name: string
@@ -31,6 +42,17 @@ export type AiProviderModelDraft = Readonly<AiProviderModel> &
   Readonly<{
     enabled: boolean
   }>
+
+export type AiProviderModelProfileUpdate = Readonly<{
+  capabilities: AiModelCapabilities
+  contextWindow: number | null
+  inputModalities: AiModelModality[]
+  maxInputTokens: number | null
+  maxOutputTokens: number | null
+  modelType: AiModelType
+  name: string | null
+  outputModalities: AiModelModality[]
+}>
 
 export type AiProviderDraft = Readonly<{
   apiKeyConfigured: boolean
@@ -57,6 +79,7 @@ export const AI_PROVIDER_DEFINITIONS = [
     multiple: true,
     name: "OpenAI 兼容",
     description: "连接实现 OpenAI API 规范的服务、中转或企业网关。",
+    endpointTypes: ["openai-chat-completions"],
     adapter: "AI SDK · OpenAI Compatible",
     protocol: "Chat Completions",
     apiKeyPlaceholder: "输入 API Key",
@@ -68,6 +91,7 @@ export const AI_PROVIDER_DEFINITIONS = [
     multiple: true,
     name: "Anthropic 兼容",
     description: "连接 Anthropic 官方服务或兼容 Messages API 的端点。",
+    endpointTypes: ["anthropic-messages"],
     adapter: "AI SDK · Anthropic",
     protocol: "Messages API",
     apiKeyPlaceholder: "输入 Anthropic API Key",
@@ -79,6 +103,7 @@ export const AI_PROVIDER_DEFINITIONS = [
     multiple: false,
     name: "DeepSeek",
     description: "使用 DeepSeek 的独立适配器，保留供应商能力边界。",
+    endpointTypes: ["openai-chat-completions", "openai-responses", "anthropic-messages"],
     adapter: "AI SDK · DeepSeek",
     protocol: "DeepSeek API",
     apiKeyPlaceholder: "输入 DeepSeek API Key",
@@ -90,6 +115,7 @@ export const AI_PROVIDER_DEFINITIONS = [
     multiple: false,
     name: "Grok",
     description: "通过 xAI API 接入 Grok 模型与后续原生能力。",
+    endpointTypes: ["openai-chat-completions", "xai-responses"],
     adapter: "AI SDK · xAI",
     protocol: "xAI API",
     apiKeyPlaceholder: "输入 xAI API Key",
@@ -101,6 +127,7 @@ export const AI_PROVIDER_DEFINITIONS = [
     multiple: false,
     name: "OpenRouter",
     description: "通过单一账户选择多家模型，并保留实际路由信息。",
+    endpointTypes: ["openai-chat-completions"],
     adapter: "AI SDK · OpenRouter",
     protocol: "OpenAI Compatible",
     apiKeyPlaceholder: "输入 OpenRouter API Key",
@@ -221,14 +248,69 @@ export function mergeDiscoveredAiProviderModels(
     if (!normalizedId || knownModelIds.has(normalizedId)) continue
     knownModelIds.add(normalizedId)
     const existingModel = existingById.get(normalizedId)
+    const capabilityKeys = [
+      "functionCall",
+      "reasoning",
+      "structuredOutput",
+    ] as const satisfies readonly AiModelCapabilityKey[]
+    const capabilities = Object.fromEntries(
+      capabilityKeys.map((key) => [
+        key,
+        existingModel?.capabilitySources?.[key] === "custom"
+          ? existingModel.capabilities?.[key]
+          : (discoveredModel.capabilities?.[key] ?? existingModel?.capabilities?.[key]),
+      ]),
+    ) as AiModelCapabilities
+    const capabilitySources = Object.fromEntries(
+      capabilityKeys.map((key) => [
+        key,
+        existingModel?.capabilitySources?.[key] === "custom"
+          ? "custom"
+          : (discoveredModel.capabilitySources?.[key] ?? existingModel?.capabilitySources?.[key]),
+      ]),
+    ) as Partial<Record<AiModelCapabilityKey, "builtin" | "custom" | "remote" | "unknown">>
+    const profileValue = <Value>(
+      key: AiModelProfileField,
+      discovered: Value | undefined,
+      existing: Value | undefined,
+    ) => (existingModel?.fieldSources?.[key] === "custom" ? existing : (discovered ?? existing))
+    const inputModalities = profileValue(
+      "inputModalities",
+      discoveredModel.inputModalities,
+      existingModel?.inputModalities,
+    )
+    const maxInputTokens = profileValue(
+      "maxInputTokens",
+      discoveredModel.maxInputTokens,
+      existingModel?.maxInputTokens,
+    )
+    const modelType = profileValue("modelType", discoveredModel.modelType, existingModel?.modelType)
+    const outputModalities = profileValue(
+      "outputModalities",
+      discoveredModel.outputModalities,
+      existingModel?.outputModalities,
+    )
     mergedModels.push({
       ...resolveAiModelCapabilities(providerId, {
+        ...existingModel,
         ...discoveredModel,
         id: normalizedId,
-        name: discoveredModel.name ?? existingModel?.name ?? null,
+        capabilities,
+        capabilitySources,
+        name:
+          existingModel?.fieldSources?.name === "custom"
+            ? existingModel.name
+            : (discoveredModel.name ?? existingModel?.name ?? null),
         ownedBy: discoveredModel.ownedBy ?? existingModel?.ownedBy ?? null,
-        contextWindow: discoveredModel.contextWindow ?? existingModel?.contextWindow ?? null,
-        maxOutputTokens: discoveredModel.maxOutputTokens ?? existingModel?.maxOutputTokens ?? null,
+        contextWindow:
+          profileValue("contextWindow", discoveredModel.contextWindow, existingModel?.contextWindow) ?? null,
+        ...(inputModalities ? { inputModalities } : {}),
+        ...(maxInputTokens !== undefined ? { maxInputTokens } : {}),
+        maxOutputTokens:
+          profileValue("maxOutputTokens", discoveredModel.maxOutputTokens, existingModel?.maxOutputTokens) ??
+          null,
+        ...(modelType ? { modelType } : {}),
+        ...(outputModalities ? { outputModalities } : {}),
       }),
       enabled: existingModel?.enabled ?? enableNewModelsByDefault,
     })
@@ -241,6 +323,39 @@ export function mergeDiscoveredAiProviderModels(
   }
 
   return mergedModels
+}
+
+export function updateAiProviderModelProfile(
+  models: readonly AiProviderModelDraft[],
+  modelId: string,
+  update: AiProviderModelProfileUpdate,
+  providerId: AiProviderId,
+): AiProviderModelDraft[] {
+  const profileFields = [
+    "contextWindow",
+    "inputModalities",
+    "maxInputTokens",
+    "maxOutputTokens",
+    "modelType",
+    "name",
+    "outputModalities",
+  ] as const satisfies readonly AiModelProfileField[]
+  return models.map((model) => {
+    if (model.id !== modelId) return model
+    return {
+      ...resolveAiModelCapabilities(providerId, {
+        ...model,
+        ...update,
+        capabilitySources: {
+          functionCall: "custom",
+          reasoning: "custom",
+          structuredOutput: "custom",
+        },
+        fieldSources: Object.fromEntries(profileFields.map((field) => [field, "custom"])),
+      }),
+      enabled: model.enabled,
+    }
+  })
 }
 
 export function setAllAiProviderModelsEnabled(

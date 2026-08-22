@@ -1,6 +1,6 @@
 /**
  * [INPUT]: AI SDK UIMessage、当前回复状态、客户端问答结果、变更预览/审批、文件跳转与重新生成回调
- * [OUTPUT]: 用户消息与按原始 Part 顺序、稳定唯一键组合的助手回复、问答/研究计划、搜索轨迹、工具审查及轻量消息操作
+ * [OUTPUT]: 用户文本/图片/文档附件与按原始 Part 顺序组合的助手回复、问答/研究计划、搜索轨迹、工具审查及轻量消息操作
  * [POS]: task-page 的 Chat/Agent 消息协调层
  * [DOC]: design.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
  *
@@ -12,7 +12,7 @@
 
 import type { UIMessage } from "@tessera/ai/react"
 import type { AgentChangePreview, TaskUserInputResult } from "@tessera/contracts"
-import { Copy01Icon, Refresh01Icon } from "@tessera/design-system/components/icons"
+import { Copy01Icon, File02Icon, Refresh01Icon } from "@tessera/design-system/components/icons"
 import { LoadingState } from "@tessera/design-system/components/loading-state"
 import { Button } from "@tessera/design-system/components/ui/button"
 import { Icon } from "@tessera/design-system/components/ui/icon"
@@ -58,6 +58,8 @@ export function ChatMessage({
 }: ChatMessageProps) {
   const text = messageText(message)
   const files = message.parts.filter((part) => part.type === "file")
+  const imageFiles = files.filter((file) => file.mediaType.startsWith("image/"))
+  const documentFiles = files.filter((file) => !file.mediaType.startsWith("image/"))
   const hasReasoning = message.parts.some((part) => part.type === "reasoning")
   const assistantStreaming = running && isLast
   const firstWebSearchIndex = message.parts.findIndex(isWebSearchToolPart)
@@ -77,9 +79,27 @@ export function ChatMessage({
   if (message.role === "user") {
     return (
       <article className="ml-auto max-w-[min(85%,44rem)]" aria-label="你的消息">
-        {files.length > 0 ? (
+        {documentFiles.length > 0 ? (
           <div className="mb-2 flex flex-wrap justify-end gap-2">
-            {files.map((file, index) => (
+            {documentFiles.map((file, index) => (
+              <div
+                key={`${file.filename ?? file.mediaType}-${index}`}
+                className="flex max-w-64 items-center gap-2 rounded-lg bg-muted px-2.5 py-2 text-left"
+              >
+                <Icon icon={File02Icon} size={14} className="shrink-0 text-muted-foreground" />
+                <span className="min-w-0">
+                  <span className="block truncate text-[11px] font-medium">
+                    {file.filename ?? "Markdown 文档"}
+                  </span>
+                  <span className="block text-[9px] text-muted-foreground">对话上下文</span>
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        {imageFiles.length > 0 ? (
+          <div className="mb-2 flex flex-wrap justify-end gap-2">
+            {imageFiles.map((file, index) => (
               <img
                 key={`${file.url.slice(0, 48)}-${index}`}
                 className="max-h-64 max-w-64 rounded-xl object-cover ring-1 ring-foreground/10"

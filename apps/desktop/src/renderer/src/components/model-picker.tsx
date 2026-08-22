@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 当前模型、可用模型目录、选中键与切换回调
- * [OUTPUT]: 按供应商分组、展示模型图标/能力/选中态的模型选择浮层
+ * [OUTPUT]: 按供应商分组、展示模型图标/当前连接有效能力/选中态的模型选择浮层
  * [POS]: task-composer 中替代原生下拉的高信息密度模型入口
  * [DOC]: design.md、docs/architecture/ai-providers.md
  *
@@ -10,6 +10,7 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
+import { resolveAiModelExecution } from "@tessera/ai"
 import { AiModelIcon } from "@tessera/ai/react"
 import { ArrowDown01Icon } from "@tessera/design-system/components/icons"
 import { Button } from "@tessera/design-system/components/ui/button"
@@ -31,9 +32,21 @@ export function aiModelKey(model: Pick<AvailableAiModel, "configId" | "id">) {
 
 function modelCapabilityLabel(model: AvailableAiModel) {
   const labels: string[] = []
+  if (model.modelType && model.modelType !== "chat") labels.push(model.modelType)
   if (model.capabilities?.reasoning === "supported") labels.push("思考")
-  if (model.capabilities?.search === "supported") labels.push("联网")
-  if (model.capabilities?.imageInput === "supported") labels.push("图像")
+  if (
+    resolveAiModelExecution({
+      baseUrl: model.baseUrl,
+      mode: "chat",
+      model,
+      providerId: model.providerId,
+      webSearch: true,
+    }).searchRoute === "provider-native"
+  ) {
+    labels.push("联网")
+  }
+  if (model.inputModalities?.includes("image")) labels.push("图像")
+  if (model.capabilities?.functionCall === "supported") labels.push("工具")
   return labels.join(" · ")
 }
 

@@ -57,11 +57,12 @@ describe("AI SDK 供应商适配", () => {
   })
 
   it.each([
-    ["anthropic-compatible", "https://api.anthropic.com/v1", "claude-sonnet-4"],
-    ["grok", "https://api.x.ai/v1", "grok-4"],
-  ] as const)("为 %s 接入供应商原生联网工具", (providerId, baseUrl, modelId) => {
+    ["anthropic-compatible", "https://api.anthropic.com/v1", "claude-sonnet-4", "anthropic-messages"],
+    ["deepseek", "https://api.deepseek.com", "deepseek-v4-flash", "openai-responses"],
+    ["grok", "https://api.x.ai/v1", "grok-4", "xai-responses"],
+  ] as const)("为 %s 接入供应商原生联网工具", (providerId, baseUrl, modelId, endpointType) => {
     const runtime = createAiSdkChatRuntime(
-      { configId: providerId, providerId, baseUrl, modelId, apiKey: "test-key" },
+      { configId: providerId, providerId, baseUrl, endpointType, modelId, apiKey: "test-key" },
       { webSearch: true },
     )
     expect(runtime.tools).toHaveProperty("web_search")
@@ -110,23 +111,19 @@ describe("AI SDK 供应商适配", () => {
     ).toThrow("尚未接入")
   })
 
-  it.each(["https://api.deepseek.com", "https://deepseek-relay.example.com/v1"])(
-    "不会因联网开关把 DeepSeek 连接 %s 偷换为其他协议",
-    (baseUrl) => {
-      expect(() =>
-        createAiSdkChatRuntime(
-          {
-            configId: "deepseek",
-            providerId: "deepseek",
-            baseUrl,
-            modelId: "deepseek-v4-flash",
-            apiKey: "test-key",
-          },
-          { webSearch: true },
-        ),
-      ).toThrow(
-        "DeepSeek 原生 API 当前未接入联网搜索工具；请关闭联网搜索，或改用已显式配置且支持原生搜索的供应商连接。",
-      )
-    },
-  )
+  it("不会因联网开关隐式改变 DeepSeek Chat Completions 端点", () => {
+    expect(() =>
+      createAiSdkChatRuntime(
+        {
+          configId: "deepseek",
+          providerId: "deepseek",
+          baseUrl: "https://api.deepseek.com",
+          endpointType: "openai-chat-completions",
+          modelId: "deepseek-v4-flash",
+          apiKey: "test-key",
+        },
+        { webSearch: true },
+      ),
+    ).toThrow("Chat Completions 端点不提供原生联网搜索")
+  })
 })

@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 供应商标识、模型 ID 与远端目录可能返回的不完整能力信息
- * [OUTPUT]: 保守、带来源的模型能力集合与合并函数
- * [POS]: 模型目录 API、用户配置和对话 UI 之间的能力事实归一化层
+ * [INPUT]: 供应商标识、模型 ID、远端目录信号与用户逐字段覆盖
+ * [OUTPUT]: 统一的模型类型、输入输出模态、固有能力、Token 限额、端点绑定及逐字段来源
+ * [POS]: 模型目录、持久化配置、设置界面和运行时路由共同依赖的模型事实归一化层
  * [DOC]: docs/architecture/ai-providers.md、docs/architecture/ai-chat-agent-todo.md
  *
  * [PROTOCOL]:
@@ -12,105 +12,315 @@
 
 import type {
   AiModelCapabilities,
+  AiModelCapabilityKey,
   AiModelCapabilitySource,
   AiModelCapabilityState,
+  AiModelEndpointBinding,
+  AiModelModality,
+  AiModelProfileField,
+  AiModelType,
   AiProviderId,
   AiProviderModel,
 } from "@tessera/contracts"
 
 const UNKNOWN_CAPABILITIES: AiModelCapabilities = {
-  imageInput: "unknown",
+  functionCall: "unknown",
   reasoning: "unknown",
-  search: "unknown",
-  toolUse: "unknown",
+  structuredOutput: "unknown",
+}
+
+type BuiltinModelProfile = {
+  capabilities: AiModelCapabilities
+  contextWindow: number | null
+  endpointBindings: AiModelEndpointBinding[]
+  inputModalities: AiModelModality[]
+  maxInputTokens: number | null
+  maxOutputTokens: number | null
+  modelType: AiModelType
+  outputModalities: AiModelModality[]
 }
 
 function supportedWhen(condition: boolean): AiModelCapabilityState {
   return condition ? "supported" : "unknown"
 }
 
-function builtinCapabilities(providerId: AiProviderId, modelId: string): AiModelCapabilities {
-  const id = modelId.trim().toLocaleLowerCase()
+function inferModelType(id: string): AiModelType {
+  if (/realtime/u.test(id)) return "realtime"
+  if (/(?:embedding|embed)(?:-|$|\/)/u.test(id)) return "embedding"
+  if (/(?:rerank|re-rank)/u.test(id)) return "rerank"
+  if (/(?:tts|text-to-speech|speech-generation)/u.test(id)) return "text-to-speech"
+  if (/(?:whisper|speech-to-text|transcri)/u.test(id)) return "speech-to-text"
+  if (/(?:sora|veo|video-generation|text-to-video)/u.test(id)) return "video-generation"
+  if (/(?:dall-e|gpt-image|imagen|image-generation|text-to-image|flux)/u.test(id)) {
+    return "image-generation"
+  }
+  return "chat"
+}
+
+function inferModalities(modelType: AiModelType, id: string) {
+  switch (modelType) {
+    case "embedding":
+    case "rerank":
+      return { inputModalities: ["text"], outputModalities: ["vector"] } as const
+    case "image-generation":
+      return { inputModalities: ["text", "image"], outputModalities: ["image"] } as const
+    case "video-generation":
+      return { inputModalities: ["text", "image", "video"], outputModalities: ["video"] } as const
+    case "text-to-speech":
+      return { inputModalities: ["text"], outputModalities: ["audio"] } as const
+    case "speech-to-text":
+      return { inputModalities: ["audio"], outputModalities: ["text"] } as const
+    case "realtime":
+      return { inputModalities: ["text", "audio"], outputModalities: ["text", "audio"] } as const
+    case "chat":
+      return {
+        inputModalities: [
+          "text",
+          ...(/(?:vision|vl|ocr|gpt-4o|gpt-4\.1|gpt-5|claude-|grok-(?:3|4))/u.test(id)
+            ? (["image"] as const)
+            : []),
+        ],
+        outputModalities: ["text"],
+      } as const
+  }
+}
+
+function builtinCapabilities(modelType: AiModelType, id: string): AiModelCapabilities {
+  if (modelType !== "chat" && modelType !== "realtime") {
+    return {
+      functionCall: "unsupported",
+      reasoning: "unsupported",
+      structuredOutput: "unsupported",
+    }
+  }
+
   const isClaude = /(^|\/)claude-/u.test(id)
   const isModernClaude = /claude-(?:3[-.]7|[4-9])/u.test(id)
   const isGrok = /(^|\/)grok-/u.test(id)
   const isModernGrok = /grok-(?:3|4)/u.test(id)
-  const isOpenAiMultimodal = /(^|\/)(?:gpt-4o|gpt-4\.1|gpt-5|o[134](?:-|$))/u.test(id)
+  const isOpenAi = /(^|\/)(?:gpt-|o[134](?:-|$))/u.test(id)
   const isOpenAiReasoning = /(^|\/)(?:gpt-5|o[134](?:-|$))/u.test(id)
+  const isDeepSeek = /(?:^|\/)deepseek/u.test(id)
   const isDeepSeekReasoning = /(?:reasoner|deepseek-r1|deepseek-v(?:3\.1|4))/u.test(id)
 
   if (isClaude) {
     return {
-      imageInput: "supported",
+      functionCall: "supported",
       reasoning: supportedWhen(isModernClaude),
-      search: providerId === "anthropic-compatible" && isModernClaude ? "supported" : "unsupported",
-      toolUse: "supported",
+      structuredOutput: supportedWhen(isModernClaude),
     }
   }
-
   if (isGrok) {
     return {
-      imageInput: supportedWhen(/vision|grok-(?:3|4)/u.test(id)),
+      functionCall: supportedWhen(isModernGrok),
       reasoning: supportedWhen(/reasoning/u.test(id) || isModernGrok),
-      search: providerId === "grok" && isModernGrok ? "supported" : "unsupported",
-      toolUse: supportedWhen(isModernGrok),
+      structuredOutput: supportedWhen(isModernGrok),
     }
   }
-
-  if (providerId === "deepseek" || /(^|\/)deepseek/u.test(id)) {
+  if (isDeepSeek) {
     return {
-      imageInput: /(?:vision|vl|ocr)/u.test(id) ? "supported" : "unsupported",
+      functionCall: supportedWhen(/chat|reasoner|v3|v4/u.test(id)),
       reasoning: supportedWhen(isDeepSeekReasoning),
-      search: "unsupported",
-      toolUse: supportedWhen(/chat|reasoner|v3|v4/u.test(id)),
+      structuredOutput: supportedWhen(/v3|v4/u.test(id)),
     }
   }
-
-  if (isOpenAiMultimodal || isOpenAiReasoning) {
+  if (isOpenAi) {
     return {
-      imageInput: supportedWhen(isOpenAiMultimodal),
+      functionCall: "supported",
       reasoning: supportedWhen(isOpenAiReasoning),
-      search: "unsupported",
-      toolUse: "supported",
+      structuredOutput: "supported",
     }
   }
+  return { ...UNKNOWN_CAPABILITIES }
+}
 
-  return {
-    ...UNKNOWN_CAPABILITIES,
-    search: providerId === "grok" || providerId === "anthropic-compatible" ? "unknown" : "unsupported",
+function builtinEndpointBindings(
+  providerId: AiProviderId,
+  id: string,
+  modelType: AiModelType,
+): AiModelEndpointBinding[] {
+  if (modelType !== "chat" && modelType !== "realtime") return []
+  const isModernClaude = /claude-(?:3[-.]7|[4-9])/u.test(id)
+  const isDeepSeekV4 = /(?:^|\/)deepseek-v4(?:-|$)/u.test(id)
+  const isModernGrok = /(?:^|\/)grok-(?:3|4)(?:-|$)/u.test(id)
+
+  switch (providerId) {
+    case "openai-compatible":
+    case "openrouter":
+      return [
+        {
+          endpointType: "openai-chat-completions",
+          nativeWebSearch: "unknown",
+          source: "builtin",
+        },
+      ]
+    case "anthropic-compatible":
+      return [
+        {
+          endpointType: "anthropic-messages",
+          nativeWebSearch: isModernClaude || isDeepSeekV4 ? "supported" : "unknown",
+          ...(isModernClaude || isDeepSeekV4 ? { officialOnly: true } : {}),
+          source: "builtin",
+        },
+      ]
+    case "deepseek":
+      return [
+        {
+          endpointType: "openai-chat-completions",
+          nativeWebSearch: "unsupported",
+          source: "builtin",
+        },
+        ...(isDeepSeekV4
+          ? ([
+              {
+                endpointType: "openai-responses",
+                nativeWebSearch: "supported",
+                officialOnly: true,
+                source: "builtin",
+              },
+              {
+                endpointType: "anthropic-messages",
+                nativeWebSearch: "supported",
+                officialOnly: true,
+                source: "builtin",
+              },
+            ] satisfies AiModelEndpointBinding[])
+          : []),
+      ]
+    case "grok":
+      return [
+        {
+          endpointType: "openai-chat-completions",
+          nativeWebSearch: "unsupported",
+          source: "builtin",
+        },
+        ...(isModernGrok
+          ? ([
+              {
+                endpointType: "xai-responses",
+                nativeWebSearch: "supported",
+                officialOnly: true,
+                source: "builtin",
+              },
+            ] satisfies AiModelEndpointBinding[])
+          : []),
+      ]
   }
 }
 
-function mergeCapability(
-  explicit: AiModelCapabilityState | undefined,
-  builtin: AiModelCapabilityState,
-): AiModelCapabilityState {
-  return explicit && explicit !== "unknown" ? explicit : builtin
+function builtinProfile(providerId: AiProviderId, modelId: string): BuiltinModelProfile {
+  const id = modelId.trim().toLocaleLowerCase()
+  const modelType = inferModelType(id)
+  const modalities = inferModalities(modelType, id)
+  const isDeepSeekV4 = /(?:^|\/)deepseek-v4(?:-|$)/u.test(id)
+  return {
+    capabilities: builtinCapabilities(modelType, id),
+    contextWindow: isDeepSeekV4 ? 1_048_576 : null,
+    endpointBindings: builtinEndpointBindings(providerId, id, modelType),
+    inputModalities: [...modalities.inputModalities],
+    maxInputTokens: null,
+    maxOutputTokens: isDeepSeekV4 ? 393_216 : null,
+    modelType,
+    outputModalities: [...modalities.outputModalities],
+  }
+}
+
+function resolveCapability(
+  key: AiModelCapabilityKey,
+  model: AiProviderModel,
+  builtin: AiModelCapabilities,
+): { source: AiModelCapabilitySource; state: AiModelCapabilityState } {
+  const explicit = model.capabilities?.[key]
+  const explicitSource = model.capabilitySources?.[key] ?? model.capabilitySource
+  if (explicitSource === "builtin") {
+    const state = builtin[key]
+    return { source: state === "unknown" ? "unknown" : "builtin", state }
+  }
+  if (explicit !== undefined && (explicitSource === "custom" || explicit !== "unknown")) {
+    return { source: explicitSource ?? "remote", state: explicit }
+  }
+  const state = builtin[key]
+  return { source: state === "unknown" ? "unknown" : "builtin", state }
+}
+
+function resolveNullableField(
+  field: Extract<AiModelProfileField, "contextWindow" | "maxInputTokens" | "maxOutputTokens">,
+  explicit: number | null | undefined,
+  model: AiProviderModel,
+  builtin: number | null,
+): { source: AiModelCapabilitySource; value: number | null } {
+  const explicitSource = model.fieldSources?.[field]
+  if (explicitSource === "custom" || (explicit !== undefined && explicit !== null)) {
+    return { source: explicitSource ?? "remote", value: explicit ?? null }
+  }
+  return { source: builtin === null ? "unknown" : "builtin", value: builtin }
 }
 
 export function resolveAiModelCapabilities(
   providerId: AiProviderId,
   model: AiProviderModel,
 ): AiProviderModel {
-  const builtin = builtinCapabilities(providerId, model.id)
-  const explicit = model.capabilitySource === "builtin" ? undefined : model.capabilities
-  const capabilities: AiModelCapabilities = {
-    imageInput: mergeCapability(explicit?.imageInput, builtin.imageInput),
-    reasoning: mergeCapability(explicit?.reasoning, builtin.reasoning),
-    search: mergeCapability(explicit?.search, builtin.search),
-    toolUse: mergeCapability(explicit?.toolUse, builtin.toolUse),
+  const { capabilitySource: _legacyCapabilitySource, ...normalizedModel } = model
+  const builtin = builtinProfile(providerId, model.id)
+  const capabilityEntries = Object.keys(UNKNOWN_CAPABILITIES).map((key) => {
+    const capabilityKey = key as AiModelCapabilityKey
+    return [capabilityKey, resolveCapability(capabilityKey, model, builtin.capabilities)] as const
+  })
+  const capabilities = Object.fromEntries(
+    capabilityEntries.map(([key, value]) => [key, value.state]),
+  ) as AiModelCapabilities
+  const capabilitySources = Object.fromEntries(
+    capabilityEntries.map(([key, value]) => [key, value.source]),
+  ) as Record<AiModelCapabilityKey, AiModelCapabilitySource>
+  const contextWindow = resolveNullableField(
+    "contextWindow",
+    model.contextWindow,
+    model,
+    builtin.contextWindow,
+  )
+  const maxInputTokens = resolveNullableField(
+    "maxInputTokens",
+    model.maxInputTokens,
+    model,
+    builtin.maxInputTokens,
+  )
+  const maxOutputTokens = resolveNullableField(
+    "maxOutputTokens",
+    model.maxOutputTokens,
+    model,
+    builtin.maxOutputTokens,
+  )
+  const modelType = model.modelType ?? builtin.modelType
+  const inputModalities = model.inputModalities?.length ? model.inputModalities : builtin.inputModalities
+  const outputModalities = model.outputModalities?.length ? model.outputModalities : builtin.outputModalities
+  const fieldSources: Record<AiModelProfileField, AiModelCapabilitySource> = {
+    ...model.fieldSources,
+    contextWindow: contextWindow.source,
+    inputModalities: model.inputModalities?.length
+      ? (model.fieldSources?.inputModalities ?? "remote")
+      : "builtin",
+    maxInputTokens: maxInputTokens.source,
+    maxOutputTokens: maxOutputTokens.source,
+    modelType: model.modelType ? (model.fieldSources?.modelType ?? "remote") : "builtin",
+    name: model.fieldSources?.name ?? (model.name ? "remote" : "unknown"),
+    outputModalities: model.outputModalities?.length
+      ? (model.fieldSources?.outputModalities ?? "remote")
+      : "builtin",
   }
-  const hasExplicitCapability = explicit
-    ? Object.values(explicit).some((value) => value !== "unknown")
-    : false
-  const hasBuiltinCapability = Object.values(builtin).some((value) => value !== "unknown")
-  const capabilitySource: AiModelCapabilitySource = hasExplicitCapability
-    ? (model.capabilitySource ?? "remote")
-    : hasBuiltinCapability
-      ? "builtin"
-      : "unknown"
 
-  return { ...model, capabilities, capabilitySource }
+  return {
+    ...normalizedModel,
+    capabilities,
+    capabilitySources,
+    contextWindow: contextWindow.value,
+    endpointBindings: model.endpointBindings?.length ? model.endpointBindings : builtin.endpointBindings,
+    fieldSources,
+    inputModalities: [...inputModalities],
+    maxInputTokens: maxInputTokens.value,
+    maxOutputTokens: maxOutputTokens.value,
+    modelType,
+    outputModalities: [...outputModalities],
+  }
 }
 
 export function createUnknownAiModelCapabilities(): AiModelCapabilities {

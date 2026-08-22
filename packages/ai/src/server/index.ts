@@ -18,6 +18,10 @@ export {
   createAiSdkLanguageModel,
 } from "./ai-sdk-runtime"
 export {
+  aiModelExecutionIssueMessage,
+  resolveAiModelExecution,
+} from "../model-routing"
+export {
   type AiAgentRuntimeOptions,
   type AiSdkAgentRuntimeRequest,
   type ListWorkspaceFilesInput,

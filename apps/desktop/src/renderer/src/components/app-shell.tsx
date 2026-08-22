@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 应用信息、useWorkspace 文档会话与含执行模式/Skill 的 useTasks 任务导航状态
- * [OUTPUT]: 首页/Skill/任务/工作区保活视图、任务 Skill 选择协调、跨工作区任务恢复、源码行导航、平台标题栏安全区与文档主区域
+ * [INPUT]: 应用信息、useWorkspace 文档会话与隐式 Chat/Agent、创作模式的 useTasks 任务导航状态
+ * [OUTPUT]: 首页/Skill/任务/工作区保活视图、主任务与文档侧栏共享会话、跨工作区恢复、源码行导航和文档主区域
  * [POS]: Tessera 桌面端的顶层产品壳层
  * [DOC]: design.md、docs/architecture.md、docs/architecture/editor.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -97,7 +97,6 @@ export function AppShell({ appInfo }: AppShellProps) {
     persistActiveTask,
     renameTask,
     deleteTask,
-    setActiveTaskMode,
     setActiveTaskSkill,
     startNewTask,
   } = useTasks(workspace?.id)
@@ -172,7 +171,7 @@ export function AppShell({ appInfo }: AppShellProps) {
   const createStandaloneTask = useCallback(() => {
     flushPendingEdits()
     setAgentOpen(false)
-    startNewTask("chat", null)
+    startNewTask(null)
     if (compactRef.current) setSidebarOpen(false)
     setView("task")
   }, [flushPendingEdits, startNewTask])
@@ -180,17 +179,29 @@ export function AppShell({ appInfo }: AppShellProps) {
   const createWorkspaceTask = useCallback(() => {
     flushPendingEdits()
     setAgentOpen(false)
-    startNewTask("chat", workspace?.id ?? null)
+    startNewTask(workspace?.id ?? null)
     if (compactRef.current) setSidebarOpen(false)
     setView("task")
   }, [flushPendingEdits, startNewTask, workspace?.id])
+
+  const toggleAgentSidebar = useCallback(() => {
+    if (agentOpen) {
+      setAgentOpen(false)
+      return
+    }
+    flushPendingEdits()
+    if (workspace && (activeTask.workspaceId !== workspace.id || activeTask.mode !== "agent")) {
+      startNewTask(workspace.id)
+    }
+    setAgentOpen(true)
+  }, [activeTask.mode, activeTask.workspaceId, agentOpen, flushPendingEdits, startNewTask, workspace])
 
   const openWorkspace = useCallback(
     async (workspaceId: string) => {
       flushPendingEdits()
       const nextWorkspace = workspace?.id === workspaceId ? workspace : await openRecentWorkspace(workspaceId)
       if (!nextWorkspace) return
-      startNewTask("chat", nextWorkspace.id)
+      startNewTask(nextWorkspace.id)
       setAgentOpen(false)
       if (compactRef.current) setSidebarOpen(false)
       setView("task")
@@ -201,7 +212,7 @@ export function AppShell({ appInfo }: AppShellProps) {
   const chooseWorkspace = useCallback(async () => {
     const nextWorkspace = await selectWorkspace()
     if (!nextWorkspace) return
-    startNewTask("chat", nextWorkspace.id)
+    startNewTask(nextWorkspace.id)
     setView("task")
   }, [selectWorkspace, startNewTask])
 
@@ -251,7 +262,7 @@ export function AppShell({ appInfo }: AppShellProps) {
     (skillId: BuiltInTaskSkillId) => {
       flushPendingEdits()
       setAgentOpen(false)
-      startNewTask("chat", null, skillId)
+      startNewTask(null, skillId)
       setView("task")
     },
     [flushPendingEdits, startNewTask],
@@ -439,7 +450,7 @@ export function AppShell({ appInfo }: AppShellProps) {
               onGoBack={() => void goBack()}
               onGoForward={() => void goForward()}
               onModeChange={changeEditorMode}
-              onToggleAgent={() => setAgentOpen((current) => !current)}
+              onToggleAgent={toggleAgentSidebar}
               onToggleSidebar={() => setSidebarOpen((current) => !current)}
               onOpenSettings={openSettings}
               onRenameDocument={renameActiveDocument}
@@ -478,29 +489,50 @@ export function AppShell({ appInfo }: AppShellProps) {
                     key="agent-sidebar"
                     document={activeDocument}
                     onClose={() => setAgentOpen(false)}
-                  />
+                  >
+                    <TaskPage
+                      key={activeTask.id}
+                      active
+                      currentDocument={activeDocument}
+                      currentDocumentContent={draftContent}
+                      defaultAttachCurrentDocument
+                      surface="sidebar"
+                      task={activeTask}
+                      taskError={taskError}
+                      sidebarOpen={sidebarOpen}
+                      workspaceName={workspace?.name ?? null}
+                      onEnsureTask={ensureActiveTask}
+                      onPersistTask={persistActiveTask}
+                      onSkillChange={setActiveTaskSkill}
+                      onOpenDocument={showDocument}
+                      onToggleSidebar={() => setSidebarOpen((current) => !current)}
+                      onOpenSettings={openSettings}
+                    />
+                  </AgentSidebar>
                 ) : null}
               </AnimatePresence>
             </div>
           </div>
 
           <div className={`${view === "task" ? "block" : "hidden"} min-h-0 flex-1`}>
-            <TaskPage
-              key={activeTask.id}
-              active={view === "task"}
-              currentDocumentPath={activeDocument?.relativePath}
-              task={activeTask}
-              taskError={taskError}
-              sidebarOpen={sidebarOpen}
-              workspaceName={workspace?.name ?? null}
-              onEnsureTask={ensureActiveTask}
-              onPersistTask={persistActiveTask}
-              onModeChange={setActiveTaskMode}
-              onSkillChange={setActiveTaskSkill}
-              onOpenDocument={showDocument}
-              onToggleSidebar={() => setSidebarOpen((current) => !current)}
-              onOpenSettings={openSettings}
-            />
+            {view === "workspace" && agentOpen ? null : (
+              <TaskPage
+                key={activeTask.id}
+                active={view === "task"}
+                currentDocument={activeDocument}
+                currentDocumentContent={draftContent}
+                task={activeTask}
+                taskError={taskError}
+                sidebarOpen={sidebarOpen}
+                workspaceName={workspace?.name ?? null}
+                onEnsureTask={ensureActiveTask}
+                onPersistTask={persistActiveTask}
+                onSkillChange={setActiveTaskSkill}
+                onOpenDocument={showDocument}
+                onToggleSidebar={() => setSidebarOpen((current) => !current)}
+                onOpenSettings={openSettings}
+              />
+            )}
           </div>
         </main>
       </div>

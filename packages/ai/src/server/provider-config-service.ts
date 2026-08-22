@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 类型化供应商配置、可注入配置仓储与平台安全密钥存储
- * [OUTPUT]: 已校验的供应商配置读写/删除、密钥加解密和连接凭据解析服务
+ * [OUTPUT]: 已校验且兼容旧模型能力的统一供应商配置读写/删除、密钥加解密和连接凭据解析服务
  * [POS]: @tessera/ai/server 中独立于 Electron 与 SQLite 实现的配置持久化领域层
  * [DOC]: docs/architecture/ai-providers.md、docs/architecture/database.md
  *
@@ -11,9 +11,17 @@
  */
 
 import {
+  AI_MODEL_ENDPOINT_TYPES,
+  AI_MODEL_MODALITIES,
+  AI_MODEL_TYPES,
   type AiModelCapabilities,
+  type AiModelCapabilityKey,
   type AiModelCapabilitySource,
   type AiModelCapabilityState,
+  type AiModelEndpointBinding,
+  type AiModelModality,
+  type AiModelProfileField,
+  type AiModelType,
   type AiProviderConfig,
   type AiProviderConfiguredModel,
   type AiProviderConnectionInput,
@@ -139,19 +147,78 @@ function normalizeBaseUrl(value: unknown): string {
 
 function normalizeCapabilities(value: unknown): AiModelCapabilities | undefined {
   if (!isRecord(value)) return undefined
-  const imageInput = value.imageInput
+  const functionCall = value.functionCall ?? value.toolUse
   const reasoning = value.reasoning
-  const search = value.search
-  const toolUse = value.toolUse
+  const structuredOutput = value.structuredOutput ?? "unknown"
   if (
-    !isCapabilityState(imageInput) ||
+    !isCapabilityState(functionCall) ||
     !isCapabilityState(reasoning) ||
-    !isCapabilityState(search) ||
-    !isCapabilityState(toolUse)
+    !isCapabilityState(structuredOutput)
   ) {
     return undefined
   }
-  return { imageInput, reasoning, search, toolUse }
+  return { functionCall, reasoning, structuredOutput }
+}
+
+function normalizeSourceMap<Key extends string>(
+  value: unknown,
+  keys: readonly Key[],
+): Partial<Record<Key, AiModelCapabilitySource>> | undefined {
+  if (!isRecord(value)) return undefined
+  const result: Partial<Record<Key, AiModelCapabilitySource>> = {}
+  for (const key of keys) {
+    if (isCapabilitySource(value[key])) result[key] = value[key]
+  }
+  return Object.keys(result).length > 0 ? result : undefined
+}
+
+function normalizeModalities(value: unknown): AiModelModality[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const modalities = value.filter(
+    (candidate): candidate is AiModelModality =>
+      typeof candidate === "string" && AI_MODEL_MODALITIES.some((modality) => modality === candidate),
+  )
+  return [...new Set(modalities)]
+}
+
+function isModelType(value: unknown): value is AiModelType {
+  return typeof value === "string" && AI_MODEL_TYPES.some((modelType) => modelType === value)
+}
+
+function normalizeModelType(value: unknown): AiModelType | undefined {
+  return isModelType(value) ? value : undefined
+}
+
+function isEndpointType(value: unknown): value is AiModelEndpointBinding["endpointType"] {
+  return typeof value === "string" && AI_MODEL_ENDPOINT_TYPES.some((known) => known === value)
+}
+
+function normalizeEndpointBindings(value: unknown): AiModelEndpointBinding[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const bindings: AiModelEndpointBinding[] = []
+  const endpointTypes = new Set<AiModelEndpointBinding["endpointType"]>()
+  for (const candidate of value) {
+    if (!isRecord(candidate)) continue
+    const endpointType = candidate.endpointType
+    if (
+      !isEndpointType(endpointType) ||
+      endpointTypes.has(endpointType) ||
+      !isCapabilityState(candidate.nativeWebSearch) ||
+      !isCapabilitySource(candidate.source)
+    ) {
+      continue
+    }
+    endpointTypes.add(endpointType)
+    const capabilityOverrides = normalizeCapabilities(candidate.capabilityOverrides)
+    bindings.push({
+      endpointType,
+      nativeWebSearch: candidate.nativeWebSearch,
+      source: candidate.source,
+      ...(candidate.officialOnly === true ? { officialOnly: true } : {}),
+      ...(capabilityOverrides ? { capabilityOverrides } : {}),
+    })
+  }
+  return bindings.length > 0 ? bindings : undefined
 }
 
 function normalizeModel(value: unknown, providerId: AiProviderId): AiProviderConfiguredModel | null {
@@ -160,15 +227,48 @@ function normalizeModel(value: unknown, providerId: AiProviderId): AiProviderCon
   if (!id || id.length > MAX_MODEL_ID_LENGTH || typeof value.enabled !== "boolean") return null
   const capabilitySource = isCapabilitySource(value.capabilitySource) ? value.capabilitySource : undefined
   const capabilities = normalizeCapabilities(value.capabilities)
+  const legacyCapabilities = isRecord(value.capabilities) ? value.capabilities : null
+  const capabilitySources = normalizeSourceMap<AiModelCapabilityKey>(value.capabilitySources, [
+    "functionCall",
+    "reasoning",
+    "structuredOutput",
+  ])
+  const fieldSources = normalizeSourceMap<AiModelProfileField>(value.fieldSources, [
+    "contextWindow",
+    "inputModalities",
+    "maxInputTokens",
+    "maxOutputTokens",
+    "modelType",
+    "name",
+    "outputModalities",
+  ])
+  const normalizedInputModalities = normalizeModalities(value.inputModalities)
+  const endpointBindings = normalizeEndpointBindings(value.endpointBindings)
+  const modelType = normalizeModelType(value.modelType)
+  const outputModalities = normalizeModalities(value.outputModalities)
+  const legacyInputModalities =
+    legacyCapabilities && legacyCapabilities.imageInput === "supported"
+      ? (["text", "image"] satisfies AiModelModality[])
+      : legacyCapabilities && legacyCapabilities.imageInput === "unsupported"
+        ? (["text"] satisfies AiModelModality[])
+        : undefined
+  const inputModalities = normalizedInputModalities ?? legacyInputModalities
   return {
     ...resolveAiModelCapabilities(providerId, {
       id,
       name: nullableString(value.name),
       ownedBy: nullableString(value.ownedBy),
       contextWindow: nullablePositiveInteger(value.contextWindow),
+      maxInputTokens: nullablePositiveInteger(value.maxInputTokens),
       maxOutputTokens: nullablePositiveInteger(value.maxOutputTokens),
       ...(capabilities ? { capabilities } : {}),
+      ...(capabilitySources ? { capabilitySources } : {}),
       ...(capabilitySource ? { capabilitySource } : {}),
+      ...(endpointBindings ? { endpointBindings } : {}),
+      ...(fieldSources ? { fieldSources } : {}),
+      ...(inputModalities ? { inputModalities } : {}),
+      ...(modelType ? { modelType } : {}),
+      ...(outputModalities ? { outputModalities } : {}),
     }),
     enabled: value.enabled,
   }

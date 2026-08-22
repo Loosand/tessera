@@ -14,8 +14,9 @@ import { describe, expect, it } from "vitest"
 import { buildTaskSkillInstructions } from "./skill-instructions"
 
 describe("buildTaskSkillInstructions", () => {
-  it("问答模式不向模型注入 Skill", async () => {
+  it("自动与问答模式不向模型注入 Skill", async () => {
     await expect(buildTaskSkillInstructions(null)).resolves.toBeUndefined()
+    await expect(buildTaskSkillInstructions("question-answering")).resolves.toBeUndefined()
   })
 
   it("只注入选中的标准 Skill 并保留权限边界", async () => {

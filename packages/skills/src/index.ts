@@ -1,5 +1,5 @@
 /**
- * [INPUT]: Agent 权限效果、任务 Skill ID、标准 SKILL.md 文件约定与内置 Skill 源
+ * [INPUT]: Agent 权限效果、任务创作方式/Skill ID、标准 SKILL.md 文件约定与研究/写作内置 Skill 源
  * [OUTPUT]: Skill 描述/权限契约、严格 SKILL.md 解析器，以及元数据常驻、正文按需加载的内置注册表
  * [POS]: Skill 发现、校验、选择和渐进式加载的领域入口
  * [DOC]: docs/architecture.md、docs/architecture/plugin-system.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
@@ -154,7 +154,7 @@ export function listBuiltInSkills(): readonly BuiltInSkillDescriptor[] {
 }
 
 export async function loadBuiltInSkill(skillId: TaskSkillId): Promise<LoadedSkill | null> {
-  if (skillId === null) return null
+  if (skillId === null || skillId === "question-answering") return null
   const registration = BUILT_IN_SKILLS[skillId]
   const document = parseSkillDocument(await registration.loadSource(), registration.descriptor.name)
   if (document.description !== registration.descriptor.description) {

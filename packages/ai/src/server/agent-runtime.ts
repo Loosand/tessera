@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 已解析供应商连接、当前 Skill、客户端交互/研究计划工具、完整 AI SDK UIMessage 历史、主进程注入的受限工作区能力与中止信号
- * [OUTPUT]: 注入当前 Skill instructions、使用供应商兼容对象 Schema 的工作区工具、受步骤/时间/token 边界约束且使用标准 toolApproval 的 AI SDK ToolLoopAgent 增量流
+ * [INPUT]: 已解析供应商连接、自动联网/思考策略、当前 Skill、完整 AI SDK UIMessage 历史、主进程注入的受限工作区能力与中止信号
+ * [OUTPUT]: 同时承载供应商原生搜索、工作区读写、Skill instructions 与标准 toolApproval 的受限 AI SDK ToolLoopAgent 增量流
  * [POS]: @tessera/ai/server 中可读并可经人工批准修改 Markdown 的工作区 Agent 编排边界
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -15,13 +15,14 @@ import type { AiChatStreamChunk } from "@tessera/contracts"
 import { ToolLoopAgent, createAgentUIStream, isStepCount, tool } from "ai"
 import type { InferUITools, UIMessage } from "ai"
 import { z } from "zod"
-import { createAiSdkLanguageModel } from "./ai-sdk-runtime"
+import { createAiSdkChatRuntime } from "./ai-sdk-runtime"
 import {
   type AiChatRuntimeInput,
   publicChunk,
   reasoningLevel,
   safeErrorMessage,
   toUiMessages,
+  webSearchMaxUsesForSkill,
 } from "./chat-runtime"
 import { buildTaskSkillInstructions } from "./skill-instructions"
 import {
@@ -128,7 +129,11 @@ async function* runAiSdkAgent(
   { input, tools: workspaceTools, workspaceName }: AiSdkAgentRuntimeRequest,
   abortSignal: AbortSignal,
 ): AsyncIterable<AiChatStreamChunk> {
-  const model = createAiSdkLanguageModel(input)
+  const runtime = createAiSdkChatRuntime(input, {
+    webSearch: input.webSearch,
+    webSearchMaxUses: webSearchMaxUsesForSkill(input.skillId),
+  })
+  const model = runtime.model
   const skillInstructions = await buildTaskSkillInstructions(input.skillId)
   const readonlyTools = {
     "list-workspace-files": tool({
@@ -172,6 +177,7 @@ async function* runAiSdkAgent(
     stopWhen: isStepCount(5),
   })
   const tools = {
+    ...(runtime.tools ?? {}),
     ...readonlyTools,
     ...createTaskInteractionTools(input.skillId, {
       allowUserInput: !hasRequestedUserInputSinceLastUserMessage(input.messages),

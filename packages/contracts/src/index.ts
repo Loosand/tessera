@@ -1,6 +1,6 @@
 /**
- * [INPUT]: Electron 桌面应用当前需要的跨进程数据、生命周期、工作区条目、AI 配置、任务运行与 Agent 变更审批形状
- * [OUTPUT]: IPC 频道、工作区文件操作、AI 模型/任务会话/可恢复流式运行、客户端问答/研究计划工具、Agent Diff 审批、关闭握手与可推导的桌面 API 类型契约
+ * [INPUT]: Electron 桌面应用当前需要的跨进程数据、生命周期、工作区条目、AI 模型事实/端点绑定、任务运行与 Agent 变更审批形状
+ * [OUTPUT]: IPC 频道、工作区文件操作、模型能力/任务创作方式/可恢复流式运行、客户端问答/研究计划工具、Agent Diff 审批、关闭握手与可推导的桌面 API 类型契约
  * [POS]: 应用和共享包共同依赖的底层契约入口
  * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -78,24 +78,76 @@ export type AiProviderConnectionInput = {
   providerId: AiProviderId
 }
 
-export type AiProviderModel = {
-  capabilities?: AiModelCapabilities
-  capabilitySource?: AiModelCapabilitySource
-  contextWindow: number | null
-  id: string
-  maxOutputTokens: number | null
-  name: string | null
-  ownedBy: string | null
-}
+export const AI_MODEL_TYPES = [
+  "chat",
+  "embedding",
+  "rerank",
+  "image-generation",
+  "video-generation",
+  "text-to-speech",
+  "speech-to-text",
+  "realtime",
+] as const
+
+export type AiModelType = (typeof AI_MODEL_TYPES)[number]
+
+export const AI_MODEL_MODALITIES = ["text", "image", "audio", "video", "vector"] as const
+
+export type AiModelModality = (typeof AI_MODEL_MODALITIES)[number]
+
+export const AI_MODEL_ENDPOINT_TYPES = [
+  "openai-chat-completions",
+  "openai-responses",
+  "anthropic-messages",
+  "xai-responses",
+] as const
+
+export type AiModelEndpointType = (typeof AI_MODEL_ENDPOINT_TYPES)[number]
 
 export type AiModelCapabilityState = "supported" | "unsupported" | "unknown"
 export type AiModelCapabilitySource = "builtin" | "remote" | "custom" | "unknown"
 
 export type AiModelCapabilities = {
-  imageInput: AiModelCapabilityState
+  functionCall: AiModelCapabilityState
   reasoning: AiModelCapabilityState
-  search: AiModelCapabilityState
-  toolUse: AiModelCapabilityState
+  structuredOutput: AiModelCapabilityState
+}
+
+export type AiModelCapabilityKey = keyof AiModelCapabilities
+
+export type AiModelProfileField =
+  | "contextWindow"
+  | "inputModalities"
+  | "maxInputTokens"
+  | "maxOutputTokens"
+  | "modelType"
+  | "name"
+  | "outputModalities"
+
+export type AiModelEndpointBinding = {
+  capabilityOverrides?: Partial<AiModelCapabilities>
+  endpointType: AiModelEndpointType
+  nativeWebSearch: AiModelCapabilityState
+  officialOnly?: boolean
+  source: AiModelCapabilitySource
+}
+
+export type AiProviderModel = {
+  capabilities?: AiModelCapabilities
+  capabilitySources?: Partial<Record<AiModelCapabilityKey, AiModelCapabilitySource>>
+  /** @deprecated 读取旧配置时使用；新配置通过 capabilitySources 逐字段记录来源。 */
+  capabilitySource?: AiModelCapabilitySource
+  contextWindow: number | null
+  endpointBindings?: AiModelEndpointBinding[]
+  fieldSources?: Partial<Record<AiModelProfileField, AiModelCapabilitySource>>
+  id: string
+  inputModalities?: AiModelModality[]
+  maxInputTokens?: number | null
+  maxOutputTokens: number | null
+  modelType?: AiModelType
+  name: string | null
+  ownedBy: string | null
+  outputModalities?: AiModelModality[]
 }
 
 export type AiProviderConfiguredModel = AiProviderModel & {
@@ -159,9 +211,10 @@ export type AiChatMessage = {
 }
 
 export type TaskMode = "chat" | "agent"
-export const TASK_SKILL_IDS = ["research", "writing"] as const
-export type BuiltInTaskSkillId = (typeof TASK_SKILL_IDS)[number]
-export type TaskSkillId = BuiltInTaskSkillId | null
+export const BUILT_IN_TASK_SKILL_IDS = ["research", "writing"] as const
+export type BuiltInTaskSkillId = (typeof BUILT_IN_TASK_SKILL_IDS)[number]
+export const TASK_SKILL_IDS = [...BUILT_IN_TASK_SKILL_IDS, "question-answering"] as const
+export type TaskSkillId = (typeof TASK_SKILL_IDS)[number] | null
 export type TaskSessionStatus = "idle" | "running" | "waiting-input" | "completed" | "failed" | "cancelled"
 
 export const REQUEST_USER_INPUT_TOOL_NAME = "request-user-input" as const

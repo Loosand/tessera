@@ -123,13 +123,18 @@ describe("AI 模型目录发现", () => {
         ownedBy: null,
         contextWindow: null,
         maxOutputTokens: null,
-        capabilitySource: "remote",
-        capabilities: {
-          imageInput: "supported",
-          reasoning: "supported",
-          search: "unknown",
-          toolUse: "supported",
+        capabilitySources: {
+          functionCall: "remote",
+          reasoning: "remote",
+          structuredOutput: "remote",
         },
+        capabilities: {
+          functionCall: "supported",
+          reasoning: "supported",
+          structuredOutput: "unknown",
+        },
+        fieldSources: { inputModalities: "remote" },
+        inputModalities: ["text", "image"],
       },
     ])
   })

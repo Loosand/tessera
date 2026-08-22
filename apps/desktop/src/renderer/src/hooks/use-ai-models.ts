@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 预加载层 AI 配置查询/保存、模型发现与配置变更事件
- * [OUTPUT]: 当前可用于普通对话的已启用模型、模型目录同步操作、刷新状态及错误
+ * [OUTPUT]: 当前可用于任务 Chat/Agent 的已启用对话模型、实际连接地址、模型目录同步操作、刷新状态及错误
  * [POS]: 任务界面与 Electron AI 配置窄桥之间的渲染层状态适配器
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/ai-providers.md
  *
@@ -23,6 +23,7 @@ const PROVIDER_NAMES: Record<AiProviderId, string> = {
 }
 
 export type AvailableAiModel = AiConfiguredModel & {
+  readonly baseUrl: string
   readonly providerName: string
 }
 
@@ -30,9 +31,10 @@ export function selectAvailableAiModels(configs: readonly AiProviderConfig[]): A
   return configs.flatMap((config) =>
     config.enabled && config.apiKeyConfigured
       ? config.models
-          .filter((model) => model.enabled)
+          .filter((model) => model.enabled && (model.modelType ?? "chat") === "chat")
           .map((model) => ({
             ...model,
+            baseUrl: config.baseUrl,
             configId: config.configId,
             displayName: config.displayName,
             providerId: config.providerId,

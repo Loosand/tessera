@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 类型化 AI 连接配置、可选目录鉴权、供应商模型目录 HTTP 响应与可注入 fetch
- * [OUTPUT]: 支持公共目录与鉴权目录、经校验去重和归一化的模型目录以及可安全展示的连接错误
+ * [OUTPUT]: 支持公共目录与鉴权目录、经校验去重并提取模态/能力/限额远端信号的模型目录以及可安全展示的连接错误
  * [POS]: @tessera/ai/server 的供应商模型发现适配层
  * [DOC]: docs/architecture/ai-providers.md
  *
@@ -155,19 +155,18 @@ function remoteCapabilities(candidate: Record<string, unknown>): AiModelCapabili
   if (!inputModalities && !supportedParameters) return null
 
   return {
-    imageInput: inputModalities
-      ? inputModalities.some((modality) => modality === "image" || modality.startsWith("image/"))
-        ? "supported"
-        : "unsupported"
+    functionCall: supportedParameters?.some((parameter) =>
+      ["tools", "tool_choice", "function_call", "functions"].includes(parameter),
+    )
+      ? "supported"
       : "unknown",
     reasoning: supportedParameters?.some((parameter) =>
       ["reasoning", "reasoning_effort", "include_reasoning"].includes(parameter),
     )
       ? "supported"
       : "unknown",
-    search: "unknown",
-    toolUse: supportedParameters?.some((parameter) =>
-      ["tools", "tool_choice", "function_call", "functions"].includes(parameter),
+    structuredOutput: supportedParameters?.some((parameter) =>
+      ["response_format", "structured_outputs", "json_schema"].includes(parameter),
     )
       ? "supported"
       : "unknown",
@@ -187,9 +186,27 @@ function normalizeModels(body: unknown): AiProviderModel[] {
     knownIds.add(id)
     const topProvider = isRecord(candidate.top_provider) ? candidate.top_provider : null
     const capabilities = remoteCapabilities(candidate)
+    const architecture = isRecord(candidate.architecture) ? candidate.architecture : null
+    const inputModalities = stringArray(
+      architecture?.input_modalities ?? architecture?.inputModalities ?? candidate.input_modalities,
+    )?.filter((modality): modality is "audio" | "image" | "text" | "video" | "vector" =>
+      ["audio", "image", "text", "video", "vector"].includes(modality),
+    )
     models.push({
-      ...(capabilities ? { capabilities, capabilitySource: "remote" as const } : {}),
+      ...(capabilities
+        ? {
+            capabilities,
+            capabilitySources: {
+              functionCall: "remote" as const,
+              reasoning: "remote" as const,
+              structuredOutput: "remote" as const,
+            },
+          }
+        : {}),
       id,
+      ...(inputModalities?.length
+        ? { fieldSources: { inputModalities: "remote" as const }, inputModalities }
+        : {}),
       name: optionalString(candidate.name) ?? optionalString(candidate.display_name),
       ownedBy: optionalString(candidate.owned_by),
       contextWindow: positiveInteger(

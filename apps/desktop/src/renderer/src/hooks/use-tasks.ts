@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 当前工作区 ID 与预加载层的任务会话 API
- * [OUTPUT]: 带执行模式和 Skill 选择的新任务草稿、工作区/最近任务列表、历史恢复、重命名、删除和幂等保存操作
+ * [OUTPUT]: 独立任务自动使用 Chat、工作区任务自动使用 Agent 的创作模式草稿、历史恢复、重命名、删除和幂等保存操作
  * [POS]: 渲染层中工作区任务导航与对话持久化的单一状态入口
  * [DOC]: docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -32,9 +32,9 @@ export type ActiveTask = {
 }
 
 function createTaskDraft(
-  mode: TaskMode = "chat",
   workspaceId: string | null = null,
   skillId: TaskSkillId = null,
+  mode: TaskMode = workspaceId ? "agent" : "chat",
 ): ActiveTask {
   return {
     id: globalThis.crypto.randomUUID(),
@@ -61,7 +61,7 @@ function upsertSummary(items: TaskSessionSummary[], summary: TaskSessionSummary)
 export function useTasks(workspaceId: string | undefined) {
   const [tasks, setTasks] = useState<TaskSessionSummary[]>([])
   const [recentTasks, setRecentTasks] = useState<TaskSessionSummary[]>([])
-  const [activeTask, setActiveTask] = useState<ActiveTask>(createTaskDraft)
+  const [activeTask, setActiveTask] = useState<ActiveTask>(() => createTaskDraft())
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const requestIdRef = useRef(0)
@@ -100,7 +100,7 @@ export function useTasks(workspaceId: string | undefined) {
   useEffect(() => {
     const desktopApi = window.tessera
     const requestId = ++requestIdRef.current
-    const draft = createTaskDraft("chat", workspaceId ?? null)
+    const draft = createTaskDraft(workspaceId ?? null)
     activeTaskRef.current = draft
     setActiveTask(draft)
     setTasks([])
@@ -132,12 +132,12 @@ export function useTasks(workspaceId: string | undefined) {
 
   const startNewTask = useCallback(
     (
-      mode: TaskMode = "chat",
       nextWorkspaceId: string | null = workspaceId ?? null,
       skillId: TaskSkillId = null,
+      mode: TaskMode = nextWorkspaceId ? "agent" : "chat",
     ) => {
       requestIdRef.current += 1
-      const draft = createTaskDraft(mode, nextWorkspaceId, skillId)
+      const draft = createTaskDraft(nextWorkspaceId, skillId, mode)
       activeTaskRef.current = draft
       setActiveTask(draft)
       setError(null)
@@ -260,7 +260,7 @@ export function useTasks(workspaceId: string | undefined) {
       setRecentTasks((current) => current.filter((task) => task.id !== taskId))
       if (activeTaskRef.current.id === taskId) {
         requestIdRef.current += 1
-        const draft = createTaskDraft("chat", activeTaskRef.current.workspaceId)
+        const draft = createTaskDraft(activeTaskRef.current.workspaceId)
         activeTaskRef.current = draft
         setActiveTask(draft)
       }
@@ -289,14 +289,6 @@ export function useTasks(workspaceId: string | undefined) {
     [saveTask],
   )
 
-  const setActiveTaskMode = useCallback((mode: TaskMode) => {
-    const task = activeTaskRef.current
-    if (task.persisted || task.messages.length > 0 || task.mode === mode) return
-    const next = { ...task, mode }
-    activeTaskRef.current = next
-    setActiveTask(next)
-  }, [])
-
   const setActiveTaskSkill = useCallback((skillId: TaskSkillId) => {
     const task = activeTaskRef.current
     if (task.persisted || task.messages.length > 0 || task.skillId === skillId) return
@@ -318,7 +310,6 @@ export function useTasks(workspaceId: string | undefined) {
     refreshRecentTasks,
     refreshWorkspaceTasks,
     renameTask,
-    setActiveTaskMode,
     setActiveTaskSkill,
     startNewTask,
   }

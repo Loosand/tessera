@@ -22,15 +22,27 @@ const model = (id: string) => ({
 })
 
 describe("模型能力归一化", () => {
-  it("识别 DeepSeek 视觉与推理模型", () => {
-    expect(
-      resolveAiModelCapabilities("deepseek", model("deepseek-v4-flash-vision-exp")).capabilities,
-    ).toEqual({
-      imageInput: "supported",
-      reasoning: "supported",
-      search: "unsupported",
-      toolUse: "supported",
+  it("统一识别 DeepSeek V4 的模态、能力、限额和端点", () => {
+    const resolved = resolveAiModelCapabilities("deepseek", model("deepseek-v4-flash-vision-exp"))
+    expect(resolved).toMatchObject({
+      capabilities: {
+        functionCall: "supported",
+        reasoning: "supported",
+        structuredOutput: "supported",
+      },
+      contextWindow: 1_048_576,
+      inputModalities: ["text", "image"],
+      maxOutputTokens: 393_216,
+      modelType: "chat",
     })
+    expect(resolved.endpointBindings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          endpointType: "openai-responses",
+          nativeWebSearch: "supported",
+        }),
+      ]),
+    )
   })
 
   it("内建能力会随版本更新重新计算", () => {
@@ -39,19 +51,20 @@ describe("模型能力归一化", () => {
         ...model("deepseek-v4-flash-vision-exp"),
         capabilitySource: "builtin",
         capabilities: {
-          imageInput: "unsupported",
+          functionCall: "unsupported",
           reasoning: "unknown",
-          search: "unsupported",
-          toolUse: "unknown",
+          structuredOutput: "unknown",
         },
-      }).capabilities?.imageInput,
+      }).capabilities?.functionCall,
     ).toBe("supported")
   })
 
   it("不会把旧版 DeepSeek 模型标成原生联网模型", () => {
-    expect(resolveAiModelCapabilities("deepseek", model("deepseek-v3.1")).capabilities?.search).toBe(
-      "unsupported",
-    )
+    expect(
+      resolveAiModelCapabilities("deepseek", model("deepseek-v3.1")).endpointBindings?.some(
+        (binding) => binding.nativeWebSearch === "supported",
+      ),
+    ).toBe(false)
   })
 
   it("保留远端目录明确声明的能力", () => {
@@ -60,17 +73,15 @@ describe("模型能力归一化", () => {
         ...model("vendor/model"),
         capabilitySource: "remote",
         capabilities: {
-          imageInput: "supported",
+          functionCall: "supported",
           reasoning: "supported",
-          search: "unknown",
-          toolUse: "supported",
+          structuredOutput: "supported",
         },
       }).capabilities,
     ).toEqual({
-      imageInput: "supported",
+      functionCall: "supported",
       reasoning: "supported",
-      search: "unsupported",
-      toolUse: "supported",
+      structuredOutput: "supported",
     })
   })
 })

@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 类型化供应商连接、模型 ID、联网开关、搜索额度与 AI SDK 官方供应商适配器
+ * [INPUT]: 类型化供应商连接、请求期模型端点、自动联网策略、搜索额度与 AI SDK 官方供应商适配器
  * [OUTPUT]: 可交给 AI SDK generateText/streamText 的统一 LanguageModel、分层搜索额度与显式支持的原生联网工具
  * [POS]: @tessera/ai/server 的真实生成模型适配边界
  * [DOC]: docs/architecture/ai-providers.md
@@ -12,15 +12,17 @@
 
 import { createAnthropic } from "@ai-sdk/anthropic"
 import { createDeepSeek } from "@ai-sdk/deepseek"
+import { createOpenAI } from "@ai-sdk/openai"
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
 import { createXai } from "@ai-sdk/xai"
-import type { AiProviderConnectionInput } from "@tessera/contracts"
+import type { AiModelEndpointType, AiProviderConnectionInput } from "@tessera/contracts"
 import type { LanguageModel, ToolSet } from "ai"
 
 const DEFAULT_WEB_SEARCH_MAX_USES = 5
 const MAX_WEB_SEARCH_MAX_USES = 20
 
 export type AiLanguageModelInput = AiProviderConnectionInput & {
+  endpointType?: AiModelEndpointType
   modelId: string
 }
 
@@ -66,15 +68,37 @@ function normalizedWebSearchMaxUses(value: number | undefined) {
   return Math.min(MAX_WEB_SEARCH_MAX_USES, Math.max(1, Math.trunc(value)))
 }
 
+function defaultEndpointType(providerId: AiLanguageModelInput["providerId"]): AiModelEndpointType {
+  if (providerId === "anthropic-compatible") return "anthropic-messages"
+  return "openai-chat-completions"
+}
+
+function deepSeekAnthropicBaseUrl(baseURL: string) {
+  const url = new URL(baseURL)
+  const path = url.pathname.replace(/\/(?:v1|anthropic)\/?$/u, "").replace(/\/+$/u, "")
+  url.pathname = `${path}/anthropic`
+  return url.toString().replace(/\/+$/u, "")
+}
+
+function deepSeekResponsesBaseUrl(baseURL: string) {
+  const url = new URL(baseURL)
+  url.pathname = url.pathname.replace(/\/v1\/?$/u, "") || "/"
+  return url.toString().replace(/\/+$/u, "")
+}
+
 export function createAiSdkChatRuntime(
   input: AiLanguageModelInput,
   { webSearch = false, webSearchMaxUses }: AiChatRuntimeOptions = {},
 ): AiSdkChatRuntime {
   const { apiKey, baseURL, modelId } = normalizedRuntimeInput(input)
   const maxUses = normalizedWebSearchMaxUses(webSearchMaxUses)
+  const endpointType = input.endpointType ?? defaultEndpointType(input.providerId)
 
   switch (input.providerId) {
     case "openai-compatible":
+      if (endpointType !== "openai-chat-completions") {
+        throw new Error("当前 OpenAI 兼容连接未配置这个生成端点。")
+      }
       if (webSearch) throw new Error("当前 OpenAI 兼容连接尚未接入可验证的联网搜索工具。")
       return {
         model: createOpenAICompatible({
@@ -85,27 +109,59 @@ export function createAiSdkChatRuntime(
         })(modelId),
       }
     case "anthropic-compatible": {
+      if (endpointType !== "anthropic-messages") {
+        throw new Error("当前 Anthropic 兼容连接未配置这个生成端点。")
+      }
       const anthropic = createAnthropic({ apiKey, baseURL })
       return {
         model: anthropic(modelId),
         ...(webSearch ? { tools: { web_search: anthropic.tools.webSearch_20260209({ maxUses }) } } : {}),
       }
     }
-    case "deepseek":
-      if (webSearch) {
-        throw new Error(
-          "DeepSeek 原生 API 当前未接入联网搜索工具；请关闭联网搜索，或改用已显式配置且支持原生搜索的供应商连接。",
-        )
+    case "deepseek": {
+      if (endpointType === "openai-responses") {
+        const deepseek = createOpenAI({
+          name: "tesseraDeepSeekResponses",
+          apiKey,
+          baseURL: deepSeekResponsesBaseUrl(baseURL),
+        })
+        return {
+          model: deepseek.responses(modelId),
+          ...(webSearch
+            ? { tools: { web_search: deepseek.tools.webSearch() as unknown as ToolSet[string] } }
+            : {}),
+        }
       }
+      if (endpointType === "anthropic-messages") {
+        const anthropic = createAnthropic({ apiKey, baseURL: deepSeekAnthropicBaseUrl(baseURL) })
+        return {
+          model: anthropic(modelId),
+          ...(webSearch ? { tools: { web_search: anthropic.tools.webSearch_20260209({ maxUses }) } } : {}),
+        }
+      }
+      if (endpointType !== "openai-chat-completions") {
+        throw new Error("当前 DeepSeek 连接未配置这个生成端点。")
+      }
+      if (webSearch) throw new Error("DeepSeek Chat Completions 端点不提供原生联网搜索。")
       return { model: createDeepSeek({ apiKey, baseURL })(modelId) }
+    }
     case "grok": {
       const xai = createXai({ apiKey, baseURL })
+      if (endpointType !== "openai-chat-completions" && endpointType !== "xai-responses") {
+        throw new Error("当前 Grok 连接未配置这个生成端点。")
+      }
+      if (webSearch && endpointType !== "xai-responses") {
+        throw new Error("Grok Chat Completions 端点不提供已验证的原生联网搜索。")
+      }
       return {
-        model: webSearch ? xai.responses(modelId) : xai.chat(modelId),
+        model: endpointType === "xai-responses" ? xai.responses(modelId) : xai.chat(modelId),
         ...(webSearch ? { tools: { web_search: xai.tools.webSearch() } } : {}),
       }
     }
     case "openrouter":
+      if (endpointType !== "openai-chat-completions") {
+        throw new Error("当前 OpenRouter 连接未配置这个生成端点。")
+      }
       if (webSearch) throw new Error("OpenRouter 的联网能力因模型而异，当前版本暂不自动透传。")
       return {
         model: createOpenAICompatible({

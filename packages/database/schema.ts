@@ -1,5 +1,5 @@
 /**
- * [INPUT]: Tessera 对工作区索引、通用任务会话、AI 供应商配置、Agent 运行检查点、变更审批和权限审计的持久化需求
+ * [INPUT]: Tessera 对工作区索引、通用任务会话/创作方式、AI 供应商模型事实、Agent 运行检查点、变更审批和权限审计的持久化需求
  * [OUTPUT]: Drizzle SQLite 表、索引和可推导行类型，包括可恢复的任务等待输入标记（AI Key 仅保存 safeStorage 密文）
  * [POS]: 数据库结构的类型事实源；不保存 Markdown 正文
  * [DOC]: docs/architecture/database.md
@@ -102,7 +102,7 @@ export const taskSessions = sqliteTable(
     mode: text("mode", { enum: ["chat", "agent"] })
       .notNull()
       .default("chat"),
-    skillId: text("skill_id", { enum: ["research", "writing"] }),
+    skillId: text("skill_id", { enum: ["research", "writing", "question-answering"] }),
     workspaceId: text("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }),
     title: text("title").notNull(),
     status: text("status", {

@@ -76,6 +76,47 @@ describe("AI 供应商配置服务", () => {
     ).toBe("secret-key")
   })
 
+  it("读取旧版模型能力时迁移到统一模型事实", () => {
+    const store = createStore()
+    store.save({
+      apiKeyCiphertext: null,
+      baseUrl: "https://api.deepseek.com",
+      configId: "deepseek",
+      displayName: "DeepSeek",
+      enabled: true,
+      modelsJson: JSON.stringify([
+        {
+          capabilities: {
+            imageInput: "supported",
+            reasoning: "supported",
+            search: "unsupported",
+            toolUse: "supported",
+          },
+          capabilitySource: "custom",
+          contextWindow: null,
+          enabled: true,
+          id: "deepseek-v4-flash-vision-exp",
+          maxOutputTokens: null,
+          name: null,
+          ownedBy: null,
+        },
+      ]),
+      providerId: "deepseek",
+      updatedAt: 1,
+    })
+
+    const model = createAiProviderConfigService({ store, secretStorage }).listConfigs()[0]?.models[0]
+    expect(model).toMatchObject({
+      capabilities: {
+        functionCall: "supported",
+        reasoning: "supported",
+        structuredOutput: "unknown",
+      },
+      inputModalities: ["text", "image"],
+      modelType: "chat",
+    })
+  })
+
   it("未输入新密钥时保留旧密钥，显式移除后不再解析", () => {
     const store = createStore()
     const service = createAiProviderConfigService({ store, secretStorage })
