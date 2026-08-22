@@ -380,6 +380,7 @@ export function AppShell({ appInfo }: AppShellProps) {
               {showHomeSidebar ? (
                 <HomeSidebar
                   activeItem={view === "skills" ? "skills" : standaloneTask ? "new-task" : "workspaces"}
+                  activeTaskId={view === "task" ? activeTask.id : undefined}
                   recentTasks={recentTasks}
                   workspaces={recentWorkspaces}
                   onCollapse={() => setSidebarOpen(false)}

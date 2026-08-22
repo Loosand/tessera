@@ -41,6 +41,11 @@ describe("DesktopTaskService", () => {
             parts: [
               { type: "reasoning", text: "核对资料", state: "done" },
               { type: "text", text: "结论", state: "done" },
+              {
+                type: "data-task-error",
+                id: "task-error-request-1",
+                data: { message: "供应商连接中断。", retryable: true },
+              },
             ],
           },
         ],
@@ -70,6 +75,10 @@ describe("DesktopTaskService", () => {
       parts: [
         { type: "reasoning", text: "核对资料" },
         { type: "text", text: "结论" },
+        {
+          type: "data-task-error",
+          data: { message: "供应商连接中断。", retryable: true },
+        },
       ],
     })
     expect(

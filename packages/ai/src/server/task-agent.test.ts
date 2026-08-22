@@ -16,6 +16,8 @@ import {
   type TaskAgentRunMetrics,
   activeTaskAgentTools,
   createTaskAgent,
+  researchRunShouldStopAfterStep,
+  researchStepPolicy,
   taskAgentCallOptionsSchema,
 } from "./task-agent"
 
@@ -93,6 +95,85 @@ describe("统一 Task Agent 动态配置", () => {
 
   it("工作区写入作用域保留全部已注册工具，审批仍由工具定义处理", () => {
     expect(activeTaskAgentTools(toolNames, "workspace-write", groups)).toEqual(toolNames)
+  })
+
+  it("显式研究在计划前只允许计划或核心消歧，并强制工具调用", () => {
+    expect(
+      researchStepPolicy({
+        activeTools: ["web_search", "request-user-input", "publish-research-plan", "read-web-source"],
+        maxSteps: 10,
+        progress: {
+          phase: "preparing",
+          planPublished: false,
+          outcome: null,
+          questionCounts: { pending: 0, covered: 0, partial: 0, uncovered: 0 },
+          sourceCounts: { discovered: 0, shortlisted: 0, reading: 0, read: 0, unusable: 0 },
+          evidenceCount: 0,
+        },
+        stepNumber: 0,
+        tokenBudgetNearLimit: false,
+      }),
+    ).toEqual({
+      activeTools: ["request-user-input", "publish-research-plan"],
+      mode: "plan",
+      toolChoice: "required",
+    })
+  })
+
+  it("研究接近预算时只允许完成检查，通过后释放最终文本步骤", () => {
+    const progress = {
+      phase: "verifying" as const,
+      planPublished: true,
+      outcome: null,
+      questionCounts: { pending: 2, covered: 1, partial: 0, uncovered: 0 },
+      sourceCounts: { discovered: 3, shortlisted: 0, reading: 0, read: 2, unusable: 1 },
+      evidenceCount: 2,
+    }
+    expect(
+      researchStepPolicy({
+        activeTools: ["web_search", "read-web-source", "finalize-research"],
+        maxSteps: 10,
+        progress,
+        stepNumber: 8,
+        tokenBudgetNearLimit: false,
+      }),
+    ).toEqual({ activeTools: ["finalize-research"], mode: "finalize-partial", toolChoice: "required" })
+    expect(
+      researchStepPolicy({
+        activeTools: ["finalize-research"],
+        maxSteps: 10,
+        progress: { ...progress, phase: "completed", outcome: "partial" },
+        stepNumber: 9,
+        tokenBudgetNearLimit: true,
+      }),
+    ).toEqual({ activeTools: [], mode: "final-answer", toolChoice: "none" })
+  })
+
+  it("深读后先强制登记证据，并为完成检查后的最终答复保留一步", () => {
+    expect(
+      researchStepPolicy({
+        activeTools: ["web_search", "read-web-source", "record-research-evidence", "finalize-research"],
+        maxSteps: 8,
+        progress: {
+          phase: "reading",
+          planPublished: true,
+          outcome: null,
+          questionCounts: { pending: 4, covered: 0, partial: 0, uncovered: 0 },
+          sourceCounts: { discovered: 4, shortlisted: 0, reading: 0, read: 2, unusable: 1 },
+          evidenceCount: 0,
+        },
+        stepNumber: 6,
+        tokenBudgetNearLimit: true,
+      }),
+    ).toEqual({
+      activeTools: ["record-research-evidence"],
+      mode: "evidence",
+      toolChoice: "required",
+    })
+    expect(researchRunShouldStopAfterStep({ finalAnswerStarted: false, maxSteps: 8, stepCount: 8 })).toBe(
+      false,
+    )
+    expect(researchRunShouldStopAfterStep({ finalAnswerStarted: true, maxSteps: 8, stepCount: 9 })).toBe(true)
   })
 
   it("把端点专属 provider options 与本轮推理强度一起传给模型", async () => {

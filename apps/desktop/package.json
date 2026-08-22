@@ -51,6 +51,7 @@
     "codemirror": "^6.0.2",
     "diff": "9.0.0",
     "motion": "^12.42.2",
+    "parse5": "7.3.0",
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "react-markdown": "^10.1.0",

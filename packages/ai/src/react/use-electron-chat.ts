@@ -1,6 +1,6 @@
 /**
  * [INPUT]: Electron 窄桥、任务是否已持久化、内部任务执行作用域/创作方式、显式当前文档、模型选择、版本化历史消息与 AI SDK React 状态机
- * [OUTPUT]: 不传递能力开关、只为已持久化任务恢复且支持断开重连的 ElectronChatTransport、等待输入识别、完整 UIMessage 往返、问答/审批后自动续轮与类型化 IPC 增量消费
+ * [OUTPUT]: 不传递能力开关、只为已持久化任务恢复且支持断开重连的 ElectronChatTransport、可持久化消息内运行失败、等待输入识别、完整 UIMessage 往返、问答/审批后自动续轮与类型化 IPC 增量消费
  * [POS]: @tessera/ai/react 中连接桌面渲染层与主进程 Chat/Agent 运行时的 Transport
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -17,6 +17,7 @@ import type {
   AiProviderId,
   DesktopApi,
   TaskMessage,
+  TaskMessageData,
   TaskMessageMetadata,
   TaskMode,
   TaskSkillId,
@@ -36,8 +37,8 @@ export type ElectronChatBridge = Pick<
   "cancelAiChat" | "onAiChatEvent" | "resumeAiChat" | "startAiChat"
 >
 
-export type UIMessage = AiSdkUiMessage
-type UIMessageChunk = AiSdkUiMessageChunk<TaskMessageMetadata>
+export type UIMessage = AiSdkUiMessage<TaskMessageMetadata, TaskMessageData>
+type UIMessageChunk = AiSdkUiMessageChunk<TaskMessageMetadata, TaskMessageData>
 
 export type UseElectronChatOptions = {
   bridge: ElectronChatBridge | undefined
@@ -82,6 +83,11 @@ export function hasPendingTaskUserInput(messages: readonly UIMessage[]) {
           part.state === "input-available",
       ),
   )
+}
+
+export function hasTaskRunError(messages: readonly UIMessage[]) {
+  const message = messages.at(-1)
+  return message?.role === "assistant" && message.parts.some((part) => part.type === "data-task-error")
 }
 
 export function shouldAutomaticallyContinueTask({ messages }: { messages: UIMessage[] }) {
@@ -180,6 +186,12 @@ export function toTaskMessages(
           title: part.title,
           ...(part.filename ? { filename: part.filename } : {}),
         })
+      } else if (part.type === "data-task-error") {
+        parts.push({
+          type: "data-task-error",
+          ...(part.id ? { id: part.id } : {}),
+          data: part.data,
+        })
       } else if (part.type === "step-start") {
         parts.push({ type: "step-start" })
       } else if (isUiToolPart(part)) {
@@ -207,6 +219,22 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
   private readonly activeRequestIds = new Map<string, string>()
 
   constructor(private readonly options: () => UseElectronChatOptions) {}
+
+  private runErrorChunks(
+    requestId: string,
+    message: string,
+    metadata?: TaskMessageMetadata,
+  ): UIMessageChunk[] {
+    return [
+      ...(metadata ? [{ type: "start" as const, messageMetadata: metadata }] : []),
+      {
+        type: "data-task-error",
+        id: `task-error-${requestId}`,
+        data: { message, retryable: true },
+      },
+      { type: "error", errorText: message },
+    ]
+  }
 
   cancelActive(chatId: string) {
     const activeRequestId = this.activeRequestIds.get(chatId)
@@ -262,7 +290,13 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
                   } satisfies TaskMessageMetadata,
                 }
               : event.chunk
-          controller.enqueue(chunk)
+          if (event.chunk.type === "error") {
+            for (const errorChunk of this.runErrorChunks(activeRequestId, event.chunk.errorText)) {
+              controller.enqueue(errorChunk)
+            }
+          } else {
+            controller.enqueue(chunk)
+          }
           if (event.chunk.type === "finish" || event.chunk.type === "abort" || event.chunk.type === "error") {
             if (this.activeRequestIds.get(chatId) === activeRequestId) this.activeRequestIds.delete(chatId)
             close()
@@ -291,18 +325,27 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
             if (result.ok) return
             if (this.activeRequestIds.get(chatId) === activeRequestId) this.activeRequestIds.delete(chatId)
             if (closed) return
-            controller.error(new Error(result.error))
-            closed = true
-            unsubscribe()
-            abortSignal?.removeEventListener("abort", abort)
+            for (const chunk of this.runErrorChunks(activeRequestId, result.error, {
+              configId: options.configId,
+              modelId: options.modelId,
+              providerId: options.providerId,
+            })) {
+              controller.enqueue(chunk)
+            }
+            close()
           })
           .catch((error) => {
             if (this.activeRequestIds.get(chatId) === activeRequestId) this.activeRequestIds.delete(chatId)
             if (closed) return
-            controller.error(error instanceof Error ? error : new Error("无法开始模型请求。"))
-            closed = true
-            unsubscribe()
-            abortSignal?.removeEventListener("abort", abort)
+            const message = error instanceof Error ? error.message : "无法开始模型请求。"
+            for (const chunk of this.runErrorChunks(activeRequestId, message, {
+              configId: options.configId,
+              modelId: options.modelId,
+              providerId: options.providerId,
+            })) {
+              controller.enqueue(chunk)
+            }
+            close()
           })
       },
       cancel: () => detach(),
@@ -390,7 +433,13 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
                   } satisfies TaskMessageMetadata,
                 }
               : event.chunk
-          controller.enqueue(chunk)
+          if (event.chunk.type === "error") {
+            for (const errorChunk of this.runErrorChunks(run.requestId, event.chunk.errorText)) {
+              controller.enqueue(errorChunk)
+            }
+          } else {
+            controller.enqueue(chunk)
+          }
           if (event.chunk.type === "finish" || event.chunk.type === "abort" || event.chunk.type === "error") {
             if (this.activeRequestIds.get(chatId) === run.requestId) this.activeRequestIds.delete(chatId)
             close()

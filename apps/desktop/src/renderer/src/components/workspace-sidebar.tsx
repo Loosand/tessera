@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 当前工作区、任务/文件分区、会话列表、文档草稿与工作区操作
- * [OUTPUT]: 可切换工作区的二级侧栏、任务列表、文件树/列表和大纲
+ * [OUTPUT]: 可切换工作区的二级侧栏、带选中/运行状态的任务列表、文件树/列表和大纲
  * [POS]: Tessera 两级导航中的工作区侧栏
  * [DOC]: design.md、docs/architecture.md、docs/architecture/editor.md
  *
@@ -30,7 +30,6 @@ import {
   Link01Icon,
   ListViewIcon,
   Menu01Icon,
-  Message01Icon,
   PanelLeftCloseIcon,
   PinIcon,
   SortingAZ01Icon,
@@ -47,6 +46,7 @@ import {
 } from "@tessera/design-system/components/ui/popover"
 import { useEffect, useMemo, useState } from "react"
 import { TaskContextMenu } from "./task-context-menu"
+import { TaskNavigationRow } from "./task-navigation-row"
 import { WorkspaceContextMenu } from "./workspace-context-menu"
 import { WorkspaceEntryContextMenu } from "./workspace-entry-context-menu"
 import {
@@ -526,16 +526,12 @@ export function WorkspaceSidebar({
                         key={task.id}
                         task={task}
                         trigger={
-                          <button
-                            type="button"
-                            className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[12px] transition-colors hover:bg-sidebar-accent data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium"
-                            data-active={task.id === activeTaskId || undefined}
-                            title={task.title}
+                          <TaskNavigationRow
+                            active={task.id === activeTaskId}
+                            status={task.status}
+                            taskTitle={task.title}
                             onClick={() => onOpenTask(task.id)}
-                          >
-                            <Icon icon={Message01Icon} size={14} className="shrink-0 text-muted-foreground" />
-                            <span className="min-w-0 flex-1 truncate">{task.title}</span>
-                          </button>
+                          />
                         }
                         onOpen={(selectedTask) => onOpenTask(selectedTask.id)}
                         onRename={onRenameTask}

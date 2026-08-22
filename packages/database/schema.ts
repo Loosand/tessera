@@ -224,6 +224,112 @@ export const taskRunEvents = sqliteTable(
   (table) => [uniqueIndex("task_run_events_request_sequence_unique").on(table.requestId, table.sequence)],
 )
 
+export const researchRuns = sqliteTable(
+  "research_runs",
+  {
+    requestId: text("request_id")
+      .primaryKey()
+      .references(() => taskRuns.requestId, { onDelete: "cascade" }),
+    taskId: text("task_id")
+      .notNull()
+      .references(() => taskSessions.id, { onDelete: "cascade" }),
+    phase: text("phase", {
+      enum: ["preparing", "planning", "discovering", "reading", "verifying", "synthesizing", "completed"],
+    }).notNull(),
+    outcome: text("outcome", { enum: ["complete", "partial"] }),
+    objective: text("objective"),
+    scope: text("scope"),
+    deliverable: text("deliverable"),
+    planVersion: integer("plan_version").notNull().default(0),
+    limitationsJson: text("limitations_json").notNull().default("[]"),
+    startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    completedAt: integer("completed_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [index("research_runs_task_updated_idx").on(table.taskId, table.updatedAt)],
+)
+
+export const researchQuestions = sqliteTable(
+  "research_questions",
+  {
+    id: text("id").primaryKey(),
+    requestId: text("request_id")
+      .notNull()
+      .references(() => researchRuns.requestId, { onDelete: "cascade" }),
+    questionId: text("question_id").notNull(),
+    title: text("title").notNull(),
+    position: integer("position").notNull(),
+    status: text("status", { enum: ["pending", "covered", "partial", "uncovered"] })
+      .notNull()
+      .default("pending"),
+    coverageNote: text("coverage_note"),
+    createdAt,
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("research_questions_run_question_unique").on(table.requestId, table.questionId),
+    index("research_questions_run_status_idx").on(table.requestId, table.status),
+  ],
+)
+
+export const researchSources = sqliteTable(
+  "research_sources",
+  {
+    id: text("id").primaryKey(),
+    requestId: text("request_id")
+      .notNull()
+      .references(() => researchRuns.requestId, { onDelete: "cascade" }),
+    url: text("url").notNull(),
+    canonicalUrl: text("canonical_url").notNull(),
+    finalUrl: text("final_url"),
+    title: text("title"),
+    author: text("author"),
+    publishedAt: text("published_at"),
+    discoveredByQuery: text("discovered_by_query"),
+    questionIdsJson: text("question_ids_json").notNull().default("[]"),
+    status: text("status", {
+      enum: ["discovered", "shortlisted", "reading", "read", "unusable"],
+    }).notNull(),
+    contentType: text("content_type"),
+    contentHash: text("content_hash"),
+    charCount: integer("char_count"),
+    truncated: integer("truncated", { mode: "boolean" }).notNull().default(false),
+    errorMessage: text("error_message"),
+    discoveredAt: integer("discovered_at", { mode: "timestamp_ms" }).notNull(),
+    readAt: integer("read_at", { mode: "timestamp_ms" }),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("research_sources_run_url_unique").on(table.requestId, table.canonicalUrl),
+    index("research_sources_run_status_idx").on(table.requestId, table.status),
+  ],
+)
+
+export const researchEvidence = sqliteTable(
+  "research_evidence",
+  {
+    id: text("id").primaryKey(),
+    requestId: text("request_id")
+      .notNull()
+      .references(() => researchRuns.requestId, { onDelete: "cascade" }),
+    sourceId: text("source_id")
+      .notNull()
+      .references(() => researchSources.id, { onDelete: "cascade" }),
+    researchQuestionId: text("research_question_id")
+      .notNull()
+      .references(() => researchQuestions.id, { onDelete: "cascade" }),
+    relation: text("relation", { enum: ["supports", "refutes", "qualifies"] }).notNull(),
+    claim: text("claim").notNull(),
+    excerpt: text("excerpt").notNull(),
+    locator: text("locator"),
+    createdAt,
+  },
+  (table) => [
+    index("research_evidence_run_question_idx").on(table.requestId, table.researchQuestionId),
+    index("research_evidence_source_idx").on(table.sourceId),
+  ],
+)
+
 export const agentChangeProposals = sqliteTable(
   "agent_change_proposals",
   {
@@ -412,6 +518,10 @@ export type TaskSession = typeof taskSessions.$inferSelect
 export type TaskMessageRecord = typeof taskMessages.$inferSelect
 export type TaskRun = typeof taskRuns.$inferSelect
 export type TaskRunEventRecord = typeof taskRunEvents.$inferSelect
+export type ResearchRunRecord = typeof researchRuns.$inferSelect
+export type ResearchQuestionRecord = typeof researchQuestions.$inferSelect
+export type ResearchSourceRecord = typeof researchSources.$inferSelect
+export type ResearchEvidenceRecord = typeof researchEvidence.$inferSelect
 export type AgentChangeProposal = typeof agentChangeProposals.$inferSelect
 export type TaskResourceBindingRecord = typeof taskResourceBindings.$inferSelect
 export type ArtifactRecord = typeof artifacts.$inferSelect

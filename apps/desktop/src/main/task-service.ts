@@ -132,6 +132,14 @@ function validateTaskPart(part: unknown): part is TaskMessagePart {
       validateOptionalString(part.filename)
     )
   }
+  if (part.type === "data-task-error") {
+    return (
+      validateOptionalString(part.id) &&
+      isRecord(part.data) &&
+      typeof part.data.message === "string" &&
+      typeof part.data.retryable === "boolean"
+    )
+  }
   if (part.type === "step-start") return true
   if (part.type !== "dynamic-tool" && !part.type.startsWith("tool-")) return false
   if (

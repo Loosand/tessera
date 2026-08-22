@@ -17,9 +17,12 @@ import { LoadingState } from "@tessera/design-system/components/loading-state"
 import { Button } from "@tessera/design-system/components/ui/button"
 import { Icon } from "@tessera/design-system/components/ui/icon"
 import React from "react"
+import { ContentOperationPart, isContentOperationToolPart } from "./chat-parts/content-operation-part"
 import { ReasoningPart } from "./chat-parts/reasoning-part"
+import { ResearchActivityPart, isResearchActivityToolPart } from "./chat-parts/research-activity-part"
 import { ResearchPlanPart, isResearchPlanToolPart } from "./chat-parts/research-plan-part"
 import { SourcePart } from "./chat-parts/source-part"
+import { TaskErrorPart, isTaskErrorPart } from "./chat-parts/task-error-part"
 import { TextPart } from "./chat-parts/text-part"
 import { ToolPart, isToolPart } from "./chat-parts/tool-part"
 import { UserInputPart, isUserInputToolPart } from "./chat-parts/user-input-part"
@@ -67,6 +70,9 @@ export function ChatMessage({
   const documentFiles = files.filter((file) => !file.mediaType.startsWith("image/"))
   const assistantStreaming = running && isLast
   const firstWebSearchIndex = message.parts.findIndex(isWebSearchToolPart)
+  const firstContentOperationIndex = message.parts.findIndex(isContentOperationToolPart)
+  const firstResearchActivityIndex = message.parts.findIndex(isResearchActivityToolPart)
+  const contentOperationParts = message.parts.filter(isContentOperationToolPart)
   const firstEmptyReasoningIndex = message.parts.findIndex(
     (part) => part.type === "reasoning" && !shouldRenderReasoningBody(part),
   )
@@ -151,6 +157,15 @@ export function ChatMessage({
             />
           )
         }
+        if (isTaskErrorPart(part)) {
+          return (
+            <TaskErrorPart
+              key={partKey}
+              part={part}
+              onRetry={isLast && !running ? onRegenerate : undefined}
+            />
+          )
+        }
         if (isUserInputToolPart(part)) {
           return <UserInputPart key={partKey} part={part} onSubmit={onUserInput} />
         }
@@ -160,6 +175,22 @@ export function ChatMessage({
         if (isWebSearchToolPart(part)) {
           return index === firstWebSearchIndex ? (
             <WebSearchPart key={partKey} parts={message.parts} streaming={assistantStreaming} />
+          ) : null
+        }
+        if (isResearchActivityToolPart(part)) {
+          return index === firstResearchActivityIndex ? (
+            <ResearchActivityPart key={partKey} parts={message.parts} streaming={assistantStreaming} />
+          ) : null
+        }
+        if (isContentOperationToolPart(part)) {
+          return index === firstContentOperationIndex ? (
+            <ContentOperationPart
+              key={partKey}
+              parts={contentOperationParts}
+              loadAgentChangePreview={loadAgentChangePreview}
+              onOpenDocument={onOpenDocument}
+              onToolApproval={onToolApproval}
+            />
           ) : null
         }
         if (isToolPart(part)) {

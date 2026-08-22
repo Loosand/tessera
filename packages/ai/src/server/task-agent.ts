@@ -11,6 +11,11 @@
  */
 
 import {
+  FINALIZE_RESEARCH_TOOL_NAME,
+  PUBLISH_RESEARCH_PLAN_TOOL_NAME,
+  RECORD_RESEARCH_EVIDENCE_TOOL_NAME,
+  REQUEST_USER_INPUT_TOOL_NAME,
+  type TaskResearchProgress,
   type TaskRunPolicy,
   type TaskToolScope,
   type UserTaskSkillId,
@@ -26,6 +31,7 @@ import {
   isStepCount,
 } from "ai"
 import { z } from "zod"
+import type { ResearchWorkflowController } from "./research-tools"
 
 const taskRunPolicySchema = z.strictObject({
   limits: z.strictObject({
@@ -155,11 +161,65 @@ function combinedInstructions(baseInstructions: string | undefined, skillInstruc
   return sections.length > 0 ? sections.join("\n\n") : undefined
 }
 
+export type ResearchStepPolicy = Readonly<{
+  activeTools: string[]
+  mode: "evidence" | "final-answer" | "finalize-partial" | "plan" | "research"
+  toolChoice: "none" | "required"
+}>
+
+export function researchStepPolicy(
+  input: Readonly<{
+    activeTools: readonly string[]
+    maxSteps: number
+    progress: TaskResearchProgress
+    stepNumber: number
+    tokenBudgetNearLimit: boolean
+  }>,
+): ResearchStepPolicy {
+  if (input.progress.outcome) return { activeTools: [], mode: "final-answer", toolChoice: "none" }
+  if (!input.progress.planPublished) {
+    return {
+      activeTools: input.activeTools.filter(
+        (name) => name === PUBLISH_RESEARCH_PLAN_TOOL_NAME || name === REQUEST_USER_INPUT_TOOL_NAME,
+      ),
+      mode: "plan",
+      toolChoice: "required",
+    }
+  }
+  const evidenceTools = input.activeTools.filter((name) => name === RECORD_RESEARCH_EVIDENCE_TOOL_NAME)
+  if (
+    input.progress.sourceCounts.read > 0 &&
+    input.progress.evidenceCount === 0 &&
+    evidenceTools.length > 0
+  ) {
+    return { activeTools: evidenceTools, mode: "evidence", toolChoice: "required" }
+  }
+  if (input.stepNumber >= Math.max(1, input.maxSteps - 3) || input.tokenBudgetNearLimit) {
+    return {
+      activeTools: input.activeTools.filter((name) => name === FINALIZE_RESEARCH_TOOL_NAME),
+      mode: "finalize-partial",
+      toolChoice: "required",
+    }
+  }
+  return {
+    activeTools: input.activeTools.filter((name) => name !== REQUEST_USER_INPUT_TOOL_NAME),
+    mode: "research",
+    toolChoice: "required",
+  }
+}
+
+export function researchRunShouldStopAfterStep(
+  input: Readonly<{ finalAnswerStarted: boolean; maxSteps: number; stepCount: number }>,
+) {
+  return input.finalAnswerStarted || input.stepCount >= input.maxSteps + 2
+}
+
 export function createTaskAgent({
   baseInstructions,
   model,
   onRunMetrics,
   providerOptions,
+  researchWorkflow,
   toolGroups = {},
   tools,
 }: {
@@ -167,11 +227,13 @@ export function createTaskAgent({
   model: LanguageModel
   onRunMetrics?: (metrics: TaskAgentRunMetrics) => void
   providerOptions?: Record<string, Record<string, JSONValue>>
+  researchWorkflow?: ResearchWorkflowController
   toolGroups?: TaskAgentToolGroups
   tools: ToolSet
 }) {
   const toolNames = Object.keys(tools)
   const completedSteps: GenerateTextStepEndEvent<ToolSet>[] = []
+  let researchFinalAnswerStarted = false
   return new ToolLoopAgent<TaskAgentCallOptions, ToolSet>({
     id: "tessera-task-agent",
     model,
@@ -189,18 +251,63 @@ export function createTaskAgent({
     callOptionsSchema: taskAgentCallOptionsSchema,
     prepareCall: ({ options, ...settings }) => {
       const instructions = combinedInstructions(baseInstructions, options.skillInstructions)
+      const activeTools = activeTaskAgentTools(toolNames, options.policy.toolScope, toolGroups)
       return {
         ...settings,
-        activeTools: activeTaskAgentTools(toolNames, options.policy.toolScope, toolGroups),
+        activeTools,
         ...(instructions ? { instructions } : {}),
         maxOutputTokens: options.policy.limits.maxOutputTokens,
         reasoning: reasoningLevel(options.policy.reasoning),
         stopWhen: [
-          isStepCount(options.policy.limits.maxSteps),
+          researchWorkflow
+            ? ({ steps }) =>
+                researchRunShouldStopAfterStep({
+                  finalAnswerStarted: researchFinalAnswerStarted,
+                  maxSteps: options.policy.limits.maxSteps,
+                  stepCount: steps.length,
+                })
+            : isStepCount(options.policy.limits.maxSteps),
           ({ steps }) =>
+            (!researchWorkflow || researchFinalAnswerStarted) &&
             steps.reduce((total, step) => total + (step.usage.totalTokens ?? 0), 0) >=
-            options.policy.limits.maxTotalTokens,
+              options.policy.limits.maxTotalTokens,
         ],
+        ...(researchWorkflow
+          ? {
+              prepareStep: ({
+                stepNumber,
+                steps,
+              }: { stepNumber: number; steps: GenerateTextStepEndEvent<ToolSet>[] }) => {
+                const usedTokens = steps.reduce((total, step) => total + (step.usage.totalTokens ?? 0), 0)
+                const policy = researchStepPolicy({
+                  activeTools,
+                  maxSteps: options.policy.limits.maxSteps,
+                  progress: researchWorkflow.getProgress(),
+                  stepNumber,
+                  tokenBudgetNearLimit:
+                    usedTokens + options.policy.limits.maxOutputTokens * 2 >=
+                    options.policy.limits.maxTotalTokens,
+                })
+                if (policy.mode === "finalize-partial") researchWorkflow.allowPartialFinalization()
+                if (policy.mode === "final-answer") researchFinalAnswerStarted = true
+                const phaseInstruction =
+                  policy.mode === "plan"
+                    ? "运行时要求：这是显式研究。必须先调用 publish-research-plan；只有核心语义确实歧义时才可改为 request-user-input。"
+                    : policy.mode === "evidence"
+                      ? "运行时要求：已经深读来源但尚未登记证据。现在只调用 record-research-evidence；可并行登记多个问题的短原文片段，不要继续搜索、阅读或输出最终答复。"
+                      : policy.mode === "finalize-partial"
+                        ? "运行时要求：研究预算即将耗尽。现在必须调用 finalize-research；满足全部证据门槛时可标记 complete，否则必须以 partial 如实标记未覆盖问题与限制。"
+                        : policy.mode === "final-answer"
+                          ? "运行时要求：领域完成检查已经通过。现在直接交付最终答复，引用已读来源，清楚说明覆盖与限制，不再调用工具。"
+                          : "运行时要求：最终答复前必须调用 finalize-research；继续搜索、深读和登记证据，搜索摘要不能作为已读证据。"
+                return {
+                  activeTools: policy.activeTools,
+                  toolChoice: policy.toolChoice,
+                  instructions: [instructions, phaseInstruction].filter(Boolean).join("\n\n"),
+                }
+              },
+            }
+          : {}),
       }
     },
   })

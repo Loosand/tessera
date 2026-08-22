@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 内存/临时磁盘 SQLite 客户端与前向迁移
- * [OUTPUT]: 迁移幂等性、统一内容控制层、工作区最近项、通用任务会话、AI/MCP 加密配置恢复、任务运行观测指标和级联删除的回归验证
+ * [OUTPUT]: 迁移幂等性、统一内容控制层、研究证据链、工作区最近项、通用任务会话、AI/MCP 加密配置恢复、任务运行观测指标和级联删除的回归验证
  * [POS]: 数据库包不依赖磁盘状态的基础集成测试
  * [DOC]: docs/architecture/database.md
  *
@@ -46,6 +46,15 @@ import {
 import { DATABASE_MIGRATIONS, applyDatabaseMigrations } from "./migrations"
 import { foundationMigration } from "./migrations/0000-foundation"
 import { taskSessionsMigration } from "./migrations/0002-task-sessions"
+import { researchQuestionPositionMigration } from "./migrations/0015-research-question-position"
+import {
+  findResearchRun,
+  finishResearchRun,
+  publishResearchPlan,
+  saveResearchEvidence,
+  saveResearchSource,
+  startResearchRun,
+} from "./research-repository"
 import { appendTaskRunEvent, findLatestTaskRun, finishTaskRun, startTaskRun } from "./task-run-repository"
 import {
   deleteTaskSession,
@@ -88,6 +97,10 @@ describe("本地数据库基建", () => {
       "document_index",
       "mcp_server_configs",
       "permission_decisions",
+      "research_evidence",
+      "research_questions",
+      "research_runs",
+      "research_sources",
       "task_messages",
       "task_resource_bindings",
       "task_run_events",
@@ -97,6 +110,111 @@ describe("本地数据库基建", () => {
       "workspace_operations",
       "workspaces",
     ])
+    client.close()
+  })
+
+  test("研究运行会持久化计划、已读来源、证据与覆盖结果", () => {
+    const client = openDatabase({ path: ":memory:" })
+    const now = new Date(100)
+    saveTaskSession(client, {
+      id: "task-research",
+      mode: "chat",
+      workspaceId: null,
+      title: "FKJ 研究",
+      status: "running",
+      updatedAt: now,
+      messagePayloads: [],
+    })
+    startTaskRun(client, {
+      requestId: "run-research",
+      taskId: "task-research",
+      configId: "openai",
+      providerId: "openai",
+      modelId: "gpt-5",
+      mode: "chat",
+      skillId: "research",
+      reasoning: "high",
+      webSearch: true,
+      policyJson: "{}",
+      resourceSummaryJson: "{}",
+      startedAt: now,
+    })
+
+    expect(
+      startResearchRun(client, { requestId: "run-research", taskId: "task-research", startedAt: now }),
+    ).toMatchObject({ phase: "preparing", planVersion: 0 })
+    publishResearchPlan(client, {
+      requestId: "run-research",
+      objective: "核实 FKJ 的经历、音乐与近期动态",
+      scope: "公开资料",
+      deliverable: "带来源的人物导览",
+      questions: [
+        { id: "q1", title: "他的成长经历是什么？" },
+        { id: "q2", title: "现场表演有什么特点？" },
+      ],
+    })
+    expect(() =>
+      publishResearchPlan(client, {
+        requestId: "run-research",
+        objective: "静默替换",
+        scope: null,
+        deliverable: null,
+        questions: [{ id: "q3", title: "新问题" }],
+      }),
+    ).toThrow("研究计划已经发布")
+
+    saveResearchSource(client, {
+      id: "source-1",
+      requestId: "run-research",
+      url: "https://example.com/fkj",
+      canonicalUrl: "https://example.com/fkj",
+      finalUrl: "https://example.com/fkj",
+      title: "FKJ interview",
+      author: "Example",
+      publishedAt: "2026-01-01",
+      discoveredByQuery: "FKJ interview",
+      questionIds: ["q1", "q2"],
+      status: "read",
+      contentType: "text/html",
+      contentHash: "sha256:content",
+      charCount: 1200,
+      truncated: false,
+      errorMessage: null,
+    })
+    expect(
+      saveResearchEvidence(client, {
+        id: "evidence-1",
+        requestId: "run-research",
+        sourceId: "source-1",
+        questionId: "q2",
+        relation: "supports",
+        claim: "FKJ 以现场循环叠加多个乐器声部",
+        excerpt: "He builds the arrangement live by looping instruments.",
+        locator: "paragraph 8",
+      }),
+    ).toMatchObject({ sourceId: "source-1", relation: "supports" })
+    finishResearchRun(client, {
+      requestId: "run-research",
+      outcome: "partial",
+      limitations: ["成长经历仍缺少一手访谈交叉核验"],
+      questions: [
+        { id: "q1", status: "uncovered", note: "未找到可靠一手资料" },
+        { id: "q2", status: "covered", note: "已由访谈材料支持" },
+      ],
+    })
+
+    expect(findResearchRun(client, "run-research")).toMatchObject({
+      phase: "completed",
+      outcome: "partial",
+      planVersion: 1,
+      limitationsJson: '["成长经历仍缺少一手访谈交叉核验"]',
+      questions: [
+        { questionId: "q1", status: "uncovered" },
+        { questionId: "q2", status: "covered" },
+      ],
+      sources: [{ id: "source-1", status: "read", contentHash: "sha256:content" }],
+      evidence: [{ id: "evidence-1", sourceId: "source-1" }],
+    })
     client.close()
   })
 
@@ -250,6 +368,49 @@ describe("本地数据库基建", () => {
 
     expect(result?.count).toBe(DATABASE_MIGRATIONS.length)
     client.close()
+  })
+
+  test("0015 会为已执行的旧研究表补齐稳定问题顺序", () => {
+    const database = new BetterSqlite3(":memory:")
+    database.pragma("foreign_keys = ON")
+    for (const migration of DATABASE_MIGRATIONS) {
+      if (migration.id === researchQuestionPositionMigration.id) break
+      for (const statement of migration.statements) database.exec(statement)
+    }
+    database
+      .prepare("INSERT INTO task_sessions (id, title, updated_at) VALUES (?, ?, ?)")
+      .run("task-legacy-research", "旧研究", 100)
+    database
+      .prepare(
+        `INSERT INTO task_runs (
+          request_id, task_id, provider_id, model_id, status, started_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run("run-legacy-research", "task-legacy-research", "test", "test-model", "running", 100, 100)
+    database
+      .prepare(
+        `INSERT INTO research_runs (
+          request_id, task_id, phase, started_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run("run-legacy-research", "task-legacy-research", "planning", 100, 100)
+    const insertQuestion = database.prepare(
+      `INSERT INTO research_questions (
+        id, request_id, question_id, title, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    insertQuestion.run("run-legacy-research:q-a", "run-legacy-research", "q-a", "问题 A", 100, 100)
+    insertQuestion.run("run-legacy-research:q-b", "run-legacy-research", "q-b", "问题 B", 100, 100)
+
+    for (const statement of researchQuestionPositionMigration.statements) database.exec(statement)
+
+    expect(
+      database.prepare("SELECT question_id, position FROM research_questions ORDER BY position").all(),
+    ).toEqual([
+      { question_id: "q-a", position: 0 },
+      { question_id: "q-b", position: 1 },
+    ])
+    database.close()
   })
 
   test("前向迁移会保留旧 agent_events 中的 Chat 快照", () => {

@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 已解析供应商连接、自动联网/思考策略、当前 Skill、完整 AI SDK UIMessage 历史、主进程按授权注入的内容库/工作区/MCP 能力、中止信号与运行指标回调
- * [OUTPUT]: 普通对话和工作区任务共用、同时承载供应商原生搜索、内容领域、按 RunPolicy 收窄的工作区读写、强制审批 MCP、Skill instructions、标准 needsApproval 与原生生命周期观测的 AI SDK ToolLoopAgent 增量流
+ * [INPUT]: 已解析供应商连接、自动联网/思考策略、当前 Skill、完整 AI SDK UIMessage 历史、主进程按授权注入的研究/内容库/工作区/MCP 能力、中止信号与运行指标回调
+ * [OUTPUT]: 普通对话和工作区任务共用、同时承载供应商原生搜索、可信研究闭环、内容领域、按 RunPolicy 收窄的工作区读写、强制审批 MCP、Skill instructions、标准 needsApproval 与原生生命周期观测的 AI SDK ToolLoopAgent 增量流
  * [POS]: @tessera/ai/server 中统一自然对话的 ToolLoopAgent 编排边界
  * [DOC]: docs/architecture/unified-creation-agent.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/ai-observability.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -14,7 +14,7 @@ import type { AgentRuntime } from "@tessera/agent-runtime"
 import type { AiChatStreamChunk } from "@tessera/contracts"
 import type { LoadedSkill } from "@tessera/skills"
 import { ToolLoopAgent, createAgentUIStream, dynamicTool, isStepCount, jsonSchema, tool } from "ai"
-import type { InferUITools, JSONSchema7, ToolSet, UIMessage } from "ai"
+import type { InferUITools, JSONSchema7, ToolSet, UIMessage, UIMessageChunk } from "ai"
 import { z } from "zod"
 import { createAiSdkChatRuntime } from "./ai-sdk-runtime"
 import {
@@ -31,6 +31,7 @@ import {
   createTaskInteractionTools,
   hasRequestedUserInputSinceLastUserMessage,
 } from "./task-interaction-tools"
+import { type ResearchAgentTools, createResearchToolSet, publicResearchToolOutput } from "./research-tools"
 
 export type ListWorkspaceFilesInput = Readonly<{
   directory?: string | undefined
@@ -113,6 +114,7 @@ export type AiAgentRuntimeOptions = Readonly<{
   externalTools?: readonly ExternalAgentTool[]
   onChunk: (chunk: AiChatStreamChunk) => void | Promise<void>
   onRunMetrics?: (metrics: TaskAgentRunMetrics) => void
+  researchTools?: ResearchAgentTools
   skill?: LoadedSkill
   tools?: WorkspaceAgentTools
   workspaceName?: string
@@ -123,6 +125,7 @@ export type AiSdkAgentRuntimeRequest = Readonly<{
   externalTools?: readonly ExternalAgentTool[]
   input: AiChatRuntimeInput
   onRunMetrics?: (metrics: TaskAgentRunMetrics) => void
+  researchTools?: ResearchAgentTools
   skill?: LoadedSkill
   tools?: WorkspaceAgentTools
   workspaceName?: string
@@ -176,6 +179,7 @@ async function* runAiSdkAgent(
     externalTools = [],
     input,
     onRunMetrics,
+    researchTools,
     skill,
     tools: workspaceTools,
     workspaceName,
@@ -249,6 +253,7 @@ async function* runAiSdkAgent(
   }
   const mcpTools = createExternalAgentToolSet(externalTools, abortSignal)
   const contentDomainTools = contentTools ? createContentDomainToolSet(contentTools, abortSignal) : {}
+  const researchWorkflow = researchTools ? createResearchToolSet(researchTools, abortSignal) : null
   const workspaceWriteTools: ToolSet = workspaceTools
     ? {
         "write-workspace-document": tool({
@@ -271,7 +276,9 @@ async function* runAiSdkAgent(
     ...workspaceResearchTools,
     ...createTaskInteractionTools(input.runPolicy.skillId, {
       allowUserInput: !hasRequestedUserInputSinceLastUserMessage(input.messages),
+      includeResearchPlan: !researchWorkflow,
     }),
+    ...(researchWorkflow?.tools ?? {}),
     ...workspaceWriteTools,
     ...mcpTools,
   }
@@ -280,6 +287,7 @@ async function* runAiSdkAgent(
     model,
     ...(onRunMetrics ? { onRunMetrics } : {}),
     ...(runtime.providerOptions ? { providerOptions: runtime.providerOptions } : {}),
+    ...(researchWorkflow ? { researchWorkflow } : {}),
     tools,
     toolGroups: {
       external: externalTools.map((externalTool) => externalTool.id),
@@ -308,8 +316,23 @@ async function* runAiSdkAgent(
     onError: (error) => safeErrorMessage(error, input.apiKey),
   })
 
+  const toolNames = new Map<string, string>()
   for await (const chunk of stream) {
-    const sanitized = publicChunk(chunk)
+    if (
+      chunk.type === "tool-input-start" ||
+      chunk.type === "tool-input-available" ||
+      chunk.type === "tool-input-error"
+    ) {
+      toolNames.set(chunk.toolCallId, chunk.toolName)
+    }
+    const publicInput: UIMessageChunk =
+      chunk.type === "tool-output-available"
+        ? {
+            ...chunk,
+            output: publicResearchToolOutput(toolNames.get(chunk.toolCallId) ?? "", chunk.output),
+          }
+        : chunk
+    const sanitized = publicChunk(publicInput)
     if (sanitized) yield sanitized
   }
 }
@@ -327,6 +350,7 @@ export async function streamAiAgent(
     externalTools,
     onChunk,
     onRunMetrics,
+    researchTools,
     skill,
     tools,
     workspaceName,
@@ -337,6 +361,7 @@ export async function streamAiAgent(
       input,
       ...(contentTools ? { contentTools } : {}),
       ...(onRunMetrics ? { onRunMetrics } : {}),
+      ...(researchTools ? { researchTools } : {}),
       ...(tools ? { tools } : {}),
       ...(workspaceName ? { workspaceName } : {}),
       ...(externalTools ? { externalTools } : {}),

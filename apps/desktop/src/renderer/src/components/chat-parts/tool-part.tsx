@@ -1,6 +1,6 @@
 /**
  * [INPUT]: AI SDK dynamic-tool 或 tool-* Part、Agent 变更预览、内容领域操作与工具审批回调
- * [OUTPUT]: Tool Chips 工具状态、内容库创建/移动的紧凑确认，以及 Markdown 写工具的高亮 Diff 审批
+ * [OUTPUT]: Tool Chips 工具状态、可由聚合活动复用的独立审批区、内容库创建/移动的紧凑确认，以及 Markdown 写工具的高亮 Diff 审批
  * [POS]: ChatMessage 内可独立演进的工具呈现单元
  * [DOC]: design.md、docs/architecture/unified-creation-agent.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
  *
@@ -23,6 +23,7 @@ type MessagePart = UIMessage["parts"][number]
 type ToolMessagePart = Extract<MessagePart, { type: "dynamic-tool" | `tool-${string}` }>
 
 type ToolPartProps = {
+  readonly hideSummary?: boolean
   readonly loadAgentChangePreview?: ((approvalId: string) => Promise<AgentChangePreview>) | undefined
   readonly onOpenDocument?: ((path: string) => void) | undefined
   readonly onToolApproval?: ((approvalId: string, approved: boolean) => void) | undefined
@@ -52,6 +53,9 @@ const toolLabels: Record<string, string> = {
   "create-document": "创建正式文档",
   "create-project": "创建独立项目",
   "move-documents": "移动正式文档",
+  "read-web-source": "阅读网页来源",
+  "record-research-evidence": "登记研究证据",
+  "finalize-research": "检查研究覆盖",
   web_search: "联网搜索",
 }
 
@@ -67,6 +71,8 @@ function toolResource(part: ToolMessagePart) {
   if (typeof input.path === "string") return input.path
   if (typeof input.directory === "string" && input.directory) return input.directory
   if (typeof input.query === "string") return `“${input.query}”`
+  if (typeof input.url === "string") return input.url
+  if (typeof input.claim === "string") return input.claim
   return ""
 }
 
@@ -127,7 +133,13 @@ function stateLabel(part: ToolMessagePart) {
   return stateLabels[part.state]
 }
 
-export function ToolPart({ loadAgentChangePreview, onOpenDocument, onToolApproval, part }: ToolPartProps) {
+export function ToolPart({
+  hideSummary = false,
+  loadAgentChangePreview,
+  onOpenDocument,
+  onToolApproval,
+  part,
+}: ToolPartProps) {
   const toolName = part.type === "dynamic-tool" ? part.toolName : part.type.slice("tool-".length)
   const resource = toolResource(part)
   const errorText = part.state === "output-error" ? part.errorText : ""
@@ -157,23 +169,27 @@ export function ToolPart({ loadAgentChangePreview, onOpenDocument, onToolApprova
     ? approvalPresentation(toolName, "input" in part ? part.input : undefined)
     : null
 
+  if (hideSummary && !changeApproval && !manualApproval) return null
+
   return (
     <div className="my-3">
-      <ToolChips
-        className="my-0"
-        items={[
-          {
-            defaultExpanded: part.state === "output-error",
-            details,
-            icon: <Icon icon={TaskAdd01Icon} size={14} />,
-            id: part.toolCallId,
-            label: part.title || toolLabels[toolName] || toolName,
-            meta: resource || undefined,
-            status: part.state,
-            statusLabel: stateLabel(part),
-          },
-        ]}
-      />
+      {!hideSummary ? (
+        <ToolChips
+          className="my-0"
+          items={[
+            {
+              defaultExpanded: part.state === "output-error",
+              details,
+              icon: <Icon icon={TaskAdd01Icon} size={14} />,
+              id: part.toolCallId,
+              label: part.title || toolLabels[toolName] || toolName,
+              meta: resource || undefined,
+              status: part.state,
+              statusLabel: stateLabel(part),
+            },
+          ]}
+        />
+      ) : null}
       {changeApproval && loadAgentChangePreview ? (
         <AgentChangeReview
           approvalId={changeApproval.id}

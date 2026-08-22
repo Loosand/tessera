@@ -2,7 +2,7 @@
  * [INPUT]: Electron 桌面应用当前需要的跨进程数据、生命周期、工作区条目、AI 模型事实/端点绑定、MCP 服务器、用户 Skill、任务运行策略、内容对象、开发期 AI 日志与 Agent 变更审批形状
  * [OUTPUT]: IPC 频道、工作区文件操作、模型/MCP/用户 Skill 配置、类型化 RunPolicy、后端无关内容引用、可恢复流式运行、开发期 AI 日志入口、客户端问答/研究计划工具、Agent Diff 审批、关闭握手与可推导的桌面 API 类型契约
  * [POS]: 应用和共享包共同依赖的底层契约入口
- * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/ai-observability.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/mcp.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md、docs/architecture/unified-creation-agent.md
+ * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/ai-observability.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/mcp.md、docs/architecture/research-workflow.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md、docs/architecture/unified-creation-agent.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -394,6 +394,9 @@ export type TaskRunResourceSummary = {
 
 export const REQUEST_USER_INPUT_TOOL_NAME = "request-user-input" as const
 export const PUBLISH_RESEARCH_PLAN_TOOL_NAME = "publish-research-plan" as const
+export const READ_WEB_SOURCE_TOOL_NAME = "read-web-source" as const
+export const RECORD_RESEARCH_EVIDENCE_TOOL_NAME = "record-research-evidence" as const
+export const FINALIZE_RESEARCH_TOOL_NAME = "finalize-research" as const
 
 export type TaskUserInputOption = {
   description?: string
@@ -443,10 +446,116 @@ export type TaskResearchPlanOutput = {
   status: "published"
 }
 
+export const TASK_RESEARCH_PHASES = [
+  "preparing",
+  "planning",
+  "discovering",
+  "reading",
+  "verifying",
+  "synthesizing",
+  "completed",
+] as const
+export type TaskResearchPhase = (typeof TASK_RESEARCH_PHASES)[number]
+
+export const TASK_RESEARCH_SOURCE_STATUSES = [
+  "discovered",
+  "shortlisted",
+  "reading",
+  "read",
+  "unusable",
+] as const
+export type TaskResearchSourceStatus = (typeof TASK_RESEARCH_SOURCE_STATUSES)[number]
+
+export type TaskResearchQuestionCoverage = "covered" | "partial" | "uncovered"
+export type TaskResearchEvidenceRelation = "supports" | "refutes" | "qualifies"
+export type TaskResearchOutcome = "complete" | "partial"
+
+export type TaskResearchReadSourceInput = {
+  questionIds: string[]
+  url: string
+}
+
+export type TaskResearchReadSourceOutput = {
+  author?: string
+  charCount: number
+  content?: string
+  contentHash?: string
+  contentType?: string
+  error?: string
+  finalUrl: string
+  publishedAt?: string
+  sourceId: string
+  status: "read" | "unusable"
+  title?: string
+  truncated: boolean
+}
+
+export type TaskResearchEvidenceInput = {
+  claim: string
+  excerpt: string
+  locator?: string
+  questionId: string
+  relation: TaskResearchEvidenceRelation
+  sourceId: string
+}
+
+export type TaskResearchEvidenceOutput = {
+  evidenceId: string
+  status: "recorded"
+}
+
+export type TaskResearchQuestionResult = {
+  id: string
+  note: string
+  status: TaskResearchQuestionCoverage
+}
+
+export type TaskResearchFinalizeInput = {
+  limitations: string[]
+  outcome: TaskResearchOutcome
+  questions: TaskResearchQuestionResult[]
+}
+
+export type TaskResearchProgress = {
+  evidenceCount: number
+  outcome: TaskResearchOutcome | null
+  phase: TaskResearchPhase
+  planPublished: boolean
+  questionCounts: Record<"covered" | "partial" | "pending" | "uncovered", number>
+  sourceCounts: Record<TaskResearchSourceStatus, number>
+}
+
+export type TaskResearchFinalizeOutput =
+  | {
+      issues: string[]
+      progress: TaskResearchProgress
+      status: "blocked"
+    }
+  | {
+      progress: TaskResearchProgress
+      status: "completed" | "partial"
+    }
+
 export type TaskMessageMetadata = {
   configId?: string
   modelId?: string
   providerId?: AiProviderId
+}
+
+/** 一次助手生成失败后写入 UIMessage 的可持久化错误数据。 */
+export type TaskRunErrorData = {
+  message: string
+  retryable: boolean
+}
+
+export type TaskMessageData = {
+  "task-error": TaskRunErrorData
+}
+
+export type TaskRunErrorMessagePart = {
+  data: TaskRunErrorData
+  id?: string
+  type: "data-task-error"
 }
 
 export type TaskToolApproval = {
@@ -491,6 +600,7 @@ export type TaskMessagePart =
       title: string
       filename?: string
     }
+  | TaskRunErrorMessagePart
   | { type: "step-start" }
   | TaskToolMessagePart
 

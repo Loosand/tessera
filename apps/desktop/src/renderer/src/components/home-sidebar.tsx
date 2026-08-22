@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 最近任务、最近工作区与新任务/工作区/Skill 顶层导航回调
- * [OUTPUT]: 工作区之外的一级桌面侧栏，提供新任务、聚合页、Skill、最近对话与工作区列表
+ * [INPUT]: 当前任务、最近任务、最近工作区与新任务/工作区/Skill 顶层导航回调
+ * [OUTPUT]: 工作区之外的一级桌面侧栏，提供新任务、聚合页、Skill、带选中/运行状态的最近对话与工作区列表
  * [POS]: Tessera 两级导航中的一级侧栏
  * [DOC]: design.md、docs/architecture/task-navigation.md
  *
@@ -15,7 +15,6 @@ import {
   BookOpen01Icon,
   Folder01Icon,
   Home05Icon,
-  Message01Icon,
   PanelLeftCloseIcon,
   Settings01Icon,
   TaskAdd01Icon,
@@ -23,10 +22,12 @@ import {
 import { Button } from "@tessera/design-system/components/ui/button"
 import { Icon } from "@tessera/design-system/components/ui/icon"
 import { TaskContextMenu } from "./task-context-menu"
+import { TaskNavigationRow } from "./task-navigation-row"
 import { WorkspaceContextMenu } from "./workspace-context-menu"
 
 type HomeSidebarProps = Readonly<{
   activeItem: "new-task" | "skills" | "workspaces"
+  activeTaskId: string | undefined
   recentTasks: readonly TaskSessionSummary[]
   workspaces: readonly WorkspaceInfo[]
   onCollapse: () => void
@@ -69,6 +70,7 @@ function NavigationRow({
 
 export function HomeSidebar({
   activeItem,
+  activeTaskId,
   recentTasks,
   workspaces,
   onCollapse,
@@ -131,18 +133,18 @@ export function HomeSidebar({
                   key={task.id}
                   task={task}
                   trigger={
-                    <button
-                      type="button"
-                      className="group flex min-h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[12px] transition-colors hover:bg-sidebar-accent"
-                      title={`${task.workspaceName ?? "草稿"} · ${task.title}`}
+                    <TaskNavigationRow
+                      active={task.id === activeTaskId}
+                      status={task.status}
+                      taskTitle={task.title}
+                      tooltip={`${task.workspaceName ?? "草稿"} · ${task.title}`}
                       onClick={() => onOpenTask(task)}
-                    >
-                      <Icon icon={Message01Icon} size={14} className="shrink-0 text-muted-foreground" />
-                      <span className="min-w-0 flex-1 truncate">{task.title}</span>
-                      <span className="max-w-18 shrink-0 truncate text-[10px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
-                        {task.workspaceName ?? "草稿"}
-                      </span>
-                    </button>
+                      trailing={
+                        <span className="max-w-18 shrink-0 truncate text-[10px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-data-[active=true]:opacity-100">
+                          {task.workspaceName ?? "草稿"}
+                        </span>
+                      }
+                    />
                   }
                   onOpen={onOpenTask}
                   onRename={onRenameTask}

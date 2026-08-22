@@ -111,6 +111,7 @@ export const publishResearchPlanTool = tool({
 
 type TaskInteractionToolOptions = {
   readonly allowUserInput?: boolean
+  readonly includeResearchPlan?: boolean
 }
 
 function messagePartToolName(part: TaskMessage["parts"][number]) {
@@ -137,10 +138,12 @@ export function hasRequestedUserInputSinceLastUserMessage(messages: readonly Tas
 
 export function createTaskInteractionTools(
   skillId: TaskSkillId,
-  { allowUserInput = true }: TaskInteractionToolOptions = {},
+  { allowUserInput = true, includeResearchPlan = true }: TaskInteractionToolOptions = {},
 ) {
   return {
     ...(allowUserInput ? { [REQUEST_USER_INPUT_TOOL_NAME]: requestUserInputTool } : {}),
-    ...(skillId === "research" ? { [PUBLISH_RESEARCH_PLAN_TOOL_NAME]: publishResearchPlanTool } : {}),
+    ...(skillId === "research" && includeResearchPlan
+      ? { [PUBLISH_RESEARCH_PLAN_TOOL_NAME]: publishResearchPlanTool }
+      : {}),
   }
 }

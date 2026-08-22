@@ -25,6 +25,8 @@ import { taskRunContextMigration } from "./0010-task-run-context"
 import { userSkillsMigration } from "./0011-user-skills"
 import { taskRunObservabilityMigration } from "./0012-task-run-observability"
 import { unifiedContentDomainMigration } from "./0013-unified-content-domain"
+import { researchWorkflowMigration } from "./0014-research-workflow"
+import { researchQuestionPositionMigration } from "./0015-research-question-position"
 import type { DatabaseMigration } from "./types"
 
 export type { DatabaseMigration } from "./types"
@@ -44,6 +46,8 @@ export const DATABASE_MIGRATIONS = [
   userSkillsMigration,
   taskRunObservabilityMigration,
   unifiedContentDomainMigration,
+  researchWorkflowMigration,
+  researchQuestionPositionMigration,
 ] as const satisfies readonly DatabaseMigration[]
 
 export type DatabaseMigrationId = (typeof DATABASE_MIGRATIONS)[number]["id"]

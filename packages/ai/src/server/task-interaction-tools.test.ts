@@ -65,6 +65,9 @@ describe("任务交互工具", () => {
     expect(Object.keys(createTaskInteractionTools("research", { allowUserInput: false }))).toEqual([
       "publish-research-plan",
     ])
+    expect(Object.keys(createTaskInteractionTools("research", { includeResearchPlan: false }))).toEqual([
+      "request-user-input",
+    ])
     expect(
       taskResearchPlanInputSchema.safeParse({
         objective: "核对作品和改编之间的关系",

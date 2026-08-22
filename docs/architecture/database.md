@@ -5,10 +5,14 @@
 > `packages/database/task-session-repository.ts`、`packages/database/task-run-repository.ts`、
 > `packages/database/agent-change-repository.ts`、`packages/database/ai-provider-config-repository.ts`、
 > `packages/database/mcp-server-config-repository.ts`、`packages/database/user-skill-config-repository.ts`、
-> `packages/database/content-domain-repository.ts`、`packages/database/migrations/0013-unified-content-domain.ts`
+> `packages/database/content-domain-repository.ts`、`packages/database/research-repository.ts`、
+> `packages/database/migrations/0013-unified-content-domain.ts`、
+> `packages/database/migrations/0014-research-workflow.ts`、
+> `packages/database/migrations/0015-research-question-position.ts`
 >
-> 状态：部分实现。任务、运行、工作区、审批、动态资源、Artifact、内容库和项目操作审计仓储已实现；每轮完整
-> RunPolicy、脱敏资源摘要与 AI SDK 生命周期汇总已写入运行记录。正文存储仍在探索，当前仅实现托管内容库混合原型。
+> 状态：部分实现。任务、运行、研究计划/来源/证据、工作区、审批、动态资源、Artifact、内容库和项目操作审计仓储
+> 已实现；每轮完整 RunPolicy、脱敏资源摘要与 AI SDK 生命周期汇总已写入运行记录。正文存储仍在探索，当前仅实现
+> 托管内容库混合原型；网页正文不作为长期内容副本写入 SQLite。
 
 ## 边界
 
@@ -34,6 +38,10 @@ Markdown 文件是已批准正文的内容事实源。SQLite 保存工作区登�
 - **已实现**：`agent_change_proposals` 冻结 Markdown 基准与候选内容、模型、工具调用、人工决定和写入结果；它不是已批准正文事实源，任务删除时级联清理。
 - **已实现**：`0013-unified-content-domain` 增加内容库、托管工作区来源、逐轮资源关系、Artifact 与项目操作审计；
   这些表只保存稳定 ID、相对位置和控制状态，不保存 Markdown 正文。
+- **已实现**：`0014-research-workflow` 增加绑定 `task_run` 的研究运行、稳定问题、规范化来源读取摘要与证据关系；
+  网页正文只在当前工具执行内提供给模型，SQLite 保存必要片段、定位、哈希、数量、失败和覆盖状态。
+- **已实现**：`0015-research-question-position` 为已经执行旧版 `0014` 的数据库补齐问题顺序并回填既有记录；
+  已记录的迁移不会因同编号文件在开发期发生变化而被静默重跑。
 
 ## 统一创作 Agent 数据探索
 
@@ -52,7 +60,8 @@ Markdown 文件是已批准正文的内容事实源。SQLite 保存工作区登�
 
 迁移以内嵌 TypeScript SQL 清单发布，因此 Electron 打包后不依赖额外 SQL 文件路径。执行器先创建
 `__tessera_migrations`，再在单个事务内按顺序应用尚未记录的迁移。已经发布的迁移不可修改；
-schema 变化必须追加迁移，并同步结构测试。
+schema 变化必须追加迁移，并同步结构测试。`0015-research-question-position` 是迁移漂移校准样本：恢复 `0014` 的
+已执行物理形态后，再用新 ID 追加 `position`，从而让已有开发数据库与全新数据库收敛到同一结构。
 
 已发布的任务状态列带固定 `CHECK`，新增 `waiting-input` 不重写旧表：`0007-task-waiting-input` 追加布尔标记，仓储把公开等待态编码为物理 `status = running` 与 `waiting_for_input = 1`，读取时再统一还原。问题输入和用户答案仍保存在版本化消息 Part 中，布尔列只服务列表、恢复和状态查询。
 
@@ -73,6 +82,10 @@ schema 变化必须追加迁移，并同步结构测试。
 | `task_messages` | 按序保存的版本化消息 Part 与模型元数据 | 否 |
 | `task_runs` | 每次模型运行的供应商、模型、完整 RunPolicy、资源摘要、兼容策略列、状态、事件游标和无正文运行汇总 | 否 |
 | `task_run_events` | 按 request/sequence 保存的公开 AI SDK 流事件检查点 | 否 |
+| `research_runs` | 绑定 task run 的研究阶段、计划摘要、结果和限制 | 否 |
+| `research_questions` | 计划问题、稳定顺序、覆盖状态与说明 | 否 |
+| `research_sources` | 候选/已读/不可用来源、读取元数据、哈希和失败原因，不含网页全文 | 否 |
+| `research_evidence` | 已读来源短片段到研究问题和声明的支持/反驳/限定关系 | 否 |
 | `agent_change_proposals` | 冻结的 Markdown 基准/候选、审批决定、冲突和写入审计 | 否 |
 | `ai_provider_configs` | 供应商连接、模型状态与 Electron safeStorage 密文 | 否 |
 | `mcp_server_configs` | MCP 传输、信任/启用状态、禁用工具与 Electron safeStorage 密文 | 否 |

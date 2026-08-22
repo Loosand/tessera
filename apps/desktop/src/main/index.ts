@@ -1,8 +1,8 @@
 /**
- * [INPUT]: Electron 生命周期、共享 IPC 契约、AI Chat/Agent/Skill 配置、AI SDK 开发期日志、用户 Skill 扫描安装服务、混合内容库、Agent 变更服务、模型服务、safeStorage 与 Tessera 核心服务
- * [OUTPUT]: 受限工作区/MCP Agent 工具、托管内容库/Artifact 查询、内置/用户 Skill 校验后的 SQLite 可恢复后台 AI 运行、官方 AI SDK 日志入口、Diff/MCP 审批、持久化 AI/MCP/用户 Skill 配置与扫描会话、关闭保存握手和桌面窗口
+ * [INPUT]: Electron 生命周期、共享 IPC 契约、AI Chat/Agent/Skill 配置、AI SDK 开发期日志、用户 Skill 扫描安装服务、可信研究服务、混合内容库、Agent 变更服务、模型服务、safeStorage 与 Tessera 核心服务
+ * [OUTPUT]: 受限研究/工作区/MCP Agent 工具、托管内容库/Artifact 查询、内置/用户 Skill 校验后的 SQLite 可恢复后台 AI 运行、官方 AI SDK 日志入口、Diff/MCP 审批、持久化研究/AI/MCP/用户 Skill 配置与扫描会话、关闭保存握手和桌面窗口
  * [POS]: Electron 主进程入口与平台安全边界
- * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/ai-observability.md、docs/architecture/database.md、docs/architecture/mcp.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md、docs/architecture/unified-creation-agent.md
+ * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/ai-observability.md、docs/architecture/database.md、docs/architecture/mcp.md、docs/architecture/research-workflow.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md、docs/architecture/unified-creation-agent.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -19,6 +19,7 @@ import {
   AiProviderConfigError,
   AiProviderConnectionError,
   type ContentDomainAgentTools,
+  type ResearchAgentTools,
   type TaskAgentRunMetrics,
   listAiProviderModels,
   streamAiAgent,
@@ -53,6 +54,7 @@ import {
   saveTaskResourceBinding,
   saveWorkspace,
   startTaskRun,
+  startResearchRun,
 } from "@tessera/database"
 import {
   BrowserWindow,
@@ -77,6 +79,7 @@ import {
 import { handleDesktopInvoke, onDesktopSend } from "./ipc-contract"
 import { McpConfigError, type McpService, createMcpService } from "./mcp-service"
 import { createReadonlyWorkspaceAgentTools } from "./read-only-agent-tools"
+import { type DesktopResearchService, createDesktopResearchService } from "./research-service"
 import { type DesktopTaskService, createDesktopTaskService } from "./task-service"
 import { UserSkillError, type UserSkillService, createUserSkillService } from "./user-skill-service"
 
@@ -207,6 +210,16 @@ function summarizeTaskRunResources(
   }
 }
 
+function researchSearchQuery(value: unknown): string | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const input = value as Record<string, unknown>
+  for (const key of ["query", "search_query", "q"]) {
+    const candidate = input[key]
+    if (typeof candidate === "string" && candidate.trim()) return candidate.trim().slice(0, 1_000)
+  }
+  return undefined
+}
+
 function recordTaskRunResourceBindings(
   client: DatabaseClient,
   input: AiChatStartInput,
@@ -276,7 +289,10 @@ function taskRunCompletion(
 async function streamAiTask(
   input: ReturnType<typeof resolveAiChatInput>,
   workspace: WorkspaceInfo | null,
-  options: Pick<Parameters<typeof streamAiAgent>[1], "abortSignal" | "onChunk" | "onRunMetrics" | "skill">,
+  options: Pick<
+    Parameters<typeof streamAiAgent>[1],
+    "abortSignal" | "onChunk" | "onRunMetrics" | "researchTools" | "skill"
+  >,
 ) {
   const workspaceTools = workspace
     ? createReadonlyWorkspaceAgentTools({
@@ -934,6 +950,10 @@ function registerIpcHandlers() {
     }
   })
   handleDesktopInvoke(IPC_CHANNELS.aiChatStart, async (event, input) => {
+    let initializingRun: ActiveAiChat | null = null
+    let initializingRunDatabase: DatabaseClient | null = null
+    let initializingRunStartedAt: Date | null = null
+    let taskRunStarted = false
     try {
       if (activeAiChats.has(input.requestId)) {
         throw new AiProviderConfigError("这个对话请求正在运行，请先停止后重试。")
@@ -969,6 +989,9 @@ function registerIpcHandlers() {
         taskId: input.taskId,
         webContentsId,
       }
+      initializingRun = run
+      initializingRunDatabase = runDatabase
+      initializingRunStartedAt = runStartedAt
       activeAiChats.set(input.requestId, run)
       aiChatRunsByTask.set(input.taskId, run)
       startTaskRun(runDatabase, {
@@ -985,13 +1008,58 @@ function registerIpcHandlers() {
         resourceSummaryJson: JSON.stringify(summarizeTaskRunResources(input, workspace)),
         startedAt: runStartedAt,
       })
+      taskRunStarted = true
+      let researchService: DesktopResearchService | null = null
+      if (runtimeInput.runPolicy.skillId === "research") {
+        startResearchRun(runDatabase, {
+          requestId: input.requestId,
+          taskId: input.taskId,
+          startedAt: runStartedAt,
+        })
+        researchService = createDesktopResearchService(runDatabase, { requestId: input.requestId })
+      }
       recordTaskRunResourceBindings(runDatabase, input, workspace)
 
       const pendingToolInputs = new Map<string, { input: unknown; toolName: string }>()
+      let latestSearchQuery: string | undefined
 
-      const emit = async (chunk: AiChatStreamChunk) => {
+      const emit = async (incomingChunk: AiChatStreamChunk) => {
+        const awaitingUserInput = [...pendingToolInputs.values()].some(
+          (pending) => pending.toolName === "request-user-input",
+        )
+        const chunk: AiChatStreamChunk =
+          incomingChunk.type === "finish" &&
+          researchService &&
+          !researchService.getProgress().outcome &&
+          !awaitingUserInput
+            ? {
+                type: "error",
+                errorText: "研究运行在通过证据与覆盖检查前结束，已保留当前计划和来源进度，请重试继续。",
+              }
+            : incomingChunk
         if (chunk.type === "tool-input-available") {
           pendingToolInputs.set(chunk.toolCallId, { input: chunk.input, toolName: chunk.toolName })
+          if (chunk.toolName.includes("web_search") || chunk.toolName.includes("web-search")) {
+            latestSearchQuery = researchSearchQuery(chunk.input)
+          }
+        }
+        if (
+          chunk.type === "tool-output-available" ||
+          chunk.type === "tool-output-error" ||
+          chunk.type === "tool-output-denied"
+        ) {
+          pendingToolInputs.delete(chunk.toolCallId)
+        }
+        if (chunk.type === "source-url" && researchService) {
+          try {
+            researchService.recordDiscoveredSource({
+              url: chunk.url,
+              ...(chunk.title ? { title: chunk.title } : {}),
+              ...(latestSearchQuery ? { query: latestSearchQuery } : {}),
+            })
+          } catch {
+            // 供应商可能发出非 http(s) 来源或计划前的辅助来源；不让来源归一化失败中断模型流。
+          }
         }
         if (chunk.type === "tool-approval-request") {
           const pending = pendingToolInputs.get(chunk.toolCallId)
@@ -1031,6 +1099,7 @@ function registerIpcHandlers() {
         onRunMetrics: (metrics) => {
           runMetrics = metrics
         },
+        ...(researchService ? { researchTools: researchService satisfies ResearchAgentTools } : {}),
         ...(loadedSkill ? { skill: loadedSkill } : {}),
       })
         .catch(async (error) => {
@@ -1056,8 +1125,26 @@ function registerIpcHandlers() {
           run.retentionTimer = setTimeout(() => releaseAiChatRun(run), AI_CHAT_RUN_RETENTION_MS)
           run.retentionTimer.unref()
         })
+      initializingRun = null
       return { ok: true }
     } catch (error) {
+      if (initializingRun) {
+        initializingRun.active = false
+        if (taskRunStarted && initializingRunDatabase && initializingRunStartedAt) {
+          try {
+            finishTaskRun(initializingRunDatabase, initializingRun.requestId, "failed", {
+              ...taskRunCompletion(
+                null,
+                "error",
+                Math.max(0, Date.now() - initializingRunStartedAt.getTime()),
+              ),
+            })
+          } catch {
+            // 原始初始化异常优先返回给调用方；下次启动仍会把未收尾的运行恢复为 interrupted。
+          }
+        }
+        releaseAiChatRun(initializingRun)
+      }
       return { ok: false, error: aiChatErrorMessage(error) }
     }
   })

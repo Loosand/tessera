@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 当前文档、当前任务/同工作区任务列表、共享任务会话子树与任务切换/关闭操作
- * [OUTPUT]: 带任务身份、历史切换和新建入口，承载正常任务对话实现的可访问文档右侧 AI 协作面板
+ * [INPUT]: 当前文档、带状态的当前任务/同工作区任务列表、共享任务会话子树与任务切换/关闭操作
+ * [OUTPUT]: 带任务身份、选中/运行状态、历史切换和新建入口，承载正常任务对话实现的可访问文档右侧 AI 协作面板
  * [POS]: TaskPage 在文档工作表面中的窄布局容器
  * [DOC]: design.md、docs/architecture.md、docs/architecture/task-navigation.md
  *
@@ -10,13 +10,12 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import type { DocumentSnapshot } from "@tessera/contracts"
+import type { DocumentSnapshot, TaskSessionStatus } from "@tessera/contracts"
 import {
   Add01Icon,
   AiBrain01Icon,
   ArrowDown01Icon,
   ArrowRight01Icon,
-  Message01Icon,
 } from "@tessera/design-system/components/icons"
 import { Button } from "@tessera/design-system/components/ui/button"
 import { Icon } from "@tessera/design-system/components/ui/icon"
@@ -24,9 +23,11 @@ import { Popover, PopoverContent, PopoverTrigger } from "@tessera/design-system/
 import { m, useReducedMotion } from "motion/react"
 import React, { type ReactNode, useMemo, useState } from "react"
 import { motionSprings } from "../motion"
+import { TaskNavigationRow, TaskRunIndicator } from "./task-navigation-row"
 
 export type AgentSidebarTask = Readonly<{
   id: string
+  status: TaskSessionStatus
   title: string
 }>
 
@@ -85,13 +86,14 @@ export function AgentSidebar({
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="h-8 min-w-0 flex-1 justify-start gap-2 px-2 data-[popup-open]:bg-sidebar-accent"
+                className="h-8 min-w-0 flex-1 justify-start gap-2 bg-sidebar-accent/70 px-2 text-sidebar-accent-foreground data-[popup-open]:bg-sidebar-accent"
                 aria-label="切换侧栏任务"
+                aria-current="page"
                 title={activeTask.title}
               />
             }
           >
-            <Icon icon={Message01Icon} size={14} className="shrink-0 text-muted-foreground" />
+            <TaskRunIndicator status={activeTask.status} />
             <span className="min-w-0 flex-1 truncate text-left text-xs">{activeTask.title}</span>
             <Icon icon={ArrowDown01Icon} size={12} className="shrink-0 text-muted-foreground" />
           </PopoverTrigger>
@@ -104,20 +106,17 @@ export function AgentSidebar({
             <div className="px-2 py-1 text-[10px] font-medium text-muted-foreground">当前任务与项目历史</div>
             <div className="grid max-h-64 gap-0.5 overflow-y-auto">
               {taskOptions.map((task) => (
-                <button
+                <TaskNavigationRow
                   key={task.id}
-                  type="button"
-                  className="flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-xs transition-colors hover:bg-sidebar-accent data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium"
-                  data-active={task.id === activeTask.id || undefined}
-                  title={task.title}
+                  active={task.id === activeTask.id}
+                  className="rounded-lg text-xs"
+                  status={task.status}
+                  taskTitle={task.title}
                   onClick={() => {
                     setTaskMenuOpen(false)
                     if (task.id !== activeTask.id) onOpenTask(task.id)
                   }}
-                >
-                  <Icon icon={Message01Icon} size={13} className="shrink-0 text-muted-foreground" />
-                  <span className="min-w-0 flex-1 truncate">{task.title}</span>
-                </button>
+                />
               ))}
             </div>
           </PopoverContent>

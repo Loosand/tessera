@@ -19,11 +19,11 @@ describe("文档 AI 侧栏任务导航", () => {
   it("显示当前任务、历史切换和新建入口", () => {
     const markup = renderToStaticMarkup(
       <AgentSidebar
-        activeTask={{ id: "task-current", title: "Madeline 自媒体稿" }}
+        activeTask={{ id: "task-current", status: "running", title: "Madeline 自媒体稿" }}
         document={null}
         tasks={[
-          { id: "task-current", title: "Madeline 自媒体稿" },
-          { id: "task-history", title: "角色资料研究" },
+          { id: "task-current", status: "running", title: "Madeline 自媒体稿" },
+          { id: "task-history", status: "completed", title: "角色资料研究" },
         ]}
         onClose={() => undefined}
         onNewTask={() => undefined}
@@ -36,6 +36,8 @@ describe("文档 AI 侧栏任务导航", () => {
     expect(markup).toContain('aria-label="切换侧栏任务"')
     expect(markup).toContain("Madeline 自媒体稿")
     expect(markup).toContain('aria-label="新建侧栏任务"')
+    expect(markup).toContain('aria-label="正在生成"')
+    expect(markup).toContain('aria-current="page"')
     expect(markup).toContain("统一任务内容")
   })
 })

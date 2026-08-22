@@ -16,7 +16,13 @@ import {
   resolveTaskRunPolicy,
   taskRunPolicyIssueMessage,
 } from "@tessera/ai"
-import { type UIMessage, hasPendingTaskUserInput, toTaskMessages, useElectronChat } from "@tessera/ai/react"
+import {
+  type UIMessage,
+  hasPendingTaskUserInput,
+  hasTaskRunError,
+  toTaskMessages,
+  useElectronChat,
+} from "@tessera/ai/react"
 import {
   type DocumentSnapshot,
   REQUEST_USER_INPUT_TOOL_NAME,
@@ -136,6 +142,7 @@ function taskStatus(
   if (status === "submitted" || status === "streaming") return "running"
   if (status === "error") return "failed"
   if (hasPendingTaskUserInput(messages)) return "waiting-input"
+  if (hasTaskRunError(messages)) return "failed"
   return "completed"
 }
 
@@ -392,7 +399,6 @@ export function TaskPage({
     (waitingForInput ? "当前任务正在等待你的回答。" : "") ||
     researchNotice ||
     executionNotice ||
-    chat.error?.message ||
     taskError ||
     ""
 
@@ -530,7 +536,7 @@ export function TaskPage({
                         running={running}
                         loadAgentChangePreview={loadAgentChangePreview}
                         onOpenDocument={onOpenDocument}
-                        onRegenerate={() => void chat.regenerate()}
+                        onRegenerate={() => void chat.regenerate({ messageId: message.id })}
                         onToolApproval={(id, approved) =>
                           chat.addToolApprovalResponse({
                             id,

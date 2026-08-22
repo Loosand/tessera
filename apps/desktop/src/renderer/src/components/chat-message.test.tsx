@@ -78,4 +78,27 @@ describe("ChatMessage reasoning 正文可见性", () => {
     expect(markup).toContain("example.com")
     expect(markup).toContain("最终回答")
   })
+
+  it("在部分回复后呈现持久化失败原因与重试入口", () => {
+    const message = {
+      id: "assistant-failed",
+      role: "assistant",
+      parts: [
+        { type: "text", text: "已经生成的部分。", state: "done" },
+        {
+          type: "data-task-error",
+          data: { message: "供应商连接中断，请稍后重试。", retryable: true },
+        },
+      ],
+    } as UIMessage
+
+    const markup = renderToStaticMarkup(
+      <ChatMessage isLast message={message} onRegenerate={() => undefined} running={false} />,
+    )
+
+    expect(markup).toContain("已经生成的部分。")
+    expect(markup).toContain("这次生成未完成")
+    expect(markup).toContain("供应商连接中断，请稍后重试。")
+    expect(markup).toContain("重试")
+  })
 })
