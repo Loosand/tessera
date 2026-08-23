@@ -1,6 +1,6 @@
 /**
  * [INPUT]: AI SDK UI 工具增量、Markdown 上下文附件、供应商错误与 Tessera 公开流式协议
- * [OUTPUT]: 文档材料边界、工具增量裁剪、错误归类脱敏和 Skill 搜索额度策略的回归验证
+ * [OUTPUT]: 文档材料边界、工具/引申问题增量裁剪、错误归类脱敏和 Skill 搜索额度策略的回归验证
  * [POS]: Chat/Agent 共用 UIMessageChunk 裁剪边界的单元测试
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
  *
@@ -38,6 +38,32 @@ describe("Agent 工具公开增量", () => {
       type: "tool-output-available",
       toolCallId: "call-1",
       output: { path: "README.md", content: "# Tessera" },
+    })
+  })
+
+  it("保留类型化引申问题 Data Part", () => {
+    expect(
+      publicChunk({
+        type: "data-follow-up-questions",
+        id: "follow-up-request-1",
+        data: {
+          version: 1,
+          questions: [
+            { id: "follow-up-1", prompt: "哪些证据值得继续核实？" },
+            { id: "follow-up-2", prompt: "这个结论还有哪些例外？" },
+          ],
+        },
+      }),
+    ).toEqual({
+      type: "data-follow-up-questions",
+      id: "follow-up-request-1",
+      data: {
+        version: 1,
+        questions: [
+          { id: "follow-up-1", prompt: "哪些证据值得继续核实？" },
+          { id: "follow-up-2", prompt: "这个结论还有哪些例外？" },
+        ],
+      },
     })
   })
 })

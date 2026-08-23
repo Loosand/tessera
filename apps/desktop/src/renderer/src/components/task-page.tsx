@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 隐式执行模式/创作方式的任务快照、可选工作区/当前文档草稿、Artifact、页面或侧栏表面、导航回调、AI 模型与 Electron useChat/运行解释桥
- * [OUTPUT]: 主任务与文档侧栏共用的首次发送懒创建、显式文档上下文、Artifact 导航、同源 RunPolicy 预检、流式恢复、按需运行解释、Agent Diff 审批和持续保存会话表面
+ * [OUTPUT]: 主任务与文档侧栏共用的首次发送懒创建、显式文档上下文、Artifact 导航、同源 RunPolicy 预检、流式恢复、引申问题带入、按需运行解释、Agent Diff 审批和持续保存会话表面
  * [POS]: Tessera 主任务页与文档 AI 侧栏共用的单一对话实现
  * [DOC]: design.md、docs/architecture/unified-creation-agent.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -294,6 +294,11 @@ export function TaskPage({
     rememberPreferredAiModelKey(key)
   }, [])
 
+  const useFollowUpQuestion = useCallback((value: string) => {
+    setPrompt(value)
+    setNotice("")
+  }, [])
+
   useEffect(() => {
     if (!selectedModel?.inputModalities?.includes("image")) setImages([])
   }, [selectedModel])
@@ -568,6 +573,7 @@ export function TaskPage({
                         onReadResearchNotebook={readResearchNotebook}
                         onReadTaskRun={readTaskRun}
                         onSaveResearchRecommendations={saveResearchRecommendations}
+                        onUseFollowUpQuestion={running ? undefined : useFollowUpQuestion}
                         onToolApproval={(id, approved) =>
                           chat.addToolApprovalResponse({
                             id,

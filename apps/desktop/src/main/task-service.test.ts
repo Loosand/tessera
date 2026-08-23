@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 内存 SQLite、通用任务会话输入与模拟工作区
- * [OUTPUT]: 无工作区任务、版本化运行/工具失败、可选读取、内置/用户 Skill 标记、兼容工作区创建约束、动态逐轮资源、任务 mode 不可变、创作模式逐轮切换和重命名/删除的回归验证
+ * [OUTPUT]: 无工作区任务、版本化引申问题/运行/工具失败、可选读取、内置/用户 Skill 标记、兼容工作区创建约束、动态逐轮资源、任务 mode 不可变、创作模式逐轮切换和重命名/删除的回归验证
  * [POS]: task-service 主进程权限边界的单元测试
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -41,6 +41,17 @@ describe("DesktopTaskService", () => {
             parts: [
               { type: "reasoning", text: "核对资料", state: "done" },
               { type: "text", text: "结论", state: "done" },
+              {
+                type: "data-follow-up-questions",
+                id: "follow-up-request-1",
+                data: {
+                  version: 1,
+                  questions: [
+                    { id: "follow-up-1", prompt: "哪些证据最值得继续核实？" },
+                    { id: "follow-up-2", prompt: "这个结论还有哪些争议？" },
+                  ],
+                },
+              },
               {
                 type: "data-task-error",
                 id: "task-error-request-1",
@@ -87,6 +98,13 @@ describe("DesktopTaskService", () => {
       parts: [
         { type: "reasoning", text: "核对资料" },
         { type: "text", text: "结论" },
+        {
+          type: "data-follow-up-questions",
+          data: {
+            version: 1,
+            questions: [{ prompt: "哪些证据最值得继续核实？" }, { prompt: "这个结论还有哪些争议？" }],
+          },
+        },
         {
           type: "data-task-error",
           data: { message: "供应商连接中断。", retryable: true },

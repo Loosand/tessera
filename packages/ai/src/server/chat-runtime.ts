@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 已解析的供应商连接、受信任 RunPolicy、含图片/显式 Markdown 上下文的任务消息与 AI SDK UIMessageChunk
- * [OUTPUT]: 统一 Agent 复用的附件边界、输入校验、错误归类脱敏、搜索额度和公开增量裁剪
+ * [OUTPUT]: 统一 Agent 复用的附件边界、输入校验、错误归类脱敏、搜索额度和含引申问题的公开增量裁剪
  * [POS]: Electron 主进程与统一 ToolLoopAgent 之间的共享流协议辅助层，不提供独立 Chat 运行时
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/ai-observability.md、docs/architecture/ai-providers.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -15,6 +15,7 @@ import type {
   AiChatStreamChunk,
   AiModelEndpointType,
   AiProviderConnectionInput,
+  TaskMessageData,
   TaskMessage,
   TaskRunPolicy,
 } from "@tessera/contracts"
@@ -119,7 +120,9 @@ export async function toUiMessages<Message extends UIMessage = UIMessage>(
   return validateUIMessages<Message>({ messages: normalizedMessages as Message[], ...options })
 }
 
-export function publicChunk(chunk: UIMessageChunk): AiChatStreamChunk | null {
+export function publicChunk(
+  chunk: UIMessageChunk<unknown, TaskMessageData> | UIMessageChunk<unknown, never>,
+): AiChatStreamChunk | null {
   switch (chunk.type) {
     case "start":
       return { type: "start", ...(chunk.messageId ? { messageId: chunk.messageId } : {}) }
@@ -136,6 +139,12 @@ export function publicChunk(chunk: UIMessageChunk): AiChatStreamChunk | null {
       return { type: chunk.type, id: chunk.id, delta: chunk.delta }
     case "reasoning-delta":
       return { type: chunk.type, id: chunk.id, delta: chunk.delta }
+    case "data-follow-up-questions":
+      return {
+        type: "data-follow-up-questions",
+        ...(chunk.id ? { id: chunk.id } : {}),
+        data: chunk.data,
+      }
     case "source-url":
       return {
         type: "source-url",

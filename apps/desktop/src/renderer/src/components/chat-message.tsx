@@ -1,6 +1,6 @@
 /**
- * [INPUT]: AI SDK UIMessage、当前回复状态、客户端问答结果、reasoning 生命周期/摘要、变更预览/审批、文件跳转、运行解释读取与重新生成回调
- * [OUTPUT]: 用户文本/图片/文档附件与按原始 Part 顺序组合的助手回复、思考阶段/摘要、问答/研究计划、搜索轨迹、工具审查及按需运行解释等轻量消息操作
+ * [INPUT]: AI SDK UIMessage、当前回复状态、客户端问答结果、reasoning 生命周期/摘要、变更预览/审批、文件跳转、引申问题带入、运行解释读取与重新生成回调
+ * [OUTPUT]: 用户文本/图片/文档附件与按原始 Part 顺序组合的助手回复、思考阶段/摘要、问答/研究计划、搜索轨迹、回答后引申问题、工具审查及按需运行解释等轻量消息操作
  * [POS]: task-page 的 Chat/Agent 消息协调层
  * [DOC]: design.md、docs/architecture/ai-observability.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
  *
@@ -24,6 +24,7 @@ import { Button } from "@tessera/design-system/components/ui/button"
 import { Icon } from "@tessera/design-system/components/ui/icon"
 import React from "react"
 import { ContentOperationPart, isContentOperationToolPart } from "./chat-parts/content-operation-part"
+import { FollowUpQuestionsPart, isFollowUpQuestionsPart } from "./chat-parts/follow-up-questions-part"
 import { ReasoningPart } from "./chat-parts/reasoning-part"
 import { ResearchActivityPart, isResearchActivityToolPart } from "./chat-parts/research-activity-part"
 import { ResearchPlanPart, isResearchPlanToolPart } from "./chat-parts/research-plan-part"
@@ -41,6 +42,7 @@ type ChatMessageProps = Readonly<{
   loadAgentChangePreview?: ((approvalId: string) => Promise<AgentChangePreview>) | undefined
   onOpenDocument?: ((path: string, line?: number) => void) | undefined
   onRegenerate: () => void
+  onUseFollowUpQuestion?: ((prompt: string) => void) | undefined
   onReadTaskRun?: ((requestId: string) => Promise<TaskRunInspection | null>) | undefined
   onReadResearchNotebook?: ((requestId: string) => Promise<TaskResearchNotebook | null>) | undefined
   onSaveResearchRecommendations?:
@@ -77,6 +79,7 @@ export function ChatMessage({
   onSaveResearchRecommendations,
   onToolApproval,
   onUserInput,
+  onUseFollowUpQuestion,
   running,
 }: ChatMessageProps) {
   const text = messageText(message)
@@ -88,6 +91,7 @@ export function ChatMessage({
   const firstWebSearchIndex = message.parts.findIndex(isWebSearchToolPart)
   const firstContentOperationIndex = message.parts.findIndex(isContentOperationToolPart)
   const firstResearchActivityIndex = message.parts.findIndex(isResearchActivityToolPart)
+  const followUpQuestionsPart = message.parts.find(isFollowUpQuestionsPart)
   const contentOperationParts = message.parts.filter(isContentOperationToolPart)
   const firstEmptyReasoningIndex = message.parts.findIndex(
     (part) => part.type === "reasoning" && !shouldRenderReasoningBody(part),
@@ -236,6 +240,12 @@ export function ChatMessage({
         parts={message.parts}
         streaming={assistantStreaming}
       />
+      {followUpQuestionsPart ? (
+        <FollowUpQuestionsPart
+          part={followUpQuestionsPart}
+          onSelect={assistantStreaming ? undefined : onUseFollowUpQuestion}
+        />
+      ) : null}
 
       {(text || runRequestId) && !(running && isLast) ? (
         <div className="mt-2 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">

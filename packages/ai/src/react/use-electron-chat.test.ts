@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 合成 Electron IPC 正文/工具增量事件与 AI SDK React Chat 状态机
- * [OUTPUT]: Transport 按连续序号消费与恢复 reasoning、正文、工具和失败 Part，覆盖重复/乱序/缺口、断开/取消和草稿跳过恢复的回归验证
+ * [OUTPUT]: Transport 按连续序号消费与恢复 reasoning、正文、引申问题、工具和失败 Part，覆盖重复/乱序/缺口、断开/取消和草稿跳过恢复的回归验证
  * [POS]: use-electron-chat Transport 的流式集成测试
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -518,6 +518,17 @@ describe("ElectronChatTransport", () => {
             title: "来源",
           },
           {
+            type: "data-follow-up-questions",
+            id: "follow-up-history",
+            data: {
+              version: 1,
+              questions: [
+                { id: "follow-up-1", prompt: "哪些一手来源值得继续阅读？" },
+                { id: "follow-up-2", prompt: "这个结论存在哪些争议？" },
+              ],
+            },
+          },
+          {
             type: "data-tool-error",
             id: "tool-error-history",
             data: {
@@ -544,6 +555,16 @@ describe("ElectronChatTransport", () => {
         { type: "reasoning", text: "核对来源" },
         { type: "text", text: "结论" },
         { type: "source-url", url: "https://example.com/source" },
+        {
+          type: "data-follow-up-questions",
+          data: {
+            version: 1,
+            questions: [
+              { id: "follow-up-1", prompt: "哪些一手来源值得继续阅读？" },
+              { id: "follow-up-2", prompt: "这个结论存在哪些争议？" },
+            ],
+          },
+        },
         { type: "data-tool-error", data: { code: "timeout", toolCallId: "tool-history" } },
       ],
     })

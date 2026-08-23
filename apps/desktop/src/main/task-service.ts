@@ -1,6 +1,6 @@
 /**
  * [INPUT]: SQLite 任务仓储、可逐轮变化的显式可空 Skill、兼容工作区归属、等待输入状态的跨进程任务输入与主进程当前工作区
- * [OUTPUT]: 任务列表/必需或可选读取/保存/重命名/删除、主进程运行状态收口、等待输入恢复、创建期工作区校验、带 requestId 的版本化运行/工具失败消息校验与运行前逐轮 Skill 校验
+ * [OUTPUT]: 任务列表/必需或可选读取/保存/重命名/删除、主进程运行状态收口、等待输入恢复、创建期工作区校验、带 requestId 的版本化引申问题/运行/工具失败消息校验与运行前逐轮 Skill 校验
  * [POS]: Electron 主进程中的统一任务会话领域服务；旧 mode/workspace 只保留兼容归属，不再决定逐轮资源授权
  * [DOC]: docs/architecture/database.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -22,6 +22,7 @@ import {
   type TaskSkillId,
   type TaskToolState,
   type WorkspaceInfo,
+  isTaskFollowUpQuestionsDataV1,
   isTaskRunErrorDataV1,
   isTaskSkillId,
   isTaskToolErrorDataV1,
@@ -147,6 +148,9 @@ function validateTaskPart(part: unknown): part is TaskMessagePart {
     return part.data.version === undefined
       ? part.data.code === undefined && part.data.phase === undefined
       : isTaskRunErrorDataV1(part.data)
+  }
+  if (part.type === "data-follow-up-questions") {
+    return validateOptionalString(part.id) && isTaskFollowUpQuestionsDataV1(part.data)
   }
   if (part.type === "data-tool-error") {
     return validateOptionalString(part.id) && isTaskToolErrorDataV1(part.data)

@@ -2,15 +2,16 @@
 
 > 代码源头：`packages/agent-runtime/src/index.ts`、`packages/ai/src/server/agent-runtime.ts`、
 > `packages/ai/src/server/content-domain-tools.ts`、`packages/ai/src/intent-routing.ts`、
-> `packages/ai/src/server/skill-instructions.ts`、
+> `packages/ai/src/server/skill-instructions.ts`、`packages/ai/src/server/follow-up-questions.ts`、
 > `packages/contracts/src/index.ts`、`packages/database/schema.ts`、
 > `packages/database/content-domain-repository.ts`、`apps/desktop/src/main/content-library-service.ts`、
 > `apps/desktop/src/main/task-service.ts`、`apps/desktop/src/main/read-only-agent-tools.ts`、
 > `apps/desktop/src/renderer/src/hooks/use-tasks.ts`、
 > `apps/desktop/src/renderer/src/components/task-page.tsx`、
+> `apps/desktop/src/renderer/src/components/chat-parts/follow-up-questions-part.tsx`、
 > `apps/desktop/src/renderer/src/components/task-artifact-tray.tsx`
 >
-> 状态：统一交互、消息内失败、运行解释、内容 Operation 聚合与混合方案跨重启验收已实现，最终内容存储仍处于探索阶段。所有任务共用 AI SDK `ToolLoopAgent`、
+> 状态：统一交互、回答后引申问题、消息内失败、运行解释、内容 Operation 聚合与混合方案跨重启验收已实现，最终内容存储仍处于探索阶段。所有任务共用 AI SDK `ToolLoopAgent`、
 > `callOptionsSchema` / `prepareCall`、受信任 RunPolicy、当前文档附件、联网、Skill、动态资源关系、Artifact、
 > 内容库领域工具、审批与操作审计；自动方式已对明确研究/写作请求做保守收窄。托管内容库只是当前实验基线，
 > 不排除数据库正文或完全开放外部工作区。
@@ -42,6 +43,8 @@
    Document、Artifact 和 Operation 语义保持一致。
 8. **任务随创作过程延续**：通过 Artifact 打开或移动到其他项目只改变当前资源作用域，不重置 Task；文档侧栏
    显示当前任务、项目历史和新建入口，并与主任务页共用消息、reasoning、工具和恢复协议。
+9. **回答自然通向下一步**：正常完成的正文后提供 2–4 个与结论紧密相关的引申问题；研究优先暴露证据缺口、
+   争议、时间变化和深层机制。点击问题只带入输入框，保留用户编辑与发送决定，不自动发起下一轮。
 
 ## 目标交互
 
@@ -104,6 +107,11 @@ Task + User Turn + Visible Resources + Model Facts + Permissions
 
 AI SDK 的 step 属于一次 `task_run` 内部执行细节。一个 run 可以连续调用多个工具，也可以在第一步直接输出文本；
 Task、Run 和 AI SDK step 不能共用一个状态语义。
+
+正常最终正文到达后，运行时使用同一模型执行一次独立的结构化短调用，生成 2–4 个 `data-follow-up-questions`。
+该调用只接收当前用户请求和有界的已完成正文，不重新获得工具；15 秒超时、供应商错误或结构化输出失败都只省略
+“继续探索”，不能把已经完成的主回答改成失败。后处理在 `finish` 之前进入同一有序事件链，Token、缓存与模型耗时
+并入同一个 `task_run`，但保留主调用的 call ID、完成原因、首输出时间和工具计数。
 
 ### AI SDK 标准优先约束
 
@@ -283,6 +291,8 @@ Markdown / 图片 / 附件             Task / Run / Message
   正文一起持久化；未知供应商异常只暴露安全文案，最后一次失败可从消息内重试。研究重试创建带 provenance 的新
   request 并继承计划、来源、证据与推荐，不从空白开始；输入框不重复显示同一错误。
 - 工具输入或执行错误保留 AI SDK 标准 Tool Part 状态，同时以版本化 `data-tool-error` 持久化稳定 code、retryable、`toolCallId` 与 `toolName`；用户界面复用原 Tool 卡说明哪个动作没有完成，不额外堆叠诊断卡，也不能暴露模型、工具内部异常或不确定的文件位置。
+- 正常正文后以版本化 `data-follow-up-questions` 呈现“继续探索”；只允许 2–4 个可直接发送的短问题，点击后覆盖当前
+  输入框草稿但不自动发送。Part 与正文一同持久化并跨重启恢复，不能临时从 Markdown 标题或客户端随机推导。
 - 每个完成回复通过 `requestId` 关联对应 `task_run`；消息操作栏仅放置运行信息图标，点击后按需展示实际模型、Skill、资源、工具、结束或失败原因，不把权限说明、调试日志或内部 schema 常驻在对话正文。
 
 ## 持久化目标与迁移
@@ -290,7 +300,7 @@ Markdown / 图片 / 附件             Task / Run / Message
 ### 当前混合基线的数据职责
 
 - `task_sessions`：会话身份、标题、状态和时间，不再以 mode/Skill/单一 Workspace 定义整个会话权限。
-- `task_messages`：用户、助手和工具的版本化消息 Part。
+- `task_messages`：用户、助手、工具与回答后引申问题的版本化消息 Part。
 - `task_runs`：每轮实际模型、创作策略、Skill、联网/工具策略、资源快照摘要、完成原因、用量和耗时。
 - `content_libraries`：当前授权内容库及撤销时间；撤销只移除授权，不删除用户文件。
 - `task_resource_bindings`：Task/Run 与 Workspace、Document、Attachment 的动态关系和角色；同一 Task 最新 scope
@@ -331,6 +341,8 @@ Markdown / 图片 / 附件             Task / Run / Message
 10. **运行时加固与验收（已实现）**：统一版本化运行/工具失败、恢复/取消/乱序事件和 AI SDK 消息类型边界；提供
     脱敏单次运行解释、流增量合并与研究状态续跑，并以磁盘 SQLite 验收普通问答、研究工具链、写作、创建/移动内容
     及重启中断收口；真实 FKJ 供应商运行另通过领域黄金审计。
+11. **回答后继续探索（已实现）**：主回答正常结束后使用同一模型生成结构化短问题，以版本化 Data Part 进入事件、
+    消息与恢复协议；用户点击只带入输入框，后处理失败不影响主回答，并把实际用量并入本轮运行汇总。
 
 实施时每一步都必须保持现有 Markdown 路径防护、Diff 审批、运行恢复和人工编辑路径可用。不能用一次性大迁移同时
 替换运行时、数据库和文件操作。

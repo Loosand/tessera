@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 合法、损坏与过期的 AI 流事件 JSON
- * [OUTPUT]: 持久化恢复边界中正文、运行失败与工具失败的字段级校验回归保障
+ * [OUTPUT]: 持久化恢复边界中正文、引申问题、运行失败与工具失败的字段级校验回归保障
  * [POS]: AI 流事件运行时守卫单元测试
  * [DOC]: docs/architecture/database.md、docs/architecture/task-navigation.md
  *
@@ -91,6 +91,31 @@ describe("AI chat persisted events", () => {
         toolCallId: "tool-read",
         errorText: "损坏工具错误",
         failure: { code: "future-tool-code", retryable: true },
+      }),
+    ).toBe(false)
+  })
+
+  it("接受 2–4 个版本化引申问题并拒绝损坏内容", () => {
+    expect(
+      isAiChatStreamChunk({
+        type: "data-follow-up-questions",
+        id: "follow-up-request-1",
+        data: {
+          version: 1,
+          questions: [
+            { id: "follow-up-1", prompt: "哪些一手来源最能验证这一结论？" },
+            { id: "follow-up-2", prompt: "这个结论在最近两年发生了哪些变化？" },
+          ],
+        },
+      }),
+    ).toBe(true)
+    expect(
+      isAiChatStreamChunk({
+        type: "data-follow-up-questions",
+        data: {
+          version: 1,
+          questions: [{ id: "follow-up-1", prompt: "只有一个问题" }],
+        },
       }),
     ).toBe(false)
   })

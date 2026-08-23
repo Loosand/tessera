@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 已解析供应商连接、自动联网/思考策略、当前 Skill、完整 AI SDK UIMessage 历史、主进程按授权注入的研究/写作交接/内容库/工作区/MCP 能力、中止信号与运行指标回调
- * [OUTPUT]: 普通对话和工作区任务共用、以 InferAgentUIMessage 约束并由 createAgentUIStream 标准转换模型消息，同时承载供应商原生搜索、可信研究闭环、证据化写作交接、内容领域、按 RunPolicy 收窄的工作区读写、强制审批 MCP、Skill instructions、标准 needsApproval 与原生生命周期观测的 AI SDK ToolLoopAgent 增量流
+ * [OUTPUT]: 普通对话和工作区任务共用、以 InferAgentUIMessage 约束并由 createAgentUIStream 标准转换模型消息，同时承载供应商原生搜索、可信研究闭环、证据化写作交接、内容领域、按 RunPolicy 收窄的工作区读写、强制审批 MCP、Skill instructions、标准 needsApproval、回答后类型化引申问题与原生生命周期观测的 AI SDK ToolLoopAgent 增量流
  * [POS]: @tessera/ai/server 中统一自然对话的 ToolLoopAgent 编排边界
  * [DOC]: docs/architecture/unified-creation-agent.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/ai-observability.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -14,7 +14,7 @@ import type { AgentRuntime } from "@tessera/agent-runtime"
 import type { AiChatStreamChunk } from "@tessera/contracts"
 import type { LoadedSkill } from "@tessera/skills"
 import { ToolLoopAgent, createAgentUIStream, dynamicTool, isStepCount, jsonSchema, tool } from "ai"
-import type { InferAgentUIMessage, JSONSchema7, ToolSet, UIMessageChunk } from "ai"
+import type { InferAgentUIMessage, JSONSchema7, ToolSet } from "ai"
 import { z } from "zod"
 import { createAiSdkChatRuntime } from "./ai-sdk-runtime"
 import {
@@ -27,6 +27,7 @@ import {
 import { type ContentDomainAgentTools, createContentDomainToolSet } from "./content-domain-tools"
 import { type ResearchAgentTools, createResearchToolSet, publicResearchToolOutput } from "./research-tools"
 import { buildTaskSkillInstructions } from "./skill-instructions"
+import { generateFollowUpQuestions, mergeFollowUpRunMetrics } from "./follow-up-questions"
 import { type TaskAgentRunMetrics, createTaskAgent } from "./task-agent"
 import {
   createTaskInteractionTools,
@@ -135,6 +136,16 @@ export type AiSdkAgentRuntimeRequest = Readonly<{
 
 export function shouldHideResearchDraftText(chunkType: string, outcome: "complete" | "partial" | null) {
   return !outcome && (chunkType === "text-start" || chunkType === "text-delta" || chunkType === "text-end")
+}
+
+function lastUserRequest(messages: AiChatRuntimeInput["messages"]) {
+  const message = [...messages].reverse().find((candidate) => candidate.role === "user")
+  return (
+    message?.parts
+      .filter((part) => part.type === "text")
+      .map((part) => part.text)
+      .join("\n") ?? ""
+  )
 }
 
 export function createExternalAgentToolSet(
@@ -293,10 +304,15 @@ async function* runAiSdkAgent(
     ...workspaceWriteTools,
     ...mcpTools,
   }
+  let latestRunMetrics: TaskAgentRunMetrics | null = null
+  const captureRunMetrics = (metrics: TaskAgentRunMetrics) => {
+    latestRunMetrics = metrics
+    onRunMetrics?.(metrics)
+  }
   const agent = createTaskAgent({
     baseInstructions: agentInstructions(workspaceName, Boolean(contentTools), researchContext),
     model,
-    ...(onRunMetrics ? { onRunMetrics } : {}),
+    ...(onRunMetrics ? { onRunMetrics: captureRunMetrics } : {}),
     ...(runtime.providerOptions ? { providerOptions: runtime.providerOptions } : {}),
     ...(researchWorkflow ? { researchWorkflow } : {}),
     tools,
@@ -328,6 +344,8 @@ async function* runAiSdkAgent(
   })
 
   const toolNames = new Map<string, string>()
+  let finalAnswer = ""
+  let finishChunk: AiChatStreamChunk | null = null
   for await (const chunk of stream) {
     if (
       chunk.type === "tool-input-start" ||
@@ -336,7 +354,7 @@ async function* runAiSdkAgent(
     ) {
       toolNames.set(chunk.toolCallId, chunk.toolName)
     }
-    const publicInput: UIMessageChunk =
+    const publicInput =
       chunk.type === "tool-output-available"
         ? {
             ...chunk,
@@ -350,8 +368,47 @@ async function* runAiSdkAgent(
       continue
     }
     const sanitized = publicChunk(publicInput)
-    if (sanitized) yield sanitized
+    if (!sanitized) continue
+    if (sanitized.type === "text-delta") finalAnswer += sanitized.delta
+    if (sanitized.type === "finish") {
+      finishChunk = sanitized
+      continue
+    }
+    yield sanitized
   }
+
+  if (
+    finishChunk &&
+    (finishChunk.finishReason === undefined || finishChunk.finishReason === "stop") &&
+    finalAnswer.trim() &&
+    !abortSignal.aborted
+  ) {
+    try {
+      const followUp = await generateFollowUpQuestions({
+        abortSignal,
+        answer: finalAnswer,
+        model,
+        ...(runtime.providerOptions ? { providerOptions: runtime.providerOptions } : {}),
+        skillId: input.runPolicy.skillId,
+        userRequest: lastUserRequest(input.messages),
+      })
+      if (followUp) {
+        if (followUp.data) {
+          yield {
+            type: "data-follow-up-questions",
+            id: `follow-up-questions-${input.requestId}`,
+            data: followUp.data,
+          }
+        }
+        if (latestRunMetrics && onRunMetrics) {
+          onRunMetrics(mergeFollowUpRunMetrics(latestRunMetrics, followUp.metrics))
+        }
+      }
+    } catch {
+      // 引申问题是非关键增强；失败或超时不能把已经完成的主回答改成失败。
+    }
+  }
+  if (finishChunk) yield finishChunk
 }
 
 export const aiSdkAgentRuntime: AgentRuntime<AiSdkAgentRuntimeRequest, AiChatStreamChunk> = {

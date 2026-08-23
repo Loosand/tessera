@@ -1,6 +1,6 @@
 /**
  * [INPUT]: Electron 窄桥、任务是否已持久化、内部任务执行作用域/创作方式、显式当前文档、模型选择、版本化历史消息与 AI SDK React 状态机
- * [OUTPUT]: 不传递能力开关、只为已持久化任务恢复且支持断开重连的 ElectronChatTransport、显式重新生成到研究续跑 provenance 的映射、重复过滤/乱序缓冲/缺口失败、取消流安全收口、带 requestId 的版本化消息内运行失败、基于 AI SDK 标准 Tool Part 守卫的等待输入识别、完整 UIMessage 往返、问答/审批后自动续轮与类型化 IPC 增量消费
+ * [OUTPUT]: 不传递能力开关、只为已持久化任务恢复且支持断开重连的 ElectronChatTransport、显式重新生成到研究续跑 provenance 的映射、重复过滤/乱序缓冲/缺口失败、取消流安全收口、带 requestId 的版本化消息内引申问题/运行失败、基于 AI SDK 标准 Tool Part 守卫的等待输入识别、完整 UIMessage 往返、问答/审批后自动续轮与类型化 IPC 增量消费
  * [POS]: @tessera/ai/react 中连接桌面渲染层与主进程 Chat/Agent 运行时的 Transport
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -186,6 +186,12 @@ export function toTaskMessages(
       } else if (part.type === "data-task-error") {
         parts.push({
           type: "data-task-error",
+          ...(part.id ? { id: part.id } : {}),
+          data: part.data,
+        })
+      } else if (part.type === "data-follow-up-questions") {
+        parts.push({
+          type: "data-follow-up-questions",
           ...(part.id ? { id: part.id } : {}),
           data: part.data,
         })

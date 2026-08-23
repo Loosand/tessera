@@ -1,6 +1,6 @@
 /**
  * [INPUT]: SQLite 中持久化的未知 AI 流事件 JSON
- * [OUTPUT]: 通过字段级校验且兼容旧文本错误的 AiChatStreamEvent，拒绝损坏、未知运行/工具错误码或过期的恢复数据
+ * [OUTPUT]: 通过字段级校验且兼容旧文本错误的 AiChatStreamEvent，保留版本化引申问题并拒绝损坏、未知运行/工具错误码或过期的恢复数据
  * [POS]: 数据库运行检查点与类型化 Electron 恢复通道之间的运行时边界
  * [DOC]: docs/architecture/database.md、docs/architecture/task-navigation.md
  *
@@ -13,6 +13,7 @@
 import {
   type AiChatStreamChunk,
   type AiChatStreamEvent,
+  isTaskFollowUpQuestionsDataV1,
   isTaskRunErrorDataV1,
   isTaskToolErrorDataV1,
 } from "@tessera/contracts"
@@ -55,6 +56,8 @@ export function isAiChatStreamChunk(value: unknown): value is AiChatStreamChunk 
     case "text-delta":
     case "reasoning-delta":
       return hasString(value, "id") && hasString(value, "delta")
+    case "data-follow-up-questions":
+      return hasOptionalString(value, "id") && isTaskFollowUpQuestionsDataV1(value.data)
     case "source-url":
       return hasString(value, "sourceId") && hasString(value, "url") && hasOptionalString(value, "title")
     case "source-document":

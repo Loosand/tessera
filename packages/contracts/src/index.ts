@@ -1,6 +1,6 @@
 /**
  * [INPUT]: Electron 桌面应用当前需要的跨进程数据、生命周期、工作区条目、AI 模型事实/端点绑定、MCP 服务器、用户 Skill、研究网络偏好、任务运行策略、内容对象、开发期 AI 日志与 Agent 变更审批形状
- * [OUTPUT]: IPC 频道、工作区文件操作、模型/MCP/用户 Skill/研究网络配置、类型化 RunPolicy、版本化公开运行/工具错误、脱敏运行解释、后端无关内容引用、可恢复流式运行、开发期 AI 日志入口、客户端问答/研究计划工具、Agent Diff 审批、关闭握手与可推导的桌面 API 类型契约
+ * [OUTPUT]: IPC 频道、工作区文件操作、模型/MCP/用户 Skill/研究网络配置、类型化 RunPolicy、版本化公开运行/工具错误与引申问题、脱敏运行解释、后端无关内容引用、可恢复流式运行、开发期 AI 日志入口、客户端问答/研究计划工具、Agent Diff 审批、关闭握手与可推导的桌面 API 类型契约
  * [POS]: 应用和共享包共同依赖的底层契约入口
  * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/ai-observability.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/mcp.md、docs/architecture/research-workflow.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md、docs/architecture/unified-creation-agent.md
  *
@@ -700,6 +700,39 @@ export type TaskMessageMetadata = {
   requestId?: string
 }
 
+export type TaskFollowUpQuestion = {
+  id: string
+  prompt: string
+}
+
+export type TaskFollowUpQuestionsDataV1 = {
+  questions: TaskFollowUpQuestion[]
+  version: 1
+}
+
+export function isTaskFollowUpQuestionsDataV1(value: unknown): value is TaskFollowUpQuestionsDataV1 {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false
+  const data = value as Record<string, unknown>
+  return (
+    data.version === 1 &&
+    Array.isArray(data.questions) &&
+    data.questions.length >= 2 &&
+    data.questions.length <= 4 &&
+    data.questions.every((question) => {
+      if (!question || typeof question !== "object" || Array.isArray(question)) return false
+      const item = question as Record<string, unknown>
+      return (
+        typeof item.id === "string" &&
+        item.id.length > 0 &&
+        item.id.length <= 80 &&
+        typeof item.prompt === "string" &&
+        item.prompt.length > 0 &&
+        item.prompt.length <= 240
+      )
+    })
+  )
+}
+
 export const TASK_RUN_ERROR_CODES = [
   "provider-config",
   "provider-auth",
@@ -803,8 +836,15 @@ export function isTaskToolErrorDataV1(value: unknown): value is TaskToolErrorDat
 }
 
 export type TaskMessageData = {
+  "follow-up-questions": TaskFollowUpQuestionsDataV1
   "task-error": TaskRunErrorData
   "tool-error": TaskToolErrorDataV1
+}
+
+export type TaskFollowUpQuestionsMessagePart = {
+  data: TaskFollowUpQuestionsDataV1
+  id?: string
+  type: "data-follow-up-questions"
 }
 
 export type TaskRunErrorMessagePart = {
@@ -863,6 +903,7 @@ export type TaskMessagePart =
     }
   | TaskRunErrorMessagePart
   | TaskToolErrorMessagePart
+  | TaskFollowUpQuestionsMessagePart
   | { type: "step-start" }
   | TaskToolMessagePart
 
@@ -924,6 +965,11 @@ export type AiChatStreamChunk =
   | { type: "reasoning-start"; id: string }
   | { type: "reasoning-delta"; id: string; delta: string }
   | { type: "reasoning-end"; id: string }
+  | {
+      type: "data-follow-up-questions"
+      id?: string
+      data: TaskFollowUpQuestionsDataV1
+    }
   | { type: "source-url"; sourceId: string; url: string; title?: string }
   | { type: "source-document"; sourceId: string; mediaType: string; title: string; filename?: string }
   | {

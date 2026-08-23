@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 同一 Agent 消息内复用 provider reasoning ID 的多步骤 Part、缺失/存在摘要的 reasoning Part，以及结构化研究结果
- * [OUTPUT]: 每个消息 Part 都获得稳定且唯一 React key，并正确聚合空 reasoning 阶段、保留搜索轨迹、研究笔记/来源操作与真实正文的回归验证
+ * [INPUT]: 同一 Agent 消息内复用 provider reasoning ID 的多步骤 Part、缺失/存在摘要的 reasoning Part，以及结构化研究/引申问题结果
+ * [OUTPUT]: 每个消息 Part 都获得稳定且唯一 React key，并正确聚合空 reasoning 阶段、保留搜索轨迹、研究笔记/来源操作、真实正文与可点击引申问题的回归验证
  * [POS]: chat-message 多步骤流式协调的单元测试
  * [DOC]: docs/architecture/ai-observability.md、docs/architecture/task-navigation.md
  *
@@ -156,6 +156,43 @@ describe("ChatMessage reasoning 正文可见性", () => {
     expect(markup).toContain("无法恢复生成")
     expect(markup).toContain("恢复检查点已经损坏。")
     expect(markup).not.toContain(">重试<")
+  })
+
+  it("在回答正文后呈现可选择但不会自行发送的引申问题", () => {
+    const message = {
+      id: "assistant-follow-up",
+      role: "assistant",
+      parts: [
+        { type: "text", text: "这是最终回答。", state: "done" },
+        {
+          type: "data-follow-up-questions",
+          id: "follow-up-request-1",
+          data: {
+            version: 1,
+            questions: [
+              { id: "follow-up-1", prompt: "哪些一手来源最值得继续阅读？" },
+              { id: "follow-up-2", prompt: "这个结论在最近两年发生了哪些变化？" },
+            ],
+          },
+        },
+      ],
+    } as UIMessage
+
+    const markup = renderToStaticMarkup(
+      <ChatMessage
+        isLast
+        message={message}
+        onRegenerate={() => undefined}
+        onUseFollowUpQuestion={() => undefined}
+        running={false}
+      />,
+    )
+
+    expect(markup).toContain("这是最终回答。")
+    expect(markup).toContain('aria-label="继续探索"')
+    expect(markup).toContain("哪些一手来源最值得继续阅读？")
+    expect(markup).toContain("这个结论在最近两年发生了哪些变化？")
+    expect(markup.match(/<button[^>]*\sdisabled=/gu)).toBeNull()
   })
 
   it("从真实研究工具结果呈现来源推荐，并在推荐前也允许查看增量笔记", () => {
