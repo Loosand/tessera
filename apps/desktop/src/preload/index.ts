@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 共享桌面 API 契约与 Electron IPC 渲染器
- * [OUTPUT]: 暴露在 window.tessera 上的冻结窄接口、默认空间切换、当前 Space 任务分页、研究网络偏好、开发期 AI 日志入口、MCP/用户 Skill 安全配置与扫描安装、可恢复 AI 流、脱敏运行解释、Agent 变更预览、托管内容库/Artifact、受限工作区/任务操作和关闭保存握手
+ * [OUTPUT]: 暴露在 window.tessera 上的冻结窄接口、默认空间切换、当前 Space 活动/归档任务分页与置顶/归档操作、研究网络偏好、开发期 AI 日志入口、MCP/用户 Skill 安全配置与扫描安装、可恢复 AI 流、脱敏运行解释、Agent 变更预览、托管内容库/Artifact、受限工作区/任务操作和关闭保存握手
  * [POS]: 主进程与沙箱渲染层之间的安全桥
  * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/ai-observability.md、docs/architecture/mcp.md、docs/architecture/research-workflow.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md、docs/architecture/unified-creation-agent.md
  *
@@ -54,6 +54,9 @@ const api = Object.freeze({
   readTask: (taskId) => invokeDesktop(IPC_CHANNELS.taskRead, taskId),
   saveTask: (input) => invokeDesktop(IPC_CHANNELS.taskSave, input),
   renameTask: (taskId, title) => invokeDesktop(IPC_CHANNELS.taskRename, taskId, title),
+  setTaskPinned: (taskId, pinned) => invokeDesktop(IPC_CHANNELS.taskSetPinned, taskId, pinned),
+  setTaskArchived: (taskId, archived) =>
+    invokeDesktop(IPC_CHANNELS.taskSetArchived, taskId, archived),
   deleteTask: (taskId) => invokeDesktop(IPC_CHANNELS.taskDelete, taskId),
   cancelClose: () => sendDesktop(IPC_CHANNELS.appCancelClose),
   confirmClose: () => sendDesktop(IPC_CHANNELS.appConfirmClose),

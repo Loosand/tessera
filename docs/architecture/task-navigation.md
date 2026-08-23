@@ -155,7 +155,7 @@ Space 落地页 / 侧栏最近任务
   -> 恢复到实时流，完成后持久化完整消息
 ```
 
-运行元数据和每个有序事件同时写入 SQLite。页面切换优先从主进程内存续接；应用意外退出后，启动恢复会把未结束运行标记为 `interrupted`，追加带稳定 code、phase 与 retryable 的可见错误事件并重放中断前进度，同时把非等待中的 task session 收口到对应终态。若最新运行已经结束、但 renderer 尚未来得及把对应 `requestId` 写入助手消息，恢复接口仍会重放这次终态运行；renderer 保存完整助手消息后，同一运行不再被识别为待恢复，避免重复注入。读取历史事件时只在返回快照中临时合并连续 delta 并重新生成连续序号，SQLite 原始审计序列不改写。启动、流式和恢复阶段的异常都先在 AI SDK 字符串化前分类，嵌套 RetryError 的稳定类别与安全 HTTP 状态进入 `data-task-error`，未知供应商载荷使用脱敏公开文案；初始化在 `task_run` 建立后失败时也先持久化同一失败事件。工具输入或执行失败继续使用 AI SDK 标准 Tool Part 状态，并额外写入可恢复的 `data-tool-error`（稳定 code、retryable、`toolCallId`、`toolName`）；消息 UI 不重复渲染第二张失败卡，诊断与审计仍可读取结构化 Part。
+运行元数据和每个有序事件同时写入 SQLite。页面切换优先从主进程内存续接；应用意外退出后，启动恢复会把未结束运行标记为 `interrupted`，追加带稳定 code、phase 与 retryable 的可见错误事件并重放中断前进度，同时把非等待中的 task session 收口到对应终态。若最新运行已经结束、但 renderer 尚未来得及把对应 `requestId` 写入助手消息，恢复接口仍会重放这次终态运行；renderer 保存完整助手消息后，同一运行不再被识别为待恢复，避免重复注入。读取历史事件时只在返回快照中临时合并连续 delta 并重新生成连续序号，SQLite 原始审计序列不改写。启动、流式和恢复阶段的异常都先在 AI SDK 字符串化前分类，嵌套 RetryError 的稳定类别与安全 HTTP 状态进入 `data-task-error`，具名且文案安全的配置、内容库、用户 Skill、MCP 与工作区变更领域错误保留可操作提示，未知供应商载荷使用脱敏公开文案；初始化在 `task_run` 建立后失败时也先持久化同一失败事件。工具输入或执行失败继续使用 AI SDK 标准 Tool Part 状态，并额外写入可恢复的 `data-tool-error`（稳定 code、retryable、`toolCallId`、`toolName`）；消息 UI 不重复渲染第二张失败卡，诊断与审计仍可读取结构化 Part。
 
 模型供应商的原始网络流和内存 `ToolLoopAgent` 不能跨进程继续，因此恢复不会自动重放写工具。消息级续跑先覆盖最常见
 断点：用户重试失败助手消息时，Transport 在 AI SDK 删除该消息前暂存非 preliminary 的成功 Tool Part；新 request 把

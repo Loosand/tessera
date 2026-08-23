@@ -1,6 +1,6 @@
 /**
- * [INPUT]: Drizzle 数据库实例、任务执行模式、作为下一轮默认值的可选 Skill、工作区绑定、等待输入状态与版本化任务消息
- * [OUTPUT]: 跨空间最近任务、默认空间/文件工作区任务列表与稳定分页，以及带可变 Skill 默认值/等待输入的通用任务会话幂等读写、主进程运行状态收口、重命名和删除
+ * [INPUT]: Drizzle 数据库实例、任务执行模式、作为下一轮默认值的可选 Skill、工作区绑定、置顶/归档状态、等待输入状态与版本化任务消息
+ * [OUTPUT]: 跨空间最近活动任务、默认空间/文件工作区任务列表与活动/归档稳定分页，以及带可变 Skill 默认值/等待输入的通用任务会话幂等读写、置顶/归档、主进程运行状态收口、重命名和删除
  * [POS]: 普通对话与后续 Agent 共用的任务会话持久化边界
  * [DOC]: docs/architecture/database.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -10,13 +10,14 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import { asc, desc, eq, isNull, sql } from "drizzle-orm"
+import { and, asc, desc, eq, isNotNull, isNull, sql } from "drizzle-orm"
 import type { DatabaseClient } from "./client"
 import { type TaskSession, taskMessages, taskSessions, workspaces } from "./schema"
 
 export type TaskSessionRecordStatus = TaskSession["status"] | "waiting-input"
 
 export type TaskSessionPageQuery = {
+  readonly archived?: boolean
   readonly limit: number
   readonly offset: number
 }
@@ -39,6 +40,8 @@ function selectTaskSummaries(client: DatabaseClient) {
       workspaceId: taskSessions.workspaceId,
       workspaceName: workspaces.displayName,
       title: taskSessions.title,
+      pinnedAt: taskSessions.pinnedAt,
+      archivedAt: taskSessions.archivedAt,
       status:
         sql<TaskSessionRecordStatus>`CASE WHEN ${taskSessions.waitingForInput} THEN 'waiting-input' ELSE ${taskSessions.status} END`.as(
           "status",
@@ -52,23 +55,42 @@ function selectTaskSummaries(client: DatabaseClient) {
 
 export function listWorkspaceTaskSessions(client: DatabaseClient, workspaceId: string, limit = 100) {
   return selectTaskSummaries(client)
-    .where(eq(taskSessions.workspaceId, workspaceId))
-    .orderBy(desc(taskSessions.updatedAt), desc(taskSessions.createdAt), desc(taskSessions.id))
+    .where(and(eq(taskSessions.workspaceId, workspaceId), isNull(taskSessions.archivedAt)))
+    .orderBy(
+      sql`${taskSessions.pinnedAt} IS NOT NULL DESC`,
+      desc(taskSessions.pinnedAt),
+      desc(taskSessions.updatedAt),
+      desc(taskSessions.createdAt),
+      desc(taskSessions.id),
+    )
     .limit(limit)
     .all()
 }
 
 export function listDefaultTaskSessions(client: DatabaseClient, limit = 100) {
   return selectTaskSummaries(client)
-    .where(isNull(taskSessions.workspaceId))
-    .orderBy(desc(taskSessions.updatedAt), desc(taskSessions.createdAt), desc(taskSessions.id))
+    .where(and(isNull(taskSessions.workspaceId), isNull(taskSessions.archivedAt)))
+    .orderBy(
+      sql`${taskSessions.pinnedAt} IS NOT NULL DESC`,
+      desc(taskSessions.pinnedAt),
+      desc(taskSessions.updatedAt),
+      desc(taskSessions.createdAt),
+      desc(taskSessions.id),
+    )
     .limit(limit)
     .all()
 }
 
 export function listRecentTaskSessions(client: DatabaseClient, limit = 12) {
   return selectTaskSummaries(client)
-    .orderBy(desc(taskSessions.updatedAt), desc(taskSessions.createdAt), desc(taskSessions.id))
+    .where(isNull(taskSessions.archivedAt))
+    .orderBy(
+      sql`${taskSessions.pinnedAt} IS NOT NULL DESC`,
+      desc(taskSessions.pinnedAt),
+      desc(taskSessions.updatedAt),
+      desc(taskSessions.createdAt),
+      desc(taskSessions.id),
+    )
     .limit(limit)
     .all()
 }
@@ -78,31 +100,51 @@ export function listWorkspaceTaskSessionsPage(
   workspaceId: string,
   query: TaskSessionPageQuery,
 ) {
+  const archived = query.archived === true
+  const scope = archived ? isNotNull(taskSessions.archivedAt) : isNull(taskSessions.archivedAt)
   const items = selectTaskSummaries(client)
-    .where(eq(taskSessions.workspaceId, workspaceId))
-    .orderBy(desc(taskSessions.updatedAt), desc(taskSessions.createdAt), desc(taskSessions.id))
+    .where(and(eq(taskSessions.workspaceId, workspaceId), scope))
+    .orderBy(
+      archived
+        ? desc(taskSessions.archivedAt)
+        : sql`${taskSessions.pinnedAt} IS NOT NULL DESC`,
+      desc(taskSessions.pinnedAt),
+      desc(taskSessions.updatedAt),
+      desc(taskSessions.createdAt),
+      desc(taskSessions.id),
+    )
     .limit(query.limit)
     .offset(query.offset)
     .all()
   const total = client.db
     .select({ value: sql<number>`count(*)` })
     .from(taskSessions)
-    .where(eq(taskSessions.workspaceId, workspaceId))
+    .where(and(eq(taskSessions.workspaceId, workspaceId), scope))
     .get()?.value
   return { items, total: Number(total ?? 0) }
 }
 
 export function listDefaultTaskSessionsPage(client: DatabaseClient, query: TaskSessionPageQuery) {
+  const archived = query.archived === true
+  const scope = archived ? isNotNull(taskSessions.archivedAt) : isNull(taskSessions.archivedAt)
   const items = selectTaskSummaries(client)
-    .where(isNull(taskSessions.workspaceId))
-    .orderBy(desc(taskSessions.updatedAt), desc(taskSessions.createdAt), desc(taskSessions.id))
+    .where(and(isNull(taskSessions.workspaceId), scope))
+    .orderBy(
+      archived
+        ? desc(taskSessions.archivedAt)
+        : sql`${taskSessions.pinnedAt} IS NOT NULL DESC`,
+      desc(taskSessions.pinnedAt),
+      desc(taskSessions.updatedAt),
+      desc(taskSessions.createdAt),
+      desc(taskSessions.id),
+    )
     .limit(query.limit)
     .offset(query.offset)
     .all()
   const total = client.db
     .select({ value: sql<number>`count(*)` })
     .from(taskSessions)
-    .where(isNull(taskSessions.workspaceId))
+    .where(and(isNull(taskSessions.workspaceId), scope))
     .get()?.value
   return { items, total: Number(total ?? 0) }
 }
@@ -148,6 +190,7 @@ export function saveTaskSession(client: DatabaseClient, input: TaskSessionRecord
       .onConflictDoUpdate({
         target: taskSessions.id,
         set: {
+          archivedAt: null,
           skillId: input.skillId ?? null,
           title: input.title,
           status,
@@ -180,6 +223,24 @@ export function renameTaskSession(client: DatabaseClient, taskId: string, title:
   const result = client.db
     .update(taskSessions)
     .set({ title, updatedAt: new Date() })
+    .where(eq(taskSessions.id, taskId))
+    .run()
+  return result.changes > 0 ? findTaskSession(client, taskId) : null
+}
+
+export function setTaskSessionPinned(client: DatabaseClient, taskId: string, pinned: boolean) {
+  const result = client.db
+    .update(taskSessions)
+    .set({ pinnedAt: pinned ? new Date() : null })
+    .where(and(eq(taskSessions.id, taskId), isNull(taskSessions.archivedAt)))
+    .run()
+  return result.changes > 0 ? findTaskSession(client, taskId) : null
+}
+
+export function setTaskSessionArchived(client: DatabaseClient, taskId: string, archived: boolean) {
+  const result = client.db
+    .update(taskSessions)
+    .set(archived ? { archivedAt: new Date(), pinnedAt: null } : { archivedAt: null })
     .where(eq(taskSessions.id, taskId))
     .run()
   return result.changes > 0 ? findTaskSession(client, taskId) : null

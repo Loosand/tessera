@@ -1,6 +1,6 @@
 /**
- * [INPUT]: SQLite 任务仓储、可逐轮变化的显式可空 Skill、兼容工作区归属、等待输入状态的跨进程任务输入与主进程当前工作区
- * [OUTPUT]: 默认空间/文件工作区任务列表与服务端分页、不会因相同快照刷新活动时间的幂等保存、必需或可选读取/重命名/删除、主进程运行状态收口、等待输入恢复、创建期工作区校验、带 requestId 的版本化引申问题/运行/工具失败及本地反馈消息校验与运行前逐轮 Skill 校验
+ * [INPUT]: SQLite 任务仓储、可逐轮变化的显式可空 Skill、兼容工作区归属、置顶/归档与等待输入状态的跨进程任务输入及主进程当前工作区
+ * [OUTPUT]: 默认空间/文件工作区活动任务列表与活动/归档服务端分页、不会因相同快照刷新活动时间的幂等保存、必需或可选读取/重命名/置顶/归档/删除、主进程运行状态收口、等待输入恢复、创建期工作区校验、带 requestId 的版本化引申问题/运行/工具失败及本地反馈消息校验与运行前逐轮 Skill 校验
  * [POS]: Electron 主进程中的统一任务会话领域服务；旧 mode/workspace 只保留兼容归属，不再决定逐轮资源授权
  * [DOC]: docs/architecture/database.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -41,6 +41,8 @@ import {
   listWorkspaceTaskSessionsPage,
   renameTaskSession,
   saveTaskSession,
+  setTaskSessionArchived,
+  setTaskSessionPinned,
   updateTaskSessionStatus,
 } from "@tessera/database"
 
@@ -94,13 +96,15 @@ function validateTaskTitle(value: string) {
 }
 
 function validateTaskPageRequest(value: TaskSessionPageRequest) {
+  const archived = value?.archived ?? false
   const page = value?.page
   const pageSize = value?.pageSize
+  if (typeof archived !== "boolean") throw new Error("任务归档筛选无效。")
   if (!Number.isSafeInteger(page) || page < 1) throw new Error("任务页码无效。")
   if (!Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > MAX_TASK_PAGE_SIZE) {
     throw new Error(`每页任务数必须在 1–${MAX_TASK_PAGE_SIZE} 之间。`)
   }
-  return { page, pageSize, offset: (page - 1) * pageSize }
+  return { archived, page, pageSize, offset: (page - 1) * pageSize }
 }
 
 function validateTaskMode(value: unknown): TaskMode {
@@ -242,7 +246,9 @@ function validateTaskMessages(value: unknown): TaskMessage[] {
 function toTaskSummary(record: ReturnType<typeof listRecentTaskSessions>[number]): TaskSessionSummary {
   return {
     ...record,
+    archivedAt: record.archivedAt?.getTime() ?? null,
     skillId: validateTaskSkillId(record.skillId),
+    pinnedAt: record.pinnedAt?.getTime() ?? null,
     createdAt: record.createdAt.getTime(),
     updatedAt: record.updatedAt.getTime(),
   }
@@ -275,6 +281,8 @@ export type DesktopTaskService = {
   readonly read: (taskId: string) => TaskSessionSnapshot
   readonly readIfExists: (taskId: string) => TaskSessionSnapshot | null
   readonly rename: (taskId: string, title: string) => TaskSessionSummary
+  readonly setArchived: (taskId: string, archived: boolean) => TaskSessionSummary
+  readonly setPinned: (taskId: string, pinned: boolean) => TaskSessionSummary
   readonly save: (input: TaskSessionSaveInput, workspace: WorkspaceInfo | null) => TaskSessionSnapshot
   readonly setRunStatus: (taskId: string, status: TaskSessionStatus) => TaskSessionSnapshot | null
 }
@@ -283,11 +291,12 @@ export function createDesktopTaskService(client: DatabaseClient): DesktopTaskSer
   return {
     listDefault: () => listDefaultTaskSessions(client).map(toTaskSummary),
     listPage: (workspaceId, request) => {
-      const { page, pageSize, offset } = validateTaskPageRequest(request)
+      const { archived, page, pageSize, offset } = validateTaskPageRequest(request)
       const result = workspaceId
-        ? listWorkspaceTaskSessionsPage(client, workspaceId, { limit: pageSize, offset })
-        : listDefaultTaskSessionsPage(client, { limit: pageSize, offset })
+        ? listWorkspaceTaskSessionsPage(client, workspaceId, { archived, limit: pageSize, offset })
+        : listDefaultTaskSessionsPage(client, { archived, limit: pageSize, offset })
       return {
+        archived,
         items: result.items.map(toTaskSummary),
         page,
         pageSize,
@@ -308,6 +317,18 @@ export function createDesktopTaskService(client: DatabaseClient): DesktopTaskSer
     },
     rename: (taskId, title) => {
       const record = renameTaskSession(client, validateTaskId(taskId), validateTaskTitle(title))
+      if (!record) throw new Error("找不到这个任务。")
+      return toTaskSummary(record)
+    },
+    setPinned: (taskId, pinned) => {
+      if (typeof pinned !== "boolean") throw new Error("任务置顶状态无效。")
+      const record = setTaskSessionPinned(client, validateTaskId(taskId), pinned)
+      if (!record) throw new Error("找不到活动任务，已归档任务不能置顶。")
+      return toTaskSummary(record)
+    },
+    setArchived: (taskId, archived) => {
+      if (typeof archived !== "boolean") throw new Error("任务归档状态无效。")
+      const record = setTaskSessionArchived(client, validateTaskId(taskId), archived)
       if (!record) throw new Error("找不到这个任务。")
       return toTaskSummary(record)
     },

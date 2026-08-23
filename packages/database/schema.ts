@@ -1,6 +1,6 @@
 /**
- * [INPUT]: Tessera 对内容库/托管工作区、动态资源、Artifact、项目操作、通用任务会话/创作方式、应用级偏好、AI 供应商模型事实、MCP 服务器、用户 Skill、完整逐轮执行策略/资源摘要、AI SDK 生命周期指标、Agent 运行检查点、变更审批和权限审计的持久化需求
- * [OUTPUT]: Drizzle SQLite 表、索引和可推导行类型，包括不含 Markdown 正文的统一内容控制层、应用级偏好、用户 Skill 安装目录、可恢复任务状态、逐轮 RunPolicy/资源上下文摘要与完成原因/Token/耗时指标（AI Key 与 MCP 凭据仅保存 safeStorage 密文）
+ * [INPUT]: Tessera 对内容库/托管工作区、动态资源、Artifact、项目操作、支持置顶/归档的通用任务会话/创作方式、应用级偏好、AI 供应商模型事实、MCP 服务器、用户 Skill、完整逐轮执行策略/资源摘要、AI SDK 生命周期指标、Agent 运行检查点、变更审批和权限审计的持久化需求
+ * [OUTPUT]: Drizzle SQLite 表、索引和可推导行类型，包括不含 Markdown 正文的统一内容控制层、应用级偏好、用户 Skill 安装目录、可恢复且可置顶/归档的任务状态、逐轮 RunPolicy/资源上下文摘要与完成原因/Token/耗时指标（AI Key 与 MCP 凭据仅保存 safeStorage 密文）
  * [POS]: 数据库结构的类型事实源；不保存 Markdown 正文
  * [DOC]: docs/architecture/database.md
  *
@@ -144,6 +144,8 @@ export const taskSessions = sqliteTable(
       .notNull()
       .default("idle"),
     waitingForInput: integer("waiting_for_input", { mode: "boolean" }).notNull().default(false),
+    pinnedAt: integer("pinned_at", { mode: "timestamp_ms" }),
+    archivedAt: integer("archived_at", { mode: "timestamp_ms" }),
     createdAt,
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
   },
@@ -154,6 +156,12 @@ export const taskSessions = sqliteTable(
     ),
     index("task_sessions_updated_idx").on(table.updatedAt),
     index("task_sessions_workspace_updated_idx").on(table.workspaceId, table.updatedAt),
+    index("task_sessions_workspace_archive_pin_idx").on(
+      table.workspaceId,
+      table.archivedAt,
+      table.pinnedAt,
+      table.updatedAt,
+    ),
   ],
 )
 

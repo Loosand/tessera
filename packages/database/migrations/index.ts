@@ -29,6 +29,7 @@ import { researchWorkflowMigration } from "./0014-research-workflow"
 import { researchQuestionPositionMigration } from "./0015-research-question-position"
 import { appSettingsMigration } from "./0016-app-settings"
 import { researchSourceRecommendationsMigration } from "./0017-research-source-recommendations"
+import { taskPlacementMigration } from "./0018-task-placement"
 import type { DatabaseMigration } from "./types"
 
 export type { DatabaseMigration } from "./types"
@@ -52,6 +53,7 @@ export const DATABASE_MIGRATIONS = [
   researchQuestionPositionMigration,
   appSettingsMigration,
   researchSourceRecommendationsMigration,
+  taskPlacementMigration,
 ] as const satisfies readonly DatabaseMigration[]
 
 export type DatabaseMigrationId = (typeof DATABASE_MIGRATIONS)[number]["id"]

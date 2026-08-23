@@ -1,6 +1,6 @@
 /**
  * [INPUT]: Electron 桌面应用当前需要的跨进程数据、生命周期、默认空间/文件工作区条目、AI 模型事实/端点绑定、MCP 服务器、用户 Skill、研究网络偏好、任务运行策略、消息反馈、内容对象、开发期 AI 日志与 Agent 变更审批形状
- * [OUTPUT]: IPC 频道、默认空间切换、当前 Space 任务分页、工作区文件操作、模型/MCP/用户 Skill/研究网络配置、类型化 RunPolicy、版本化公开运行/工具错误与引申问题、本地消息反馈、脱敏运行解释、后端无关内容引用、可恢复流式运行、开发期 AI 日志入口、客户端问答/研究计划工具、Agent Diff 审批、关闭握手与可推导的桌面 API 类型契约
+ * [OUTPUT]: IPC 频道、默认空间切换、当前 Space 任务分页、工作区文件操作、模型/MCP/用户 Skill/研究网络配置、带正安全整数限制的类型化 RunPolicy、版本化公开运行/工具错误与引申问题、本地消息反馈、脱敏运行解释、后端无关内容引用、可恢复流式运行、开发期 AI 日志入口、客户端问答/研究计划工具、Agent Diff 审批、关闭握手与可推导的桌面 API 类型契约
  * [POS]: 应用和共享包共同依赖的底层契约入口
  * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/ai-observability.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/mcp.md、docs/architecture/research-workflow.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md、docs/architecture/unified-creation-agent.md
  *
@@ -74,6 +74,8 @@ export const IPC_CHANNELS = {
   taskRead: "task:read",
   taskSave: "task:save",
   taskRename: "task:rename",
+  taskSetPinned: "task:set-pinned",
+  taskSetArchived: "task:set-archived",
   taskDelete: "task:delete",
   taskListArtifacts: "task:list-artifacts",
 } as const
@@ -955,9 +957,11 @@ export type TaskMessage = {
 }
 
 export type TaskSessionSummary = {
+  archivedAt: number | null
   createdAt: number
   id: string
   mode: TaskMode
+  pinnedAt: number | null
   skillId: TaskSkillId
   status: TaskSessionStatus
   title: string
@@ -967,6 +971,7 @@ export type TaskSessionSummary = {
 }
 
 export type TaskSessionPageRequest = {
+  archived?: boolean
   page: number
   pageSize: number
 }
@@ -1450,6 +1455,16 @@ export type DesktopApiContract = {
   renameTask: InvokeMethod<
     typeof IPC_CHANNELS.taskRename,
     [taskId: string, title: string],
+    TaskSessionSummary
+  >
+  setTaskPinned: InvokeMethod<
+    typeof IPC_CHANNELS.taskSetPinned,
+    [taskId: string, pinned: boolean],
+    TaskSessionSummary
+  >
+  setTaskArchived: InvokeMethod<
+    typeof IPC_CHANNELS.taskSetArchived,
+    [taskId: string, archived: boolean],
     TaskSessionSummary
   >
   deleteTask: InvokeMethod<typeof IPC_CHANNELS.taskDelete, [taskId: string], boolean>

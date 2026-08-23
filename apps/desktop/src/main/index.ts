@@ -1504,6 +1504,12 @@ function registerIpcHandlers() {
   handleDesktopInvoke(IPC_CHANNELS.taskRename, (_event, taskId, title) => {
     return requireDesktopTaskService().rename(taskId, title)
   })
+  handleDesktopInvoke(IPC_CHANNELS.taskSetPinned, (_event, taskId, pinned) => {
+    return requireDesktopTaskService().setPinned(taskId, pinned)
+  })
+  handleDesktopInvoke(IPC_CHANNELS.taskSetArchived, (_event, taskId, archived) => {
+    return requireDesktopTaskService().setArchived(taskId, archived)
+  })
   handleDesktopInvoke(IPC_CHANNELS.taskDelete, async (event, taskId) => {
     const taskService = requireDesktopTaskService()
     const task = taskService.read(taskId)
