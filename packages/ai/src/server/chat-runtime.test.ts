@@ -27,23 +27,29 @@ describe("Agent 工具公开增量", () => {
         toolCallId: "call-1",
         toolName: "read-workspace-file",
         input: { path: "README.md" },
+        providerExecuted: true,
       }),
     ).toEqual({
       type: "tool-input-available",
       toolCallId: "call-1",
       toolName: "read-workspace-file",
       input: { path: "README.md" },
+      providerExecuted: true,
     })
     expect(
       publicChunk({
         type: "tool-output-available",
         toolCallId: "call-1",
         output: { path: "README.md", content: "# Tessera" },
+        providerExecuted: true,
+        preliminary: false,
       }),
     ).toEqual({
       type: "tool-output-available",
       toolCallId: "call-1",
       output: { path: "README.md", content: "# Tessera" },
+      providerExecuted: true,
+      preliminary: false,
     })
   })
 

@@ -988,6 +988,7 @@ export type AiChatStreamChunk =
       type: "tool-input-start"
       toolCallId: string
       toolName: string
+      providerExecuted?: boolean
       title?: string
     }
   | { type: "tool-input-delta"; toolCallId: string; inputTextDelta: string }
@@ -996,6 +997,7 @@ export type AiChatStreamChunk =
       toolCallId: string
       toolName: string
       input: unknown
+      providerExecuted?: boolean
       title?: string
     }
   | {
@@ -1005,14 +1007,22 @@ export type AiChatStreamChunk =
       input: unknown
       errorText: string
       failure?: TaskToolErrorDataV1
+      providerExecuted?: boolean
       title?: string
     }
-  | { type: "tool-output-available"; toolCallId: string; output: unknown }
+  | {
+      type: "tool-output-available"
+      toolCallId: string
+      output: unknown
+      preliminary?: boolean
+      providerExecuted?: boolean
+    }
   | {
       type: "tool-output-error"
       toolCallId: string
       errorText: string
       failure?: TaskToolErrorDataV1
+      providerExecuted?: boolean
     }
   | { type: "tool-output-denied"; toolCallId: string }
   | {
@@ -1026,6 +1036,7 @@ export type AiChatStreamChunk =
       type: "tool-approval-response"
       approvalId: string
       approved: boolean
+      providerExecuted?: boolean
       reason?: string
     }
   | { type: "finish"; finishReason?: "stop" | "length" | "content-filter" | "tool-calls" | "error" | "other" }

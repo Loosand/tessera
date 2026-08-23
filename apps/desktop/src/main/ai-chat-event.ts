@@ -69,7 +69,10 @@ export function isAiChatStreamChunk(value: unknown): value is AiChatStreamChunk 
       )
     case "tool-input-start":
       return (
-        hasString(value, "toolCallId") && hasString(value, "toolName") && hasOptionalString(value, "title")
+        hasString(value, "toolCallId") &&
+        hasString(value, "toolName") &&
+        hasOptionalBoolean(value, "providerExecuted") &&
+        hasOptionalString(value, "title")
       )
     case "tool-input-delta":
       return hasString(value, "toolCallId") && hasString(value, "inputTextDelta")
@@ -78,6 +81,7 @@ export function isAiChatStreamChunk(value: unknown): value is AiChatStreamChunk 
         hasString(value, "toolCallId") &&
         hasString(value, "toolName") &&
         "input" in value &&
+        hasOptionalBoolean(value, "providerExecuted") &&
         hasOptionalString(value, "title")
       )
     case "tool-input-error":
@@ -87,15 +91,22 @@ export function isAiChatStreamChunk(value: unknown): value is AiChatStreamChunk 
         "input" in value &&
         hasString(value, "errorText") &&
         (value.failure === undefined || isTaskToolErrorDataV1(value.failure)) &&
+        hasOptionalBoolean(value, "providerExecuted") &&
         hasOptionalString(value, "title")
       )
     case "tool-output-available":
-      return hasString(value, "toolCallId") && "output" in value
+      return (
+        hasString(value, "toolCallId") &&
+        "output" in value &&
+        hasOptionalBoolean(value, "preliminary") &&
+        hasOptionalBoolean(value, "providerExecuted")
+      )
     case "tool-output-error":
       return (
         hasString(value, "toolCallId") &&
         hasString(value, "errorText") &&
-        (value.failure === undefined || isTaskToolErrorDataV1(value.failure))
+        (value.failure === undefined || isTaskToolErrorDataV1(value.failure)) &&
+        hasOptionalBoolean(value, "providerExecuted")
       )
     case "tool-output-denied":
       return hasString(value, "toolCallId")
@@ -110,6 +121,7 @@ export function isAiChatStreamChunk(value: unknown): value is AiChatStreamChunk 
       return (
         hasString(value, "approvalId") &&
         typeof value.approved === "boolean" &&
+        hasOptionalBoolean(value, "providerExecuted") &&
         hasOptionalString(value, "reason")
       )
     case "finish":

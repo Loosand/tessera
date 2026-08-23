@@ -284,6 +284,7 @@ export function publicChunk(
         type: "tool-input-start",
         toolCallId: chunk.toolCallId,
         toolName: chunk.toolName,
+        ...(chunk.providerExecuted !== undefined ? { providerExecuted: chunk.providerExecuted } : {}),
         ...(chunk.title ? { title: chunk.title } : {}),
       }
     case "tool-input-delta":
@@ -298,6 +299,7 @@ export function publicChunk(
         toolCallId: chunk.toolCallId,
         toolName: chunk.toolName,
         input: chunk.input,
+        ...(chunk.providerExecuted !== undefined ? { providerExecuted: chunk.providerExecuted } : {}),
         ...(chunk.title ? { title: chunk.title } : {}),
       }
     case "tool-input-error":
@@ -307,6 +309,7 @@ export function publicChunk(
         toolName: chunk.toolName,
         input: chunk.input,
         errorText: chunk.errorText,
+        ...(chunk.providerExecuted !== undefined ? { providerExecuted: chunk.providerExecuted } : {}),
         ...(chunk.title ? { title: chunk.title } : {}),
       }
     case "tool-output-available":
@@ -314,12 +317,15 @@ export function publicChunk(
         type: "tool-output-available",
         toolCallId: chunk.toolCallId,
         output: chunk.output,
+        ...(chunk.providerExecuted !== undefined ? { providerExecuted: chunk.providerExecuted } : {}),
+        ...(chunk.preliminary !== undefined ? { preliminary: chunk.preliminary } : {}),
       }
     case "tool-output-error":
       return {
         type: "tool-output-error",
         toolCallId: chunk.toolCallId,
         errorText: chunk.errorText,
+        ...(chunk.providerExecuted !== undefined ? { providerExecuted: chunk.providerExecuted } : {}),
       }
     case "tool-output-denied":
       return { type: "tool-output-denied", toolCallId: chunk.toolCallId }
@@ -336,6 +342,7 @@ export function publicChunk(
         type: "tool-approval-response",
         approvalId: chunk.approvalId,
         approved: chunk.approved,
+        ...(chunk.providerExecuted !== undefined ? { providerExecuted: chunk.providerExecuted } : {}),
         ...(chunk.reason ? { reason: chunk.reason } : {}),
       }
     case "finish":
