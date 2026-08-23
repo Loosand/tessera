@@ -12,6 +12,7 @@
 
 import { describe, expect, it } from "vitest"
 import {
+  PublicAgentToolError,
   classifyProviderStreamError,
   isWebSearchMaxUsesExceededError,
   publicChunk,
@@ -82,6 +83,19 @@ describe("Agent 工具公开增量", () => {
 })
 
 describe("Chat 运行时边界", () => {
+  it("保留 Tessera 自有领域工具的可操作公开错误", () => {
+    expect(
+      classifyProviderStreamError(
+        new PublicAgentToolError("当前运行没有这个来源的可核查正文，请重新读取来源。"),
+        "secret",
+      ),
+    ).toMatchObject({
+      code: "runtime",
+      message: "当前运行没有这个来源的可核查正文，请重新读取来源。",
+      retryable: false,
+    })
+  })
+
   it("把显式 Markdown 附件转换为有边界的模型材料", async () => {
     const content = "# 当前草稿\n\n保留未保存的编辑。"
     const messages = await toUiMessages([

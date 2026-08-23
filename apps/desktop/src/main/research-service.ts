@@ -16,7 +16,7 @@ import { request as httpRequest } from "node:http"
 import type { IncomingHttpHeaders } from "node:http"
 import { request as httpsRequest } from "node:https"
 import { BlockList, isIP } from "node:net"
-import type { ResearchAgentTools } from "@tessera/ai/server"
+import { PublicAgentToolError, type ResearchAgentTools } from "@tessera/ai/server"
 import type {
   TaskResearchEvidenceInput,
   TaskResearchFinalizeInput,
@@ -855,10 +855,12 @@ export function createDesktopResearchService(
     recordEvidence: async (evidence: TaskResearchEvidenceInput, context) => {
       context.signal.throwIfAborted()
       const body = sourceBodies.get(evidence.sourceId)
-      if (!body) throw new Error("当前运行没有这个来源的可核查正文。")
+      if (!body) {
+        throw new PublicAgentToolError("当前运行没有这个来源的可核查正文，请重新读取来源。")
+      }
       const excerpt = normalizeText(evidence.excerpt)
       if (excerpt.length < 8 || !normalizeText(body).includes(excerpt)) {
-        throw new Error("证据片段必须逐字来自已读取正文。")
+        throw new PublicAgentToolError("证据片段必须逐字来自已读取正文，请缩短或重新选择原文片段。")
       }
       const record = saveResearchEvidence(client, {
         id: `evidence-${randomUUID()}`,
@@ -870,7 +872,7 @@ export function createDesktopResearchService(
         excerpt: evidence.excerpt,
         locator: evidence.locator ?? null,
       })
-      if (!record) throw new Error("研究证据保存失败。")
+      if (!record) throw new PublicAgentToolError("研究证据保存失败，请重试登记这条证据。")
       return { evidenceId: record.id, requestId: input.requestId, status: "recorded" }
     },
     recommendSources: async ({ recommendations }, context): Promise<TaskResearchRecommendSourcesOutput> => {
@@ -878,7 +880,7 @@ export function createDesktopResearchService(
       const run = requiredRun(client, input.requestId)
       const evidenceSourceIds = new Set(run.evidence.map((evidence) => evidence.sourceId))
       if (recommendations.some((recommendation) => !evidenceSourceIds.has(recommendation.sourceId))) {
-        throw new Error("推荐来源必须已经进入当前研究的证据链。")
+        throw new PublicAgentToolError("推荐来源必须已经进入当前研究的证据链，请先登记对应证据。")
       }
       const saved = saveResearchRecommendations(
         client,
@@ -889,7 +891,7 @@ export function createDesktopResearchService(
           reason: recommendation.reason,
         })),
       )
-      if (!saved) throw new Error("研究来源推荐保存失败。")
+      if (!saved) throw new PublicAgentToolError("研究来源推荐保存失败，请重试。")
       return {
         status: "recommended",
         requestId: input.requestId,

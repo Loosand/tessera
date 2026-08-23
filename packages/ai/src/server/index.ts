@@ -60,7 +60,7 @@ export {
   moveManagedDocumentsInputSchema,
 } from "./content-domain-tools"
 export type { AiChatRuntimeInput } from "./chat-runtime"
-export { classifyProviderStreamError } from "./chat-runtime"
+export { PublicAgentToolError, classifyProviderStreamError } from "./chat-runtime"
 export {
   type AiModelDiscoveryOptions,
   AiProviderConnectionError,

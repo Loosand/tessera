@@ -30,6 +30,16 @@ const MAX_MARKDOWN_CONTEXT_BYTES = 256 * 1024
 const MAX_ERROR_MESSAGE_LENGTH = 320
 const DEFAULT_WEB_SEARCH_MAX_USES = 12
 const RESEARCH_WEB_SEARCH_MAX_USES = 30
+const publicAgentToolErrors = new WeakSet<object>()
+
+/** 标记由 Tessera 自有领域工具生成、可以安全展示给用户的操作错误。 */
+export class PublicAgentToolError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "PublicAgentToolError"
+    publicAgentToolErrors.add(this)
+  }
+}
 
 type UnknownRecord = Record<string, unknown>
 
@@ -105,6 +115,16 @@ function errorMessageWithStatus(message: string, httpStatus: number | undefined)
 
 /** 在 AI SDK 把 unknown error 压成字符串前，提取可公开的类别与 HTTP 状态。 */
 export function classifyProviderStreamError(error: unknown, apiKey: string): TaskRunErrorDataV1 {
+  if (error && typeof error === "object" && publicAgentToolErrors.has(error)) {
+    const message = error instanceof Error ? error.message : "工具执行失败。"
+    return {
+      code: "runtime",
+      message: message.split(apiKey || "\0").join("[已隐藏]").slice(0, MAX_ERROR_MESSAGE_LENGTH),
+      phase: "stream",
+      retryable: false,
+      version: 1,
+    }
+  }
   const { httpStatus, searchable } = providerErrorSignals(error, apiKey)
   let code: TaskRunErrorCode
   let message: string
