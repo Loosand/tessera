@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 应用信息、useWorkspace 文档会话与隐式统一 Agent、Artifact、内置/用户创作 Skill 的 useTasks 任务导航状态
- * [OUTPUT]: 默认空间/文件工作区的持久化 Space 壳层、互斥的新任务/历史任务选中态、用户 Skill 管理、分页最近任务与全部任务页、文件树共存的统一侧栏、保活任务/编辑器、独立可调宽文档对话侧栏、Artifact 到文档加同一会话、跨空间恢复和文档主区域
+ * [OUTPUT]: 默认空间/文件工作区的持久化 Space 壳层、互斥的新任务/历史任务选中态、用户 Skill 管理、渐进加载最近任务与全部任务页、文件树共存的统一侧栏、保活任务/编辑器、独立可调宽文档对话侧栏、Artifact 到文档加同一会话、跨空间恢复和文档主区域
  * [POS]: Tessera 桌面端的顶层产品壳层
  * [DOC]: design.md、docs/architecture.md、docs/architecture/unified-creation-agent.md、docs/architecture/editor.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -47,13 +47,7 @@ export function resolveHomeSidebarSelection(input: HomeSidebarSelectionInput) {
   const persistedTaskActive = input.activeTaskPersisted && (input.view === "task" || input.agentOpen)
   return {
     activeItem:
-      input.view === "skills"
-        ? ("skills" as const)
-        : input.view === "tasks"
-          ? ("all-tasks" as const)
-          : draftTaskActive
-            ? ("new-task" as const)
-            : null,
+      input.view === "skills" ? ("skills" as const) : draftTaskActive ? ("new-task" as const) : null,
     activeTaskId: persistedTaskActive ? input.activeTaskId : undefined,
   }
 }

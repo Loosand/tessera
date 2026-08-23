@@ -16,7 +16,14 @@ export {
   type ActivityTraceProps,
   type ActivityTraceStatus,
 } from "./components/activity-trace"
-export { LoadingState, type LoadingStateProps, type LoadingStateVariant } from "./components/loading-state"
+export {
+  LoadingState,
+  LoadingStateGrid,
+  type LoadingStateGridProps,
+  type LoadingStateGridVariant,
+  type LoadingStateProps,
+  type LoadingStateVariant,
+} from "./components/loading-state"
 export {
   SelectionActions,
   type SelectionActionItem,

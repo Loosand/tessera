@@ -13,6 +13,8 @@
 import type {
   ActivityTraceProps,
   ActivityTraceStatus,
+  LoadingStateGridProps,
+  LoadingStateGridVariant,
   LoadingStateProps,
   LoadingStateVariant,
   NativeSelectProps,
@@ -34,6 +36,8 @@ type Expect<Value extends true> = Value
 export type DesignSystemTypeContract = [
   Expect<Equal<ActivityTraceStatus, "active" | "complete" | "error">>,
   Expect<Equal<LoadingStateVariant, "drive" | "dots" | "orbit" | "surfer">>,
+  Expect<Equal<LoadingStateGridVariant, "drive" | "dots" | "orbit">>,
+  Expect<Equal<NonNullable<LoadingStateGridProps["variant"]>, LoadingStateGridVariant>>,
   Expect<Equal<NonNullable<LoadingStateProps["variant"]>, LoadingStateVariant>>,
   Expect<Equal<NonNullable<NativeSelectProps["size"]>, "default" | "sm">>,
   Expect<Equal<SelectionActionsStatus, "idle" | "thinking" | "streaming" | "result" | "error">>,

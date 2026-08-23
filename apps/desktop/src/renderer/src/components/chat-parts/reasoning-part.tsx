@@ -1,6 +1,6 @@
 /**
  * [INPUT]: AI SDK 单个 reasoning 生命周期/摘要 Part 及当前回复流式状态
- * [OUTPUT]: 始终可见的真实思考阶段；有摘要时可展开、计时、限高滚动并渲染 Markdown，无摘要时不伪造正文
+ * [OUTPUT]: 始终可见的真实思考阶段；有摘要时以无时间线布局展开、计时、限高滚动并渲染 Markdown，无摘要时不伪造正文
  * [POS]: ChatMessage 内按原始 Part 顺序呈现的 reasoning 单元
  * [DOC]: design.md、docs/architecture/ai-observability.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/ai-providers.md
  *
@@ -100,7 +100,7 @@ export function ReasoningPart({ part, streaming }: ReasoningPartProps) {
         />
       </button>
       {expanded ? (
-        <div className="mt-2 ml-[7px] border-l border-border pl-[23px]">
+        <div className="mt-2 pl-[23px]">
           <section
             aria-label="模型思考过程"
             className="max-h-48 overflow-y-auto pr-2 [scrollbar-gutter:stable] focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"

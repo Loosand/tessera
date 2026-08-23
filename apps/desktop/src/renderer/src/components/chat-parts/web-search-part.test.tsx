@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 包含标准 action/sources、旧结果数组与 URL 来源的 AI SDK 消息 Part，以及 favicon URL 派生规则
- * [OUTPUT]: 跨供应商联网检索轨迹聚合、去重、安全呈现与网站图标回退的回归验证
+ * [OUTPUT]: 跨供应商联网检索轨迹聚合、去重、限高滚动、安全呈现与网站图标回退的回归验证
  * [POS]: web-search-part 的数据适配与渲染单元测试
  * [DOC]: design.md、docs/architecture/ai-providers.md
  *
@@ -123,6 +123,11 @@ describe("联网搜索轨迹", () => {
     expect(markup).toContain('rel="noreferrer"')
     expect(markup).toContain('src="https://example.com/favicon.ico"')
     expect(markup).toContain('referrerPolicy="no-referrer"')
+    expect(markup).toContain("max-h-64")
+    expect(markup).toContain("overflow-y-auto")
+    expect(markup).toContain('<section aria-label="联网搜索过程"')
+    expect(markup).toContain('aria-label="联网搜索过程"')
+    expect(markup).toContain('tabindex="0"')
     expect(markup).not.toContain("不得进入界面的供应商续轮数据")
     expect(markup).not.toContain("javascript:alert")
   })

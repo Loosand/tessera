@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 顶层视图、当前任务持久化状态与文档 AI 侧栏状态
- * [OUTPUT]: 新任务、全部任务入口和历史任务行保持互斥选中的回归验证
+ * [OUTPUT]: 新任务、全部任务页面和历史任务行保持互斥选中的回归验证
  * [POS]: app-shell 侧栏导航选中态的纯函数单元测试
  * [DOC]: docs/architecture/task-navigation.md
  *
@@ -47,7 +47,7 @@ describe("主侧栏选中态", () => {
     ).toEqual({ activeItem: null, activeTaskId: "sidebar-task" })
   })
 
-  it("全部任务页只选中其一级入口", () => {
+  it("全部任务页不占用侧栏一级菜单选中态", () => {
     expect(
       resolveHomeSidebarSelection({
         activeTaskId: "saved-task",
@@ -55,6 +55,6 @@ describe("主侧栏选中态", () => {
         agentOpen: false,
         view: "tasks",
       }),
-    ).toEqual({ activeItem: "all-tasks", activeTaskId: undefined })
+    ).toEqual({ activeItem: null, activeTaskId: undefined })
   })
 })

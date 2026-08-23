@@ -210,6 +210,12 @@
     animation: none;
   }
 
+  .tessera-loading-pixel[data-paused] {
+    opacity: 0.15;
+    transform: none;
+    animation: none;
+  }
+
   .tessera-loading-label {
     background-image: linear-gradient(
       90deg,

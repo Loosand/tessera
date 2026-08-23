@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 当前任务运行状态、可选的本轮单调时钟区间、是否存在可展开过程与现有结构化过程 UI
- * [OUTPUT]: “已工作”统一折叠区块和消息流末尾常驻的闪烁“正在处理”状态
- * [POS]: ChatMessage 与 TaskPage 共享的整轮运行反馈模式
+ * [OUTPUT]: 以像素网格与文字 shimmer 表达运行态、完成后默认折叠的“已工作”统一过程区块
+ * [POS]: ChatMessage 使用的整轮工作过程反馈模式
  * [DOC]: design.md、docs/architecture/ai-observability.md
  *
  * [PROTOCOL]:
@@ -10,7 +10,8 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import { ArrowDown01Icon, SparklesIcon } from "@tessera/design-system/components/icons"
+import { ArrowDown01Icon } from "@tessera/design-system/components/icons"
+import { LoadingStateGrid } from "@tessera/design-system/components/loading-state"
 import { Icon } from "@tessera/design-system/components/ui/icon"
 import React, { type ReactNode, useEffect, useRef, useState } from "react"
 
@@ -67,8 +68,12 @@ export function TaskWorkTrace({ children, hasDetails, running, timing }: TaskWor
   const label = timing ? `已工作 ${formatElapsed(elapsed)}` : "工作过程"
   const header = (
     <>
-      <Icon icon={SparklesIcon} size={15} className="shrink-0" />
-      <span>{label}</span>
+      <LoadingStateGrid active={running} />
+      <span
+        className={running ? "tessera-loading-label bg-clip-text text-transparent" : "text-muted-foreground"}
+      >
+        {label}
+      </span>
       {hasDetails ? (
         <Icon
           icon={ArrowDown01Icon}
@@ -94,32 +99,7 @@ export function TaskWorkTrace({ children, hasDetails, running, timing }: TaskWor
         <div className="flex items-center gap-2 py-1 text-[13px] font-medium">{header}</div>
       )}
 
-      {hasDetails && expanded ? (
-        <div className="mt-1 ml-[7px] border-l border-border pl-[22px]">{children}</div>
-      ) : null}
+      {hasDetails && expanded ? <div className="mt-1 pl-[22px]">{children}</div> : null}
     </section>
-  )
-}
-
-export function TaskRunStatus() {
-  const elapsed = useElapsed(null, true)
-
-  return (
-    <output
-      className="flex w-fit items-center gap-2 py-1 text-[13px] text-muted-foreground"
-      data-slot="task-run-status"
-      aria-label="任务仍在处理"
-    >
-      <span className="relative flex size-5 shrink-0 items-center justify-center" aria-hidden="true">
-        <span className="absolute inset-0 rounded-full bg-foreground/8 motion-safe:animate-ping" />
-        <Icon icon={SparklesIcon} size={15} className="relative motion-safe:animate-pulse" />
-      </span>
-      <span aria-hidden="true" className="font-medium">
-        正在处理
-      </span>
-      <span aria-hidden="true" className="font-mono text-[12px] tabular-nums">
-        {formatElapsed(elapsed)}
-      </span>
-    </output>
   )
 }

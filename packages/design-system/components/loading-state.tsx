@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 加载提示、像素动画变体、可选 Surfer 视频与标准 output 属性
- * [OUTPUT]: 带像素网格、低干扰状态文案和实时耗时的 LoadingState 复合组件
+ * [OUTPUT]: 可独立复用的像素网格，以及带低干扰状态文案和实时耗时的 LoadingState 复合组件
  * [POS]: 设计系统中供长耗时任务复用的状态反馈模式
  * [DOC]: design.md
  *
@@ -63,6 +63,14 @@ const GRID_PATTERNS = {
 
 export type LoadingStateVariant = keyof typeof GRID_PATTERNS | "surfer"
 
+export type LoadingStateGridVariant = Exclude<LoadingStateVariant, "surfer">
+
+export type LoadingStateGridProps = Readonly<{
+  active?: boolean
+  className?: string
+  variant?: LoadingStateGridVariant
+}>
+
 export type LoadingStateProps = Omit<ComponentProps<"output">, "children"> &
   Readonly<{
     label?: string
@@ -70,11 +78,13 @@ export type LoadingStateProps = Omit<ComponentProps<"output">, "children"> &
     videoSrc?: string
   }>
 
-function LoaderGrid({ delays, duration, round }: LoaderPattern) {
+export function LoadingStateGrid({ active = true, className, variant = "drive" }: LoadingStateGridProps) {
+  const { delays, duration, round } = GRID_PATTERNS[variant]
+
   return (
     <span
       aria-hidden="true"
-      className="grid shrink-0 grid-cols-[repeat(3,4px)] gap-[1.5px]"
+      className={cn("grid shrink-0 grid-cols-[repeat(3,4px)] gap-[1.5px]", className)}
       data-slot="loading-state-grid"
     >
       {delays.map((delay, index) => (
@@ -85,6 +95,7 @@ function LoaderGrid({ delays, duration, round }: LoaderPattern) {
             round ? "rounded-full" : "rounded-[1px]",
           )}
           data-inactive={delay === null ? "" : undefined}
+          data-paused={active ? undefined : ""}
           style={loadingPixelStyle(delay, duration)}
         />
       ))}
@@ -150,14 +161,14 @@ export function LoadingState({
 }: LoadingStateProps) {
   const surfer = variant === "surfer"
   const resolvedLabel = label ?? (surfer ? "Subway surfing" : "正在处理")
-  const pattern = GRID_PATTERNS[surfer ? "drive" : variant]
+  const gridVariant = variant === "surfer" ? "drive" : variant
   const [failedVideoSrc, setFailedVideoSrc] = useState<string>()
   const reducedMotion = usePrefersReducedMotion()
   const videoAvailable = failedVideoSrc !== videoSrc
 
   const status = (
     <div aria-hidden="true" className="flex items-center gap-2.5">
-      <LoaderGrid {...pattern} />
+      <LoadingStateGrid variant={gridVariant} />
       <span className="tessera-loading-label bg-clip-text text-[13px] font-medium text-transparent">
         {resolvedLabel}
       </span>
@@ -192,7 +203,7 @@ export function LoadingState({
               />
             ) : (
               <div className="flex size-full flex-col items-center justify-center gap-1.5 text-muted-foreground">
-                <LoaderGrid {...GRID_PATTERNS.drive} />
+                <LoadingStateGrid />
                 <span className="px-3 text-center font-mono text-[10px]">
                   {reducedMotion ? "已减少动态效果" : "视频不可用"}
                 </span>

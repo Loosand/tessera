@@ -1,6 +1,6 @@
 /**
  * [INPUT]: AI SDK provider-executed web_search Tool Part、同消息 URL 来源、回复流式状态与 HTTPS favicon 资源
- * [OUTPUT]: 兼容标准 action/sources 与旧结果数组、聚合真实查询和打开页面的可展开联网检索轨迹
+ * [OUTPUT]: 兼容标准 action/sources 与旧结果数组、聚合真实查询和打开页面的可展开限高联网检索轨迹
  * [POS]: ChatMessage 内替代通用工具行与尾部来源胶囊的搜索过程单元
  * [DOC]: design.md、docs/architecture/ai-providers.md
  *
@@ -250,48 +250,55 @@ export function WebSearchPart({ parts, streaming }: WebSearchPartProps) {
       icon={<Icon icon={AiWebBrowsingIcon} size={15} />}
       status={status}
     >
-      <div className="flex flex-col gap-1">
-        {trace.queries.map((query) => (
-          <div className="flex min-h-7 items-center gap-2 rounded-md px-1.5 py-0.5" key={query}>
-            <Icon className="shrink-0 text-muted-foreground" icon={Search01Icon} size={14} />
-            <span className="min-w-0 truncate text-[12.5px] text-foreground">{query}</span>
-          </div>
-        ))}
+      {/* biome-ignore lint/a11y/noNoninteractiveTabindex: 限高滚动区需要进入键盘焦点顺序，才能独立滚动长检索轨迹。 */}
+      <section
+        aria-label="联网搜索过程"
+        className="max-h-64 overflow-y-auto pr-1 [scrollbar-gutter:stable] focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        tabIndex={0}
+      >
+        <div className="flex flex-col gap-1">
+          {trace.queries.map((query) => (
+            <div className="flex min-h-7 items-center gap-2 rounded-md px-1.5 py-0.5" key={query}>
+              <Icon className="shrink-0 text-muted-foreground" icon={Search01Icon} size={14} />
+              <span className="min-w-0 truncate text-[12.5px] text-foreground">{query}</span>
+            </div>
+          ))}
 
-        {visibleResults.map((result) => (
-          <a
-            className="flex min-h-7 items-center gap-2 rounded-md px-1.5 py-0.5 text-left transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            href={result.url}
-            key={result.url}
-            rel="noreferrer"
-            target="_blank"
-          >
-            <SourceFavicon result={result} />
-            <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-foreground">
-              {sourceLabel(result)}
-            </span>
-            <span className="max-w-40 shrink-0 truncate text-[11.5px] text-muted-foreground">
-              {result.pageAge || sourceHost(result)}
-            </span>
-          </a>
-        ))}
+          {visibleResults.map((result) => (
+            <a
+              className="flex min-h-7 items-center gap-2 rounded-md px-1.5 py-0.5 text-left transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              href={result.url}
+              key={result.url}
+              rel="noreferrer"
+              target="_blank"
+            >
+              <SourceFavicon result={result} />
+              <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-foreground">
+                {sourceLabel(result)}
+              </span>
+              <span className="max-w-40 shrink-0 truncate text-[11.5px] text-muted-foreground">
+                {result.pageAge || sourceHost(result)}
+              </span>
+            </a>
+          ))}
 
-        {trace.errorText ? (
-          <p className="px-1.5 py-1 text-xs leading-5 text-destructive">{trace.errorText}</p>
-        ) : null}
+          {trace.errorText ? (
+            <p className="px-1.5 py-1 text-xs leading-5 text-destructive">{trace.errorText}</p>
+          ) : null}
 
-        {hiddenResultCount > 0 ? (
-          <Button
-            className="ml-1 w-fit text-xs text-muted-foreground"
-            onClick={() => setShowAll(true)}
-            size="xs"
-            type="button"
-            variant="ghost"
-          >
-            查看其余 {hiddenResultCount} 个来源
-          </Button>
-        ) : null}
-      </div>
+          {hiddenResultCount > 0 ? (
+            <Button
+              className="ml-1 w-fit text-xs text-muted-foreground"
+              onClick={() => setShowAll(true)}
+              size="xs"
+              type="button"
+              variant="ghost"
+            >
+              查看其余 {hiddenResultCount} 个来源
+            </Button>
+          ) : null}
+        </div>
+      </section>
     </ActivityTrace>
   )
 }

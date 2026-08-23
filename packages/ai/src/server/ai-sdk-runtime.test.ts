@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 五类供应商配置、联网搜索额度与真实 AI SDK provider 工厂
- * [OUTPUT]: 供应商到 AI SDK LanguageModel、原生联网工具和有界搜索额度的映射回归验证
+ * [OUTPUT]: 密钥请求头校验、供应商到 AI SDK LanguageModel、原生联网工具和有界搜索额度的映射回归验证
  * [POS]: @tessera/ai/server AI SDK 适配器单元测试
  * [DOC]: docs/architecture/ai-providers.md
  *
@@ -42,6 +42,18 @@ describe("AI SDK 供应商适配", () => {
         apiKey: "test-key",
       }),
     ).toThrow("请先选择模型")
+  })
+
+  it("在创建供应商客户端前拒绝包含中文的 API Key", () => {
+    expect(() =>
+      createAiSdkLanguageModel({
+        configId: "openrouter",
+        providerId: "openrouter",
+        baseUrl: "https://openrouter.ai/api/v1",
+        modelId: "provider/model",
+        apiKey: "我的 API Key",
+      }),
+    ).toThrow("请只粘贴供应商提供的原始 Key")
   })
 
   it("拒绝非 HTTP(S) 的运行时地址", () => {

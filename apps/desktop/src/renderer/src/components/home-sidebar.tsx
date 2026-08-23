@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 当前 Space、服务端分页任务读取、作用域任务实时快照、文件索引、最近文件工作区与任务/文件/Skill/Space 操作
- * [OUTPUT]: Eigent 风格内嵌一级侧栏，顶部切换 Space，连续呈现可翻页的当前 Space 任务、全部任务入口与文件树
+ * [OUTPUT]: Eigent 风格内嵌一级侧栏，顶部切换 Space，以加载更多呈现当前 Space 最近任务，并通过区块标题进入全部任务页
  * [POS]: Tessera Space 壳层的主导航侧栏
  * [DOC]: design.md、docs/architecture/editor.md、docs/architecture/task-navigation.md
  *
@@ -18,8 +18,8 @@ import type {
   WorkspaceInfo,
 } from "@tessera/contracts"
 import {
+  ArrowRight01Icon,
   BookOpen01Icon,
-  ListViewIcon,
   PanelLeftCloseIcon,
   Settings01Icon,
   TaskAdd01Icon,
@@ -27,17 +27,17 @@ import {
 import { Button } from "@tessera/design-system/components/ui/button"
 import { Icon } from "@tessera/design-system/components/ui/icon"
 import React, { useMemo } from "react"
-import { type TaskPageLoader, useTaskPage } from "../hooks/use-task-page"
+import { useTaskFeed } from "../hooks/use-task-feed"
+import type { TaskPageLoader } from "../hooks/use-task-page"
 import { SpaceFilesSection } from "./space-files-section"
 import { SpaceSwitcher } from "./space-switcher"
 import { TaskContextMenu } from "./task-context-menu"
 import { TaskNavigationRow } from "./task-navigation-row"
-import { TaskPaginationControls } from "./task-pagination-controls"
 
 const TASK_LOADING_PLACEHOLDERS = ["first", "second", "third"] as const
 
 type HomeSidebarProps = Readonly<{
-  activeItem: "all-tasks" | "new-task" | "skills" | null
+  activeItem: "new-task" | "skills" | null
   activeTaskId: string | undefined
   activeDocumentPath: string | undefined
   directories: readonly WorkspaceDirectoryEntry[]
@@ -131,14 +131,14 @@ export function HomeSidebar({
   onShowAllTasks,
   onShowSkills,
 }: HomeSidebarProps) {
-  const taskPage = useTaskPage({
+  const taskFeed = useTaskFeed({
     loadPage: loadTasksPage,
     pageSize: 6,
     refreshKey: taskListRevision,
     scopeKey: workspace?.id ?? "default-space",
   })
   const liveTasksById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks])
-  const visibleTasks = taskPage.result.items.map((task) => liveTasksById.get(task.id) ?? task)
+  const visibleTasks = taskFeed.result.items.map((task) => liveTasksById.get(task.id) ?? task)
 
   return (
     <aside className="flex h-full min-h-0 w-62.5 shrink-0 flex-col rounded-2xl border border-sidebar-border/60 bg-sidebar text-sidebar-foreground shadow-[inset_0_1px_0_color-mix(in_oklch,var(--background)_70%,transparent)] max-[760px]:w-[240px] max-[760px]:shadow-xl">
@@ -177,12 +177,6 @@ export function HomeSidebar({
             onClick={onNewTask}
           />
           <NavigationRow
-            icon={ListViewIcon}
-            label="全部任务"
-            active={activeItem === "all-tasks"}
-            onClick={onShowAllTasks}
-          />
-          <NavigationRow
             icon={BookOpen01Icon}
             label="技能"
             active={activeItem === "skills"}
@@ -192,8 +186,18 @@ export function HomeSidebar({
 
         <div className="mt-5 min-h-0 flex-1 overflow-y-auto pb-3">
           <section>
-            <p className="px-2 pb-1 text-[10px] font-medium text-muted-foreground">最近任务</p>
-            <div className="grid gap-0.5">
+            <div className="flex items-center justify-between gap-2 px-2 pb-1">
+              <p className="text-[10px] font-medium text-muted-foreground">最近任务</p>
+              <button
+                type="button"
+                className="flex items-center gap-0.5 rounded-md px-1 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                onClick={onShowAllTasks}
+              >
+                查看全部任务
+                <Icon icon={ArrowRight01Icon} size={10} />
+              </button>
+            </div>
+            <div className="grid gap-0.5 pr-1">
               {visibleTasks.map((task) => (
                 <TaskContextMenu
                   key={task.id}
@@ -212,7 +216,7 @@ export function HomeSidebar({
                   onDelete={onDeleteTask}
                 />
               ))}
-              {taskPage.loading && visibleTasks.length === 0 ? (
+              {taskFeed.loading && visibleTasks.length === 0 ? (
                 <div className="grid gap-1 px-2 py-1.5" aria-label="正在读取任务">
                   {TASK_LOADING_PLACEHOLDERS.map((placeholder) => (
                     <span
@@ -222,27 +226,28 @@ export function HomeSidebar({
                   ))}
                 </div>
               ) : null}
-              {taskPage.error ? (
+              {taskFeed.error ? (
                 <button
                   type="button"
                   className="w-full rounded-md px-2 py-2 text-left text-[10px] leading-4 text-destructive hover:bg-destructive/8"
-                  onClick={taskPage.reload}
+                  onClick={taskFeed.reload}
                 >
-                  {taskPage.error} 点击重试。
+                  {taskFeed.error} 点击重试。
                 </button>
               ) : null}
-              {!taskPage.loading && !taskPage.error && taskPage.result.total === 0 ? (
+              {!taskFeed.loading && !taskFeed.error && taskFeed.result.total === 0 ? (
                 <p className="px-2 py-2 text-[11px] leading-5 text-muted-foreground">这里还没有任务。</p>
               ) : null}
             </div>
-            {taskPage.result.totalPages > 1 ? (
-              <TaskPaginationControls
-                compact
-                page={taskPage.page}
-                total={taskPage.result.total}
-                totalPages={taskPage.result.totalPages}
-                onPageChange={taskPage.goToPage}
-              />
+            {taskFeed.hasMore ? (
+              <button
+                type="button"
+                className="mt-1 flex h-7 w-full items-center justify-center rounded-lg text-[10px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground disabled:pointer-events-none disabled:opacity-60"
+                disabled={taskFeed.loading}
+                onClick={taskFeed.loadMore}
+              >
+                {taskFeed.loading ? "正在加载…" : "加载更多"}
+              </button>
             ) : null}
           </section>
 

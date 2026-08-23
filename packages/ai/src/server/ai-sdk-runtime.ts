@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 类型化供应商连接、请求期模型端点、自动联网策略、搜索额度与 AI SDK 官方供应商适配器
- * [OUTPUT]: 可交给 AI SDK generateText/streamText 的统一 LanguageModel、端点专属 provider options、分层搜索额度与显式支持的原生联网工具
+ * [OUTPUT]: 经请求头安全密钥校验、可交给 AI SDK generateText/streamText 的统一 LanguageModel、端点专属 provider options、分层搜索额度与显式支持的原生联网工具
  * [POS]: @tessera/ai/server 的真实生成模型适配边界
  * [DOC]: docs/architecture/ai-providers.md
  *
@@ -17,6 +17,7 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
 import { createXai } from "@ai-sdk/xai"
 import type { AiModelEndpointType, AiProviderConnectionInput } from "@tessera/contracts"
 import type { JSONValue, LanguageModel, ToolSet } from "ai"
+import { aiProviderApiKeyValidationMessage } from "./api-key-validation"
 
 const DEFAULT_WEB_SEARCH_MAX_USES = 12
 const MAX_WEB_SEARCH_MAX_USES = 50
@@ -42,6 +43,8 @@ function normalizedRuntimeInput(input: AiLanguageModelInput) {
   const rawBaseUrl = input.baseUrl.trim()
   const modelId = input.modelId.trim()
   if (!apiKey) throw new Error("请先输入 API Key。")
+  const apiKeyValidationMessage = aiProviderApiKeyValidationMessage(apiKey)
+  if (apiKeyValidationMessage) throw new Error(apiKeyValidationMessage)
   if (!rawBaseUrl) throw new Error("请先输入 API 地址。")
   if (!modelId) throw new Error("请先选择模型。")
 

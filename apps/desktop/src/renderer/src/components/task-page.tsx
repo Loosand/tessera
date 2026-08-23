@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 隐式执行模式/创作方式的任务快照、可选工作区/当前文档草稿、Artifact、页面或侧栏表面、导航回调、AI 模型与 Electron useChat/运行解释桥
- * [OUTPUT]: 主任务与独立文档对话侧栏共用的 Space 落地页、作用域最近任务、首次发送懒创建、无误保存的历史恢复、首帧定位到最新消息、显式文档上下文、Artifact 导航、同源 RunPolicy 预检、整轮计时/常驻运行反馈、流式恢复、引申问题带入、本地消息反馈、按需运行解释、Agent Diff 审批和持续保存会话表面
+ * [OUTPUT]: 主任务与独立文档对话侧栏共用的 Space 落地页、作用域最近任务、首次发送懒创建、无误保存的历史恢复、首帧定位到最新消息、显式文档上下文、Artifact 导航、同源 RunPolicy 预检、整轮工作计时、流式恢复、引申问题带入、本地消息反馈、按需运行解释、Agent Diff 审批和持续保存会话表面
  * [POS]: Tessera 主任务页与文档 AI 侧栏共用的单一对话实现
  * [DOC]: design.md、docs/architecture/unified-creation-agent.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -60,7 +60,7 @@ import {
 } from "../hooks/use-ai-models"
 import type { ActiveTask } from "../hooks/use-tasks"
 import { ChatMessage } from "./chat-message"
-import { TaskRunStatus, type TaskRunTiming } from "./chat-parts/task-run-activity"
+import type { TaskRunTiming } from "./chat-parts/task-run-activity"
 import { aiModelKey } from "./model-picker"
 import { TaskArtifactTray } from "./task-artifact-tray"
 import { type ComposerImage, TaskComposer } from "./task-composer"
@@ -750,11 +750,6 @@ export function TaskPage({
                         compact={surface === "sidebar"}
                         onOpen={onOpenArtifact}
                       />
-                    </div>
-                  ) : null}
-                  {running ? (
-                    <div className="pt-1">
-                      <TaskRunStatus />
                     </div>
                   ) : null}
                 </MessageScrollerContent>

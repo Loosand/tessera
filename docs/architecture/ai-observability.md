@@ -10,7 +10,7 @@
 > `packages/ai/src/server/task-agent.ts`、`packages/ai/src/server/follow-up-questions.ts`、`packages/database/schema.ts`、
 > `packages/database/task-run-repository.ts`、`packages/contracts/src/index.ts`
 >
-> 状态：部分实现。开发环境的 AI SDK 官方 DevTools、统一 Agent 观测标识、正式回答前统一工作过程/常驻运行反馈、版本化运行/工具错误、SQLite 脱敏运行汇总及消息级按需运行解释已实现；有限保留的生产诊断事件与历史列表仍在规划。
+> 状态：部分实现。开发环境的 AI SDK 官方 DevTools、统一 Agent 观测标识、正式回答前统一工作过程反馈、版本化运行/工具错误、SQLite 脱敏运行汇总及消息级按需运行解释已实现；有限保留的生产诊断事件与历史列表仍在规划。
 
 ## 决策
 
@@ -75,7 +75,7 @@ ToolLoopAgent / generateText / streamText
 - **已实现**：以最后一次信息性自动执行划分正式回答；此前 reasoning、过程说明、联网搜索、研究计划与自动工具统一进入“已工作 x”区块。运行中展开，进入终态后折叠，并从脱敏运行记录恢复历史耗时。
 - **已实现**：请求用户回答、人工审批、拒绝、失败、正式产物与最终正文保留在统一过程之外；专用活动继续使用结构化 UI，通用自动工具只显示动作、目标和状态，不呈现原始输入 JSON。
 - **已实现**：只有 reasoning 文本非空时才出现可展开正文；空 reasoning 生命周期只参与整轮工作状态，不因每次搜索前后刷出重复节点。
-- **已实现**：提交到终态之间，消息流末尾始终呈现带闪烁图标的“正在处理 x”通用状态；它不因已有 reasoning、工具或正文 Part 出现而提前消失，也不把整个 Agent 运行误称为“思考中”。
+- **已实现**：运行中的“已工作 x”使用 3×3 像素网格和文字 shimmer 表达活动状态，结束后动效静止；展开过程不绘制左侧时间线，消息流末尾不再重复常驻“正在处理 x”。
 - **已实现**：工具活动由真实 Tool Part 表达，不根据 reasoning 文本或空生命周期伪造搜索、读取或执行记录。
 - **已实现**：provider-executed 联网工具按 AI SDK 标准 `output.action` / `output.sources` 恢复查询与打开页面；不能因工具 `input` 为空而只显示次数、不显示过程。
 - **约束**：阶段状态不等于推理正文；不得用占位文案冒充模型推理，不得把内部链式思维补写成可见内容。

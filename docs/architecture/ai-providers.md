@@ -119,6 +119,7 @@ useChat + Electron ChatTransport
 ## 安全边界
 
 - API Key 不写 localStorage、不以明文写数据库或日志；SQLite 的 `api_key_ciphertext` 只保存 Electron `safeStorage.encryptString()` 结果。
+- 新输入和已加密保存的 API Key 在持久化、目录发现与生成请求前都会校验为可打印 ASCII；包含中文、空格、换行或说明文字时返回可操作提示，不把运行时 `ByteString` 异常暴露给用户。
 - 系统安全存储不可用时，普通配置仍可保存，但包含新 Key 的保存会被拒绝，禁止降级为明文。
 - 列表 IPC 只返回 `apiKeyConfigured`；目录检查、模型同步和后续生成在主进程按需解密，不把持久化 Key 发回 renderer。
 - 保存时未输入新 Key 会保留旧密文；删除配置会同时删除 Base URL、模型状态和密文。配置变更事件用于多窗口和任务页重新读取；同一 renderer 内的模型重读串行合并，避免竞态丢弃 SQLite 快照。

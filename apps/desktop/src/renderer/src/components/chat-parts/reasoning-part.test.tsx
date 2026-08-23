@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 长文本、空摘要与流式状态下的 AI SDK reasoning Part
- * [OUTPUT]: 思考区域限高、独立滚动、可访问状态与完成态空摘要仅保留阶段外壳的回归验证
+ * [OUTPUT]: 思考区域无左侧时间线、限高、独立滚动、可访问状态与完成态空摘要仅保留阶段外壳的回归验证
  * [POS]: reasoning-part 的布局边界单元测试
  * [DOC]: design.md、docs/architecture/ai-observability.md、docs/architecture/ai-providers.md
  *
@@ -30,6 +30,7 @@ describe("思考过程区域", () => {
     expect(markup).toContain("overflow-y-auto")
     expect(markup).toContain('aria-label="模型思考过程"')
     expect(markup).toContain('aria-busy="true"')
+    expect(markup).not.toContain("border-l")
   })
 
   it("供应商只返回 reasoning 生命周期时保留阶段外壳但不显示占位正文", () => {

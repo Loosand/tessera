@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 任务分页控件与 React 静态渲染器
- * [OUTPUT]: 页码、总数和首尾翻页禁用语义的回归验证
+ * [OUTPUT]: 固定底栏页码、总数、首尾翻页标签与禁用语义的回归验证
  * [POS]: 任务分页产品模式的轻量组件测试
  * [DOC]: docs/architecture/task-navigation.md
  *
@@ -22,6 +22,8 @@ describe("任务分页控件", () => {
     )
 
     expect(markup).toContain("第 1 / 2 页 · 共 23 个任务")
+    expect(markup).toContain("上一页")
+    expect(markup).toContain("下一页")
     expect(markup).toContain('aria-label="上一页任务"')
     expect(markup).toContain('disabled=""')
     expect(markup).toContain('aria-label="下一页任务"')

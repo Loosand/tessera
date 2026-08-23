@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 当前 Space、任务分页读取器、实时任务快照、侧栏状态与任务打开/重命名/删除操作
- * [OUTPUT]: 可查看当前 Space 全量历史并稳定翻页的一级任务管理页面
- * [POS]: 一级导航“全部任务”对应的持久化任务浏览表面
+ * [OUTPUT]: 可查看当前 Space 全量历史、每页二十条且分页栏固定在底部的满高任务管理页面
+ * [POS]: 从侧栏最近任务标题进入的持久化任务浏览表面
  * [DOC]: design.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
@@ -20,7 +20,7 @@ import { TaskContextMenu } from "./task-context-menu"
 import { TaskNavigationRow } from "./task-navigation-row"
 import { TaskPaginationControls } from "./task-pagination-controls"
 
-const TASK_PAGE_SIZE = 12
+const TASK_PAGE_SIZE = 20
 const TASK_LOADING_PLACEHOLDERS = ["first", "second", "third", "fourth", "fifth", "sixth"] as const
 const TASK_DATE_FORMAT = new Intl.DateTimeFormat("zh-CN", {
   month: "short",
@@ -105,17 +105,22 @@ export function AllTasksPage({
         </span>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-8">
-        <div className="mx-auto w-full max-w-3xl">
-          <div className="mb-6 flex items-end justify-between gap-4">
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="shrink-0 px-8 pt-7 pb-5 max-[760px]:px-4">
+          <div className="mx-auto flex w-full max-w-5xl items-end justify-between gap-4">
             <div>
               <h1 className="text-xl font-semibold tracking-tight">全部任务</h1>
               <p className="mt-1 text-xs text-muted-foreground">{spaceName} · 按最后一次对话更新时间排序</p>
             </div>
             <span className="text-xs text-muted-foreground tabular-nums">{taskPage.result.total} 个任务</span>
           </div>
+        </div>
 
-          <div className="grid gap-2" aria-busy={taskPage.loading || undefined}>
+        <div className="min-h-0 flex-1 overflow-y-auto px-8 pb-5 max-[760px]:px-4">
+          <div
+            className="mx-auto grid w-full max-w-5xl content-start gap-1"
+            aria-busy={taskPage.loading || undefined}
+          >
             {visibleTasks.map((task) => (
               <TaskContextMenu
                 key={task.id}
@@ -123,7 +128,7 @@ export function AllTasksPage({
                 trigger={
                   <TaskNavigationRow
                     active={task.id === activeTaskId}
-                    className="min-h-11 rounded-xl border border-border/75 bg-background px-3 hover:bg-muted/55 data-[active=true]:border-foreground/15 data-[active=true]:bg-muted"
+                    className="min-h-10 rounded-lg border border-transparent px-3 hover:bg-muted/55 data-[active=true]:border-border data-[active=true]:bg-muted"
                     status={task.status}
                     taskTitle={task.title}
                     tooltip={task.title}
@@ -148,7 +153,7 @@ export function AllTasksPage({
               ? TASK_LOADING_PLACEHOLDERS.map((placeholder) => (
                   <span
                     key={`all-tasks-loading-${placeholder}`}
-                    className="h-11 animate-pulse rounded-xl border border-border/50 bg-muted/45 motion-reduce:animate-none"
+                    className="h-10 animate-pulse rounded-lg bg-muted/45 motion-reduce:animate-none"
                   />
                 ))
               : null}
@@ -170,16 +175,18 @@ export function AllTasksPage({
               </div>
             ) : null}
           </div>
+        </div>
 
-          {taskPage.result.totalPages > 1 ? (
+        <footer className="shrink-0 border-t border-border/70 bg-background px-8 py-3 max-[760px]:px-4">
+          <div className="mx-auto w-full max-w-5xl">
             <TaskPaginationControls
               page={taskPage.page}
               total={taskPage.result.total}
               totalPages={taskPage.result.totalPages}
               onPageChange={taskPage.goToPage}
             />
-          ) : null}
-        </div>
+          </div>
+        </footer>
       </div>
     </section>
   )

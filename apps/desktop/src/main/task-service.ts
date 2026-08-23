@@ -1,6 +1,6 @@
 /**
  * [INPUT]: SQLite 任务仓储、可逐轮变化的显式可空 Skill、兼容工作区归属、等待输入状态的跨进程任务输入与主进程当前工作区
- * [OUTPUT]: 默认空间/文件工作区任务列表、不会因相同快照刷新活动时间的幂等保存、必需或可选读取/重命名/删除、主进程运行状态收口、等待输入恢复、创建期工作区校验、带 requestId 的版本化引申问题/运行/工具失败及本地反馈消息校验与运行前逐轮 Skill 校验
+ * [OUTPUT]: 默认空间/文件工作区任务列表与服务端分页、不会因相同快照刷新活动时间的幂等保存、必需或可选读取/重命名/删除、主进程运行状态收口、等待输入恢复、创建期工作区校验、带 requestId 的版本化引申问题/运行/工具失败及本地反馈消息校验与运行前逐轮 Skill 校验
  * [POS]: Electron 主进程中的统一任务会话领域服务；旧 mode/workspace 只保留兼容归属，不再决定逐轮资源授权
  * [DOC]: docs/architecture/database.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *

@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 模型目录适配器、模拟 HTTP 响应与不同供应商连接配置
- * [OUTPUT]: URL 推导、鉴权、响应归一化和错误脱敏的回归验证
+ * [OUTPUT]: URL 推导、密钥请求头校验、鉴权、响应归一化和错误脱敏的回归验证
  * [POS]: @tessera/ai/server 模型发现单元测试
  * [DOC]: docs/architecture/ai-providers.md
  *
@@ -87,6 +87,15 @@ describe("AI 模型目录发现", () => {
     ).resolves.toHaveLength(1)
     const [, request] = fetcher.mock.calls[0] ?? []
     expect(new Headers(request?.headers).has("authorization")).toBe(false)
+  })
+
+  it("在创建请求头前拒绝包含中文的 API Key", async () => {
+    const fetcher = vi.fn<typeof fetch>()
+
+    await expect(
+      listAiProviderModels({ ...OPENAI_CONNECTION, apiKey: "我的 API Key" }, { fetch: fetcher }),
+    ).rejects.toThrow("请只粘贴供应商提供的原始 Key")
+    expect(fetcher).not.toHaveBeenCalled()
   })
 
   it("读取 OpenRouter 返回的输入模态与可选参数能力", async () => {

@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 类型化 AI 连接配置、可选目录鉴权、供应商模型目录 HTTP 响应与可注入 fetch
- * [OUTPUT]: 支持公共目录与鉴权目录、经校验去重并提取模态/能力/限额远端信号的模型目录以及可安全展示的连接错误
+ * [OUTPUT]: 支持公共目录与鉴权目录、经密钥请求头校验和模型去重并提取模态/能力/限额远端信号的模型目录以及可安全展示的连接错误
  * [POS]: @tessera/ai/server 的供应商模型发现适配层
  * [DOC]: docs/architecture/ai-providers.md
  *
@@ -17,10 +17,10 @@ import {
   type AiProviderModel,
   isAiProviderId,
 } from "@tessera/contracts"
+import { aiProviderApiKeyValidationMessage } from "./api-key-validation"
 
 const DEFAULT_TIMEOUT_MS = 15_000
 const MAX_BASE_URL_LENGTH = 2_048
-const MAX_API_KEY_LENGTH = 16_384
 const MAX_ERROR_MESSAGE_LENGTH = 320
 const MAX_RESPONSE_BYTES = 2 * 1_024 * 1_024
 const INFERENCE_PATH_SUFFIXES = ["/chat/completions", "/responses", "/response", "/messages"] as const
@@ -58,7 +58,8 @@ function validateConnection(input: AiProviderConnectionInput) {
   const baseUrl = typeof input.baseUrl === "string" ? input.baseUrl.trim() : ""
   const configId = typeof input.configId === "string" ? input.configId.trim() : ""
   if (!configId || configId.length > 128) throw new AiProviderConnectionError("连接 ID 无效。")
-  if (apiKey.length > MAX_API_KEY_LENGTH) throw new AiProviderConnectionError("API Key 长度无效。")
+  const apiKeyValidationMessage = aiProviderApiKeyValidationMessage(apiKey)
+  if (apiKeyValidationMessage) throw new AiProviderConnectionError(apiKeyValidationMessage)
   if (!baseUrl || baseUrl.length > MAX_BASE_URL_LENGTH) {
     throw new AiProviderConnectionError("请输入有效的 API 地址。")
   }

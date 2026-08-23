@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 类型化供应商配置、可注入配置仓储与平台安全密钥存储
- * [OUTPUT]: 已校验且兼容旧模型能力的统一供应商配置读写/删除、密钥加解密和连接凭据解析服务
+ * [OUTPUT]: 已校验且兼容旧模型能力的统一供应商配置读写/删除、请求头安全密钥加解密和连接凭据解析服务
  * [POS]: @tessera/ai/server 中独立于 Electron 与 SQLite 实现的配置持久化领域层
  * [DOC]: docs/architecture/ai-providers.md、docs/architecture/database.md
  *
@@ -30,6 +30,7 @@ import {
   isAiProviderId,
 } from "@tessera/contracts"
 import { resolveAiModelCapabilities } from "../model-capabilities"
+import { aiProviderApiKeyValidationMessage } from "./api-key-validation"
 
 const MULTI_CONFIG_PROVIDER_IDS = new Set<AiProviderId>(["openai-compatible", "anthropic-compatible"])
 const CAPABILITY_STATES = [
@@ -43,7 +44,6 @@ const CAPABILITY_SOURCES = [
   "custom",
   "unknown",
 ] as const satisfies readonly AiModelCapabilitySource[]
-const MAX_API_KEY_LENGTH = 16_384
 const MAX_BASE_URL_LENGTH = 2_048
 const MAX_MODEL_ID_LENGTH = 512
 const MAX_MODELS = 10_000
@@ -363,7 +363,8 @@ export function createAiProviderConfigService({
         apiKeyCiphertext = null
       } else if (typeof input.apiKey === "string" && input.apiKey.trim()) {
         const apiKey = input.apiKey.trim()
-        if (apiKey.length > MAX_API_KEY_LENGTH) throw new AiProviderConfigError("API Key 长度无效。")
+        const validationMessage = aiProviderApiKeyValidationMessage(apiKey)
+        if (validationMessage) throw new AiProviderConfigError(validationMessage)
         requireEncryption()
         apiKeyCiphertext = bytesToHex(secretStorage.encrypt(apiKey))
       }
@@ -397,7 +398,10 @@ export function createAiProviderConfigService({
       }
       const configId = normalizeConfigId(input.configId, input.providerId)
       if (typeof input.apiKey === "string" && input.apiKey.trim()) {
-        return { ...input, configId, apiKey: input.apiKey.trim() }
+        const apiKey = input.apiKey.trim()
+        const validationMessage = aiProviderApiKeyValidationMessage(apiKey)
+        if (validationMessage) throw new AiProviderConfigError(validationMessage)
+        return { ...input, configId, apiKey }
       }
       const config = store.find(configId)
       if (config && config.providerId !== input.providerId) {
@@ -407,7 +411,10 @@ export function createAiProviderConfigService({
       if (!ciphertext) return { ...input, configId, apiKey: "" }
       requireEncryption()
       try {
-        return { ...input, configId, apiKey: secretStorage.decrypt(hexToBytes(ciphertext)) }
+        const apiKey = secretStorage.decrypt(hexToBytes(ciphertext))
+        const validationMessage = aiProviderApiKeyValidationMessage(apiKey)
+        if (validationMessage) throw new AiProviderConfigError(validationMessage)
+        return { ...input, configId, apiKey }
       } catch (error) {
         if (error instanceof AiProviderConfigError) throw error
         throw new AiProviderConfigError("保存的 API Key 无法解密，请删除后重新保存。")

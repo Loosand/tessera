@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 内存配置仓储、伪安全存储与供应商配置服务
- * [OUTPUT]: 跨服务实例持久化、密钥加密/复用/删除和公开配置隔离的回归验证
+ * [OUTPUT]: 跨服务实例持久化、密钥格式校验、加密/复用/删除和公开配置隔离的回归验证
  * [POS]: AI 供应商配置持久化领域层的无平台单元测试
  * [DOC]: docs/architecture/ai-providers.md、docs/architecture/database.md
  *
@@ -158,6 +158,35 @@ describe("AI 供应商配置服务", () => {
       secretStorage: { ...secretStorage, isEncryptionAvailable: () => false },
     })
     expect(() => service.saveConfig({ ...CONFIG, apiKey: "secret-key" })).toThrow("安全凭据存储")
+  })
+
+  it("保存时拒绝不能安全写入鉴权请求头的密钥", () => {
+    const service = createAiProviderConfigService({ store: createStore(), secretStorage })
+
+    expect(() => service.saveConfig({ ...CONFIG, apiKey: "我的 API Key" })).toThrow(
+      "请只粘贴供应商提供的原始 Key",
+    )
+  })
+
+  it("解析旧配置时把不安全密钥转换为可操作错误", () => {
+    const store = createStore()
+    const service = createAiProviderConfigService({ store, secretStorage })
+    service.saveConfig({ ...CONFIG, apiKey: "secret-key" })
+    const record = store.find("openrouter")
+    if (!record) throw new Error("测试配置未保存")
+    const legacyCiphertext = [...secretStorage.encrypt("我的 API Key")]
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("")
+    store.save({ ...record, apiKeyCiphertext: legacyCiphertext })
+
+    expect(() =>
+      service.resolveConnection({
+        configId: "openrouter",
+        providerId: "openrouter",
+        baseUrl: CONFIG.baseUrl,
+        apiKey: "",
+      }),
+    ).toThrow("请只粘贴供应商提供的原始 Key")
   })
 
   it("兼容协议允许保存多条具名连接，并按连接分别解析凭据", () => {

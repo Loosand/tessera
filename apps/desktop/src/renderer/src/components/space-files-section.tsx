@@ -101,7 +101,7 @@ export function SpaceFilesSection({
           trigger={
             <button
               type="button"
-              className="flex h-7 w-full items-center gap-1.5 rounded-xl pr-3 text-left text-[12px] transition-colors hover:bg-sidebar-accent data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium"
+              className="flex h-7 w-full items-center gap-1.5 rounded-xl pr-4 text-left text-[12px] transition-colors hover:bg-sidebar-accent data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium"
               style={{ paddingLeft: fileTreeNodeInset(depth) }}
               data-active={node.path === activePath || undefined}
               aria-current={node.path === activePath ? "page" : undefined}
@@ -132,7 +132,7 @@ export function SpaceFilesSection({
           trigger={
             <button
               type="button"
-              className="flex h-7 w-full items-center gap-1.5 rounded-xl pr-3 text-left text-[12px] transition-colors hover:bg-sidebar-accent"
+              className="flex h-7 w-full items-center gap-1.5 rounded-xl pr-4 text-left text-[12px] transition-colors hover:bg-sidebar-accent"
               style={{ paddingLeft: fileTreeNodeInset(depth) }}
               aria-expanded={expanded}
               title={node.path}
@@ -211,7 +211,7 @@ export function SpaceFilesSection({
         </Button>
       </header>
 
-      <div className="grid gap-0.5">
+      <div className="grid gap-0.5 pr-1">
         {tree.length > 0 ? (
           tree.map((node) => renderTreeNode(node, 0))
         ) : (
