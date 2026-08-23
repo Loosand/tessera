@@ -8,7 +8,7 @@
 >
 > Tessera 对照基线：当前工作区源码与 `docs/architecture/` 中标记的实现状态
 >
-> 研究状态：进行中
+> 研究状态：已完成
 
 ## 研究目标
 
@@ -61,17 +61,17 @@ rg "目标符号" backend server electron src
 | --- | --- | --- |
 | [系统、技术栈与运行时边界](system-stack-and-runtime-boundaries.md) | Electron、React、Local Brain、远端 Server 如何分工，打包和安全代价是什么 | 已完成 |
 | [Agent 运行时与工具装配](agent-runtime-and-tool-assembly.md) | 单智能体从请求到模型、工具循环、SSE 事件的完整链路 | 已完成 |
-| 模型、供应商与能力路由 | 模型配置如何进入 CAMEL，工具/搜索/多模态能力如何决定 | 研究中 |
-| 工作群与多智能体调度 | Workforce 的规划、角色、任务图、事件、恢复与人工干预 | 待研究 |
-| 上下文、记忆与压缩 | 短期历史、持久记忆、摘要、Token/字符预算和续轮策略 | 待研究 |
-| 工作区、文件与 Artifact | Space/Project/Run、四种工作目录、overlay/apply、文件审查 | 待研究 |
-| MCP 与 Connectors | 配置、发现、传输、工具装配、用户选择、密钥与审批 | 待研究 |
-| Skills | 扫描、导入、配置、渐进加载、Agent 绑定和项目同步 | 待研究 |
-| 浏览器、CDP 与 Cookie | 托管浏览器池、外部浏览器、会话隔离、Cookie 导入和预览 | 待研究 |
-| 附件、执行上下文与 RAG | 上传材料如何落盘、进入提示词、侧栏可见和后续追溯 | 待研究 |
-| 调度、Trigger 与远程控制 | Schedule/Webhook/Slack 如何触发 Agent，后台任务如何恢复 | 待研究 |
-| UI、进度审查与信息架构 | 三栏布局、Progress、Execution Context、Agent Folder、Review/Terminal/Browser | 待研究 |
-| Tessera 吸收路线图 | 跨领域对象、依赖顺序、风险门槛和近期可交付切片 | 待研究 |
+| [模型、供应商与能力路由](models-providers-and-capability-routing.md) | 模型配置如何进入 CAMEL，工具/搜索/多模态能力如何决定 | 已完成 |
+| [工作群与多智能体调度](workforce-and-multi-agent-orchestration.md) | Workforce 的规划、角色、任务图、事件、恢复与人工干预 | 已完成 |
+| [上下文、记忆与压缩](context-memory-and-compaction.md) | 短期历史、持久记忆、摘要、Token/字符预算和续轮策略 | 已完成 |
+| [工作区、文件与 Artifact](workspace-files-and-artifacts.md) | Space/Project/Run、四种工作目录、overlay/apply、文件审查 | 已完成 |
+| [MCP 与 Connectors](mcp-and-connectors.md) | 配置、发现、传输、工具装配、用户选择、密钥与审批 | 已完成 |
+| [Skills 系统](skills-system.md) | 扫描、导入、配置、渐进加载、Agent 绑定和项目同步 | 已完成 |
+| [浏览器、CDP 与 Cookie](browser-cdp-and-cookie-management.md) | 托管浏览器池、外部浏览器、会话隔离、Cookie 导入和预览 | 已完成 |
+| [附件、执行上下文与 RAG](attachments-execution-context-and-rag.md) | 上传材料如何落盘、进入提示词、侧栏可见和后续追溯 | 已完成 |
+| [调度、Trigger 与远程控制](scheduling-triggers-and-remote-control.md) | Schedule/Webhook/Slack 如何触发 Agent，后台任务如何恢复 | 已完成 |
+| [UI、进度审查与信息架构](ui-progress-inspection-and-information-architecture.md) | 三栏布局、Progress、Execution Context、Agent Folder、Review/Terminal/Browser | 已完成 |
+| [Tessera 吸收路线图](tessera-adoption-roadmap.md) | 跨领域对象、依赖顺序、风险门槛和近期可交付切片 | 已完成 |
 
 ## 当前总判断
 

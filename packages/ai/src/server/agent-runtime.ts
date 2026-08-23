@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 已解析供应商连接、自动联网/思考策略、当前 Skill、完整 AI SDK UIMessage 历史、主进程按授权注入的研究/写作交接/内容库/工作区/MCP 能力、中止信号与运行指标回调
- * [OUTPUT]: 普通对话和工作区任务共用、以 InferAgentUIMessage 约束并由 createAgentUIStream 标准转换模型消息，同时承载供应商原生搜索、可信研究闭环、证据化写作交接、内容领域、按请求相关性与 RunPolicy 双重收窄的工作区读写、强制审批 MCP、供应商错误分类、Skill instructions、标准 needsApproval、回答后类型化引申问题与原生生命周期观测的 AI SDK ToolLoopAgent 增量流
+ * [OUTPUT]: 普通对话和工作区任务共用、以 InferAgentUIMessage 约束并由 createAgentUIStream 标准转换模型消息，同时承载供应商原生搜索及预算耗尽续答、可信研究闭环、证据化写作交接、内容领域、按请求相关性与 RunPolicy 双重收窄的工作区读写、强制审批 MCP、供应商错误分类、Skill instructions、标准 needsApproval、回答后类型化引申问题与原生生命周期观测的 AI SDK ToolLoopAgent 增量流
  * [POS]: @tessera/ai/server 中统一自然对话的 ToolLoopAgent 编排边界
  * [DOC]: docs/architecture/unified-creation-agent.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/ai-observability.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -11,7 +11,12 @@
  */
 
 import type { AgentRuntime } from "@tessera/agent-runtime"
-import type { AiChatStreamChunk, TaskMessage, TaskRunErrorDataV1 } from "@tessera/contracts"
+import type {
+  AiChatStreamChunk,
+  TaskMessage,
+  TaskRunErrorDataV1,
+  TaskToolErrorDataV1,
+} from "@tessera/contracts"
 import type { LoadedSkill } from "@tessera/skills"
 import { ToolLoopAgent, createAgentUIStream, dynamicTool, isStepCount, jsonSchema, tool } from "ai"
 import type { InferAgentUIMessage, JSONSchema7, ToolSet } from "ai"
@@ -20,6 +25,7 @@ import { createAiSdkChatRuntime } from "./ai-sdk-runtime"
 import {
   type AiChatRuntimeInput,
   classifyProviderStreamError,
+  isWebSearchMaxUsesExceededError,
   publicChunk,
   toUiMessages,
   webSearchMaxUsesForSkill,
@@ -220,6 +226,32 @@ function taskToolName(part: TaskMessage["parts"][number]) {
   return part.type.startsWith("tool-") ? part.type.slice("tool-".length) : undefined
 }
 
+const WEB_SEARCH_TOOL_NAME = "web_search"
+const WEB_SEARCH_BUDGET_MESSAGE = "本轮联网搜索预算已用完，正在使用已有结果继续整理。"
+
+/** 把兼容端点误报的顶层搜索额度错误恢复为 AI SDK 标准 Tool Error Part。 */
+export function webSearchBudgetToolErrorChunk(toolCallId: string): AiChatStreamChunk {
+  const failure: TaskToolErrorDataV1 = {
+    code: "execution",
+    message: WEB_SEARCH_BUDGET_MESSAGE,
+    retryable: false,
+    toolCallId,
+    toolName: WEB_SEARCH_TOOL_NAME,
+    version: 1,
+  }
+  return {
+    type: "tool-output-error",
+    toolCallId,
+    errorText: failure.message,
+    failure,
+    providerExecuted: true,
+  }
+}
+
+export function canCompleteAfterWebSearchBudget(answerAfterBudget: string, textEndedAfterBudget: boolean) {
+  return textEndedAfterBudget && answerAfterBudget.trim().length > 0
+}
+
 /** 工作区是按请求相关性开放的能力，不是进入工作区后每轮都自动注入的背景。 */
 export function workspaceAccessRelevant(messages: readonly TaskMessage[], currentDocumentPath?: string) {
   let latestUserIndex = -1
@@ -382,7 +414,10 @@ async function* runAiSdkAgent(
   })
   type AgentUiMessage = InferAgentUIMessage<typeof agent>
   const originalMessages = await toUiMessages<AgentUiMessage>(input.messages, { tools })
-  let streamFailure: TaskRunErrorDataV1 | null = null
+  const classifiedStreamFailures: Array<{
+    failure: TaskRunErrorDataV1
+    webSearchBudgetExceeded: boolean
+  }> = []
   const stream = await createAgentUIStream({
     agent,
     uiMessages: originalMessages,
@@ -400,14 +435,37 @@ async function* runAiSdkAgent(
     sendReasoning: true,
     sendSources: true,
     onError: (error) => {
-      streamFailure = classifyProviderStreamError(error, input.apiKey)
-      return streamFailure.message
+      const failure = classifyProviderStreamError(error, input.apiKey)
+      classifiedStreamFailures.push({
+        failure,
+        webSearchBudgetExceeded: isWebSearchMaxUsesExceededError(error, input.apiKey),
+      })
+      return failure.message
     },
   })
 
   const toolNames = new Map<string, string>()
+  const pendingToolCallIds = new Set<string>()
   let finalAnswer = ""
   let finishChunk: AiChatStreamChunk | null = null
+  let webSearchBudgetExceeded = false
+  let webSearchBudgetFailure: TaskRunErrorDataV1 | null = null
+  let deferredPostBudgetFailure: TaskRunErrorDataV1 | null = null
+  let answerAfterBudget = ""
+  let textEndedAfterBudget = false
+  const takeClassifiedFailure = (errorText: string) => {
+    const index = classifiedStreamFailures.findIndex(({ failure }) => failure.message === errorText)
+    if (index < 0) return null
+    return classifiedStreamFailures.splice(index, 1)[0] ?? null
+  }
+  const markWebSearchBudgetExceeded = (failure: TaskRunErrorDataV1) => {
+    if (!webSearchBudgetExceeded) {
+      webSearchBudgetExceeded = true
+      answerAfterBudget = ""
+      textEndedAfterBudget = false
+    }
+    webSearchBudgetFailure ??= failure
+  }
   for await (const chunk of stream) {
     if (
       chunk.type === "tool-input-start" ||
@@ -415,6 +473,15 @@ async function* runAiSdkAgent(
       chunk.type === "tool-input-error"
     ) {
       toolNames.set(chunk.toolCallId, chunk.toolName)
+      pendingToolCallIds.add(chunk.toolCallId)
+    }
+    if (
+      chunk.type === "tool-output-available" ||
+      chunk.type === "tool-output-error" ||
+      chunk.type === "tool-output-denied" ||
+      chunk.type === "tool-input-error"
+    ) {
+      pendingToolCallIds.delete(chunk.toolCallId)
     }
     const publicInput =
       chunk.type === "tool-output-available"
@@ -431,8 +498,52 @@ async function* runAiSdkAgent(
     }
     const sanitized = publicChunk(publicInput)
     if (!sanitized) continue
-    if (sanitized.type === "error" && streamFailure) sanitized.failure = streamFailure
-    if (sanitized.type === "text-delta") finalAnswer += sanitized.delta
+    const classifiedFailure = "errorText" in sanitized ? takeClassifiedFailure(sanitized.errorText) : null
+    if (
+      sanitized.type === "tool-output-error" &&
+      toolNames.get(sanitized.toolCallId) === WEB_SEARCH_TOOL_NAME &&
+      isWebSearchMaxUsesExceededError(new Error(sanitized.errorText), input.apiKey)
+    ) {
+      const failure =
+        classifiedFailure?.failure ??
+        classifyProviderStreamError(new Error(sanitized.errorText), input.apiKey)
+      markWebSearchBudgetExceeded(failure)
+      yield webSearchBudgetToolErrorChunk(sanitized.toolCallId)
+      continue
+    }
+    if (sanitized.type === "error") {
+      const failure =
+        classifiedFailure?.failure ??
+        classifyProviderStreamError(new Error(sanitized.errorText), input.apiKey)
+      const budgetExceeded =
+        classifiedFailure?.webSearchBudgetExceeded === true ||
+        isWebSearchMaxUsesExceededError(new Error(sanitized.errorText), input.apiKey)
+      if (budgetExceeded) {
+        markWebSearchBudgetExceeded(failure)
+        const pendingSearchCall = Array.from(toolNames.entries())
+          .reverse()
+          .find(
+            ([toolCallId, toolName]) =>
+              toolName === WEB_SEARCH_TOOL_NAME && pendingToolCallIds.has(toolCallId),
+          )
+        if (pendingSearchCall) {
+          pendingToolCallIds.delete(pendingSearchCall[0])
+          yield webSearchBudgetToolErrorChunk(pendingSearchCall[0])
+        }
+        continue
+      }
+      if (webSearchBudgetExceeded) {
+        deferredPostBudgetFailure = failure
+        continue
+      }
+      sanitized.failure = failure
+    }
+    if (sanitized.type === "text-start" && webSearchBudgetExceeded) textEndedAfterBudget = false
+    if (sanitized.type === "text-delta") {
+      finalAnswer += sanitized.delta
+      if (webSearchBudgetExceeded) answerAfterBudget += sanitized.delta
+    }
+    if (sanitized.type === "text-end" && webSearchBudgetExceeded) textEndedAfterBudget = true
     if (sanitized.type === "finish") {
       finishChunk = sanitized
       continue
@@ -440,9 +551,21 @@ async function* runAiSdkAgent(
     yield sanitized
   }
 
+  const recoveredFinishChunk: AiChatStreamChunk | null =
+    !finishChunk && canCompleteAfterWebSearchBudget(answerAfterBudget, textEndedAfterBudget)
+      ? { type: "finish", finishReason: "stop" }
+      : null
+  const resolvedFinishChunk = finishChunk ?? recoveredFinishChunk
+  if (!resolvedFinishChunk) {
+    const terminalFailure = deferredPostBudgetFailure ?? webSearchBudgetFailure
+    if (terminalFailure) {
+      yield { type: "error", errorText: terminalFailure.message, failure: terminalFailure }
+    }
+  }
+
   if (
-    finishChunk &&
-    (finishChunk.finishReason === undefined || finishChunk.finishReason === "stop") &&
+    resolvedFinishChunk &&
+    (resolvedFinishChunk.finishReason === undefined || resolvedFinishChunk.finishReason === "stop") &&
     finalAnswer.trim() &&
     !abortSignal.aborted
   ) {
@@ -471,7 +594,7 @@ async function* runAiSdkAgent(
       // 引申问题是非关键增强；失败或超时不能把已经完成的主回答改成失败。
     }
   }
-  if (finishChunk) yield finishChunk
+  if (resolvedFinishChunk) yield resolvedFinishChunk
 }
 
 export const aiSdkAgentRuntime: AgentRuntime<AiSdkAgentRuntimeRequest, AiChatStreamChunk> = {

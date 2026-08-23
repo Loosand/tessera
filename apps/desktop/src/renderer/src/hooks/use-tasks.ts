@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 当前工作区 ID 与预加载层的任务会话 API
- * [OUTPUT]: 独立任务与工作区任务的统一草稿、跨资源保活的当前任务、可逐轮切换的创作方式、历史恢复、重命名、删除和幂等保存操作
+ * [INPUT]: 当前可空 Space 工作区 ID 与预加载层的任务会话 API
+ * [OUTPUT]: 默认空间与文件工作区的作用域任务、服务端分页读取、统一草稿、跨资源保活的当前任务、可逐轮切换的创作方式、历史恢复、重命名、删除和幂等保存操作
  * [POS]: 渲染层中工作区任务导航与对话持久化的单一状态入口
  * [DOC]: docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -13,6 +13,8 @@
 import type {
   TaskMessage,
   TaskMode,
+  TaskSessionPage,
+  TaskSessionPageRequest,
   TaskSessionSaveInput,
   TaskSessionStatus,
   TaskSessionSummary,
@@ -64,6 +66,7 @@ export function useTasks(workspaceId: string | undefined) {
   const [activeTask, setActiveTask] = useState<ActiveTask>(() => createTaskDraft())
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [taskListRevision, setTaskListRevision] = useState(0)
   const requestIdRef = useRef(0)
   const activeTaskRef = useRef(activeTask)
   activeTaskRef.current = activeTask
@@ -83,12 +86,14 @@ export function useTasks(workspaceId: string | undefined) {
 
   const refreshWorkspaceTasks = useCallback(async () => {
     const desktopApi = window.tessera
-    if (!desktopApi || !workspaceId) {
+    if (!desktopApi) {
       setTasks([])
       return []
     }
     try {
-      const nextTasks = await desktopApi.listWorkspaceTasks()
+      const nextTasks = workspaceId
+        ? await desktopApi.listWorkspaceTasks()
+        : await desktopApi.listDefaultTasks()
       setTasks(nextTasks)
       return nextTasks
     } catch (cause) {
@@ -97,18 +102,27 @@ export function useTasks(workspaceId: string | undefined) {
     }
   }, [workspaceId])
 
+  const listTasksPage = useCallback(async (request: TaskSessionPageRequest): Promise<TaskSessionPage> => {
+    const desktopApi = window.tessera
+    if (!desktopApi) {
+      return { items: [], page: request.page, pageSize: request.pageSize, total: 0, totalPages: 1 }
+    }
+    return desktopApi.listTasksPage(request)
+  }, [])
+
   useEffect(() => {
     const desktopApi = window.tessera
     const requestId = ++requestIdRef.current
     setTasks([])
     setError(null)
-    if (!desktopApi || !workspaceId) {
+    if (!desktopApi) {
       setLoading(false)
       return
     }
 
     setLoading(true)
-    void Promise.all([desktopApi.listWorkspaceTasks(), desktopApi.listRecentTasks()])
+    const scopedTasks = workspaceId ? desktopApi.listWorkspaceTasks() : desktopApi.listDefaultTasks()
+    void Promise.all([scopedTasks, desktopApi.listRecentTasks()])
       .then(([workspaceTasks, recent]) => {
         if (requestId !== requestIdRef.current) return
         setTasks(workspaceTasks)
@@ -121,11 +135,6 @@ export function useTasks(workspaceId: string | undefined) {
         if (requestId === requestIdRef.current) setLoading(false)
       })
   }, [workspaceId])
-
-  useEffect(() => {
-    if (workspaceId) return
-    void refreshRecentTasks()
-  }, [refreshRecentTasks, workspaceId])
 
   const startNewTask = useCallback(
     (
@@ -177,6 +186,7 @@ export function useTasks(workspaceId: string | undefined) {
     const desktopApi = window.tessera
     if (!desktopApi) return null
     try {
+      const firstPersistence = activeTaskRef.current.id === input.id && !activeTaskRef.current.persisted
       const snapshot = await desktopApi.saveTask(input)
       const summary: TaskSessionSummary = snapshot
       setTasks((current) => upsertSummary(current, summary))
@@ -198,6 +208,7 @@ export function useTasks(workspaceId: string | undefined) {
           return next
         })
       }
+      if (firstPersistence) setTaskListRevision((current) => current + 1)
       setError(null)
       return snapshot
     } catch (cause) {
@@ -239,6 +250,7 @@ export function useTasks(workspaceId: string | undefined) {
           return next
         })
       }
+      setTaskListRevision((current) => current + 1)
       setError(null)
       return true
     } catch (cause) {
@@ -261,6 +273,7 @@ export function useTasks(workspaceId: string | undefined) {
         activeTaskRef.current = draft
         setActiveTask(draft)
       }
+      setTaskListRevision((current) => current + 1)
       setError(null)
       return true
     } catch (cause) {
@@ -299,10 +312,12 @@ export function useTasks(workspaceId: string | undefined) {
     error,
     loading,
     tasks,
+    taskListRevision,
     recentTasks,
     ensureActiveTask,
     deleteTask,
     openTask,
+    listTasksPage,
     persistActiveTask,
     refreshRecentTasks,
     refreshWorkspaceTasks,

@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 内存/临时磁盘 SQLite 客户端与前向迁移
- * [OUTPUT]: 迁移幂等性、统一内容控制层、研究证据链、工作区最近项、通用任务会话、AI/MCP 加密配置恢复、任务运行单调检查点/观测指标和级联删除的回归验证
+ * [OUTPUT]: 迁移幂等性、统一内容控制层、研究证据链、工作区最近项、通用任务会话与全量分页、AI/MCP 加密配置恢复、任务运行单调检查点/观测指标和级联删除的回归验证
  * [POS]: 数据库包不依赖磁盘状态的基础集成测试
  * [DOC]: docs/architecture/database.md
  *
@@ -63,8 +63,11 @@ import { appendTaskRunEvent, findLatestTaskRun, finishTaskRun, startTaskRun } fr
 import {
   deleteTaskSession,
   findTaskSession,
+  listDefaultTaskSessions,
+  listDefaultTaskSessionsPage,
   listRecentTaskSessions,
   listWorkspaceTaskSessions,
+  listWorkspaceTaskSessionsPage,
   renameTaskSession,
   saveTaskSession,
 } from "./task-session-repository"
@@ -702,7 +705,78 @@ describe("本地数据库基建", () => {
     expect(listRecentTaskSessions(client)).toMatchObject([
       { id: "chat-task", mode: "chat", skillId: "research", workspaceId: null, workspaceName: null },
     ])
+    expect(listDefaultTaskSessions(client)).toMatchObject([
+      { id: "chat-task", mode: "chat", workspaceId: null },
+    ])
     expect(findTaskSession(client, "chat-task")?.messagePayloads).toHaveLength(2)
+    client.close()
+  })
+
+  test("任务分页可以越过旧列表上限并返回稳定总数", () => {
+    const client = openDatabase({ path: ":memory:" })
+    for (let index = 0; index < 105; index += 1) {
+      saveTaskSession(client, {
+        id: `paged-task-${String(index).padStart(3, "0")}`,
+        mode: "chat",
+        workspaceId: null,
+        title: `分页任务 ${index}`,
+        status: "completed",
+        updatedAt: new Date(index + 1),
+        messagePayloads: [],
+      })
+    }
+
+    const finalPage = listDefaultTaskSessionsPage(client, { limit: 10, offset: 100 })
+    expect(finalPage.total).toBe(105)
+    expect(finalPage.items.map((task) => task.id)).toEqual([
+      "paged-task-004",
+      "paged-task-003",
+      "paged-task-002",
+      "paged-task-001",
+      "paged-task-000",
+    ])
+    client.close()
+  })
+
+  test("工作区任务分页不会混入默认空间任务", () => {
+    const client = openDatabase({ path: ":memory:" })
+    saveWorkspace(client, {
+      id: "workspace-paged",
+      rootPath: "/tmp/paged",
+      displayName: "分页空间",
+      lastOpenedAt: new Date(100),
+    })
+    for (let index = 0; index < 7; index += 1) {
+      saveTaskSession(client, {
+        id: `workspace-paged-task-${index}`,
+        mode: "agent",
+        workspaceId: "workspace-paged",
+        title: `工作区任务 ${index}`,
+        status: "completed",
+        updatedAt: new Date(index + 1),
+        messagePayloads: [],
+      })
+    }
+    saveTaskSession(client, {
+      id: "default-outside-workspace-page",
+      mode: "chat",
+      workspaceId: null,
+      title: "默认空间任务",
+      status: "completed",
+      updatedAt: new Date(99),
+      messagePayloads: [],
+    })
+
+    const secondPage = listWorkspaceTaskSessionsPage(client, "workspace-paged", {
+      limit: 3,
+      offset: 3,
+    })
+    expect(secondPage.total).toBe(7)
+    expect(secondPage.items.map((task) => task.id)).toEqual([
+      "workspace-paged-task-3",
+      "workspace-paged-task-2",
+      "workspace-paged-task-1",
+    ])
     client.close()
   })
 

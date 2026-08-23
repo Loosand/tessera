@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 预加载层提供的工作区、文件监听、窗口关闭与文档读写 API
- * [OUTPUT]: 当前/最近工作区、文件/目录索引、文档草稿、条目与最近列表操作、冲突状态和串行保存操作
+ * [OUTPUT]: 当前 Space、不可删除默认空间切换、最近文件工作区、文件/目录索引、文档草稿、条目与最近列表操作、冲突状态和串行保存操作
  * [POS]: 渲染层工作区会话的单一状态入口
  * [DOC]: docs/architecture.md
  *
@@ -61,6 +61,7 @@ export function useWorkspace() {
   const [isDirty, setIsDirty] = useState(false)
   const [externalDocument, setExternalDocument] = useState<DocumentSnapshot | null>(null)
   const [status, setStatus] = useState<WorkspaceStatus>("idle")
+  const [initialized, setInitialized] = useState(false)
   const [saveStatus, setSaveStatus] = useState<WorkspaceSaveStatus>("idle")
   const [error, setError] = useState<string | null>(null)
   const [navigation, setNavigation] = useState<NavigationState>({ entries: [], index: -1 })
@@ -230,10 +231,20 @@ export function useWorkspace() {
       .then(([currentWorkspace, recent]) => {
         if (disposed) return
         setRecentWorkspaces(recent)
-        if (currentWorkspace) void loadDocuments(currentWorkspace)
+        if (currentWorkspace) {
+          void loadDocuments(currentWorkspace).finally(() => {
+            if (!disposed) setInitialized(true)
+          })
+        } else {
+          setStatus("ready")
+          setInitialized(true)
+        }
       })
       .catch((cause) => {
-        if (!disposed) setError(errorMessage(cause))
+        if (!disposed) {
+          setError(errorMessage(cause))
+          setInitialized(true)
+        }
       })
     return () => {
       disposed = true
@@ -346,6 +357,29 @@ export function useWorkspace() {
     },
     [loadDocuments, saveDocument],
   )
+
+  const openDefaultWorkspace = useCallback(async () => {
+    const desktopApi = window.tessera
+    if (!desktopApi || !(await saveDocument())) return false
+    if (!workspaceRef.current) return true
+
+    try {
+      await desktopApi.openDefaultWorkspace()
+      requestIdRef.current += 1
+      workspaceRef.current = null
+      setWorkspace(null)
+      setDocuments([])
+      setDirectories([])
+      applyDocument(null)
+      resetNavigation()
+      setStatus("ready")
+      setError(null)
+      return true
+    } catch (cause) {
+      setError(errorMessage(cause))
+      return false
+    }
+  }, [applyDocument, resetNavigation, saveDocument])
 
   const revealCurrentWorkspace = useCallback(async () => {
     const desktopApi = window.tessera
@@ -665,12 +699,14 @@ export function useWorkspace() {
     draftContent,
     isDirty,
     status,
+    initialized,
     saveStatus,
     hasExternalConflict: Boolean(externalDocument),
     canGoBack: navigation.index > 0,
     canGoForward: navigation.index >= 0 && navigation.index < navigation.entries.length - 1,
     error,
     selectWorkspace,
+    openDefaultWorkspace,
     openRecentWorkspace,
     revealCurrentWorkspace,
     revealWorkspace,

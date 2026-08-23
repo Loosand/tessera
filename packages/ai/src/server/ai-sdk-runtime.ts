@@ -18,8 +18,8 @@ import { createXai } from "@ai-sdk/xai"
 import type { AiModelEndpointType, AiProviderConnectionInput } from "@tessera/contracts"
 import type { JSONValue, LanguageModel, ToolSet } from "ai"
 
-const DEFAULT_WEB_SEARCH_MAX_USES = 5
-const MAX_WEB_SEARCH_MAX_USES = 20
+const DEFAULT_WEB_SEARCH_MAX_USES = 12
+const MAX_WEB_SEARCH_MAX_USES = 50
 
 export type AiLanguageModelInput = AiProviderConnectionInput & {
   endpointType?: AiModelEndpointType

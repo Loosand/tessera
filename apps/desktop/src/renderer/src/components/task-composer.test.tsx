@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 默认任务输入框的服务端渲染结果
- * [OUTPUT]: 常驻工具栏不暴露 Chat/Agent、专业能力开关和范围长文，并区分模型加载/未配置状态的回归验证
+ * [OUTPUT]: 单一静态外轮廓、正文卡/运行选择托底层结构、常驻工具栏密度边界和模型加载/未配置状态的回归验证
  * [POS]: task-composer 信息密度边界的单元测试
  * [DOC]: design.md、docs/architecture/task-navigation.md
  *
@@ -15,7 +15,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
 import { TaskComposer } from "./task-composer"
 
-function renderComposer({ modelLoading = false, notice = "", scope = "" } = {}) {
+function renderComposer({ modelLoading = false, notice = "", scope = "", value = "" } = {}) {
   return renderToStaticMarkup(
     <TaskComposer
       agentMode={false}
@@ -40,9 +40,18 @@ function renderComposer({ modelLoading = false, notice = "", scope = "" } = {}) 
       selectedModelKey=""
       skillId={null}
       status="ready"
-      value=""
+      value={value}
     />,
   )
+}
+
+function readDataClass(markup: string, attribute: string, value: string) {
+  const element = markup.match(new RegExp(`<[^>]*${attribute}="${value}"[^>]*>`))?.[0] ?? ""
+  return element.match(/class="([^"]*)"/)?.[1] ?? ""
+}
+
+function readSlotClass(markup: string, slot: string) {
+  return readDataClass(markup, "data-slot", slot)
 }
 
 describe("任务输入框密度", () => {
@@ -55,6 +64,46 @@ describe("任务输入框密度", () => {
     expect(markup).not.toContain("思考强度")
     expect(markup).not.toContain("<fieldset")
     expect(markup).not.toContain('type="radio"')
+  })
+
+  it("把正文操作卡悬浮在创作方式与模型的托底层之上", () => {
+    const markup = renderComposer()
+
+    expect(markup).toContain('data-slot="task-composer-input"')
+    expect(markup).toContain('data-slot="task-composer-actions"')
+    expect(markup).toContain('data-slot="task-composer-runtime"')
+    expect(markup.indexOf('data-slot="task-composer-input"')).toBeLessThan(
+      markup.indexOf('data-slot="task-composer-runtime"'),
+    )
+    expect(markup.indexOf('data-slot="task-composer-actions"')).toBeLessThan(
+      markup.indexOf('data-slot="task-composer-runtime"'),
+    )
+    expect(markup).toContain('placeholder="描述你想完成的任务…"')
+  })
+
+  it("只由外层绘制静态轮廓，不因聚焦能力或已有草稿重复描边", () => {
+    const emptyMarkup = renderComposer()
+    const draftMarkup = renderComposer({ value: "已有草稿" })
+    const composerClass = readSlotClass(emptyMarkup, "task-composer")
+    const emptyInputClass = readSlotClass(emptyMarkup, "task-composer-input")
+    const draftInputClass = readSlotClass(draftMarkup, "task-composer-input")
+
+    expect(composerClass).toContain("border")
+    expect(composerClass).not.toContain("ring-1")
+    expect(emptyInputClass).not.toContain("border")
+    expect(emptyInputClass).not.toContain("focus-within")
+    expect(draftInputClass).toBe(emptyInputClass)
+  })
+
+  it("模型与创作方式入口使用同一胶囊圆角，并保持次级小字号", () => {
+    const markup = renderComposer()
+    const capabilityClass = readDataClass(markup, "data-control", "task-capability-trigger")
+    const modelClass = readDataClass(markup, "data-control", "model-picker-trigger")
+
+    expect(capabilityClass).toContain("rounded-full")
+    expect(capabilityClass).toContain("text-[10px]")
+    expect(modelClass).toContain("rounded-full")
+    expect(modelClass).toContain("text-[9.5px]")
   })
 
   it("SQLite 快照尚未返回时显示加载状态而不是误报未配置", () => {

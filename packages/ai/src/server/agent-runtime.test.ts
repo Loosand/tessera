@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 工作区文档写入输入 Schema、请求相关性、外部 MCP 工具、研究阶段文本与 AI SDK Schema/审批适配
- * [OUTPUT]: DeepSeek 等供应商可接受的根对象 Schema、工作区能力相关性、create/update 条件校验、研究草稿隐藏和 MCP 强制审批回归
+ * [INPUT]: 工作区文档写入输入 Schema、请求相关性、外部 MCP 工具、研究阶段文本、联网搜索预算耗尽与 AI SDK Schema/审批适配
+ * [OUTPUT]: DeepSeek 等供应商可接受的根对象 Schema、工作区能力相关性、create/update 条件校验、研究草稿隐藏、搜索预算工具错误续答和 MCP 强制审批回归
  * [POS]: @tessera/ai/server 工作区 Agent 工具协议单元测试
  * [DOC]: docs/architecture/mcp.md、docs/architecture/task-navigation.md
  *
@@ -13,8 +13,10 @@
 import { zodSchema } from "ai"
 import { describe, expect, it } from "vitest"
 import {
+  canCompleteAfterWebSearchBudget,
   createExternalAgentToolSet,
   shouldHideResearchDraftText,
+  webSearchBudgetToolErrorChunk,
   workspaceAccessRelevant,
   workspaceDocumentChangeInputSchema,
 } from "./agent-runtime"
@@ -155,5 +157,24 @@ describe("研究最终答复边界", () => {
     expect(shouldHideResearchDraftText("reasoning-delta", null)).toBe(false)
     expect(shouldHideResearchDraftText("text-delta", "complete")).toBe(false)
     expect(shouldHideResearchDraftText("text-delta", "partial")).toBe(false)
+  })
+})
+
+describe("联网搜索预算耗尽", () => {
+  it("降级为标准工具错误，并在预算后正文完整结束时允许正常完成", () => {
+    expect(webSearchBudgetToolErrorChunk("search-6")).toMatchObject({
+      type: "tool-output-error",
+      toolCallId: "search-6",
+      providerExecuted: true,
+      failure: {
+        code: "execution",
+        retryable: false,
+        toolCallId: "search-6",
+        toolName: "web_search",
+      },
+    })
+    expect(canCompleteAfterWebSearchBudget("使用已有五次搜索结果完成的答案。", true)).toBe(true)
+    expect(canCompleteAfterWebSearchBudget("未完成", false)).toBe(false)
+    expect(canCompleteAfterWebSearchBudget("   ", true)).toBe(false)
   })
 })

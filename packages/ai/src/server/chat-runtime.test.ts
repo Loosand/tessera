@@ -13,6 +13,7 @@
 import { describe, expect, it } from "vitest"
 import {
   classifyProviderStreamError,
+  isWebSearchMaxUsesExceededError,
   publicChunk,
   safeErrorMessage,
   toUiMessages,
@@ -118,6 +119,12 @@ describe("Chat 运行时边界", () => {
         "secret",
       ),
     ).toBe("联网搜索服务返回了不兼容的结果格式，请稍后重试，或改用问答模式直接回答。")
+    expect(
+      isWebSearchMaxUsesExceededError(
+        { cause: { message: "web_search_tool_result error_code=max_uses_exceeded" } },
+        "secret",
+      ),
+    ).toBe(true)
   })
 
   it("隐藏 API Key 与 Authorization Header", () => {
@@ -153,9 +160,9 @@ describe("Chat 运行时边界", () => {
   })
 
   it("仅为研究 Skill 提升有界搜索额度", () => {
-    expect(webSearchMaxUsesForSkill("research")).toBe(15)
-    expect(webSearchMaxUsesForSkill("writing")).toBe(5)
-    expect(webSearchMaxUsesForSkill("question-answering")).toBe(5)
-    expect(webSearchMaxUsesForSkill(null)).toBe(5)
+    expect(webSearchMaxUsesForSkill("research")).toBe(30)
+    expect(webSearchMaxUsesForSkill("writing")).toBe(12)
+    expect(webSearchMaxUsesForSkill("question-answering")).toBe(12)
+    expect(webSearchMaxUsesForSkill(null)).toBe(12)
   })
 })

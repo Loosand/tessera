@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 隐式执行模式/创作方式的任务快照、可选工作区/当前文档草稿、Artifact、页面或侧栏表面、导航回调、AI 模型与 Electron useChat/运行解释桥
- * [OUTPUT]: 主任务与文档侧栏共用的首次发送懒创建、显式文档上下文、Artifact 导航、同源 RunPolicy 预检、流式恢复、引申问题带入、按需运行解释、Agent Diff 审批和持续保存会话表面
+ * [OUTPUT]: 主任务与独立文档对话侧栏共用的 Space 落地页、作用域最近任务、首次发送懒创建、无误保存的历史恢复、首帧定位到最新消息、显式文档上下文、Artifact 导航、同源 RunPolicy 预检、整轮计时/常驻运行反馈、流式恢复、引申问题带入、本地消息反馈、按需运行解释、Agent Diff 审批和持续保存会话表面
  * [POS]: Tessera 主任务页与文档 AI 侧栏共用的单一对话实现
  * [DOC]: design.md、docs/architecture/unified-creation-agent.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -29,10 +29,18 @@ import {
   REQUEST_USER_INPUT_TOOL_NAME,
   type TaskArtifact,
   type TaskMessage,
+  type TaskMessageFeedbackRating,
   type TaskResearchSaveSourcesResult,
   type TaskSessionStatus,
+  type TaskSessionSummary,
 } from "@tessera/contracts"
-import { PanelLeftOpenIcon, Settings01Icon } from "@tessera/design-system/components/icons"
+import {
+  CheckmarkCircle02Icon,
+  Folder01Icon,
+  Home05Icon,
+  PanelLeftOpenIcon,
+  Settings01Icon,
+} from "@tessera/design-system/components/icons"
 import { Button } from "@tessera/design-system/components/ui/button"
 import { Icon } from "@tessera/design-system/components/ui/icon"
 import {
@@ -43,7 +51,7 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "@tessera/design-system/components/ui/message-scroller"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import {
   type AvailableAiModel,
   readPreferredAiModelKey,
@@ -52,6 +60,7 @@ import {
 } from "../hooks/use-ai-models"
 import type { ActiveTask } from "../hooks/use-tasks"
 import { ChatMessage } from "./chat-message"
+import { TaskRunStatus, type TaskRunTiming } from "./chat-parts/task-run-activity"
 import { aiModelKey } from "./model-picker"
 import { TaskArtifactTray } from "./task-artifact-tray"
 import { type ComposerImage, TaskComposer } from "./task-composer"
@@ -61,6 +70,47 @@ const MAX_IMAGES = 4
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024
 const MAX_CONTEXT_DOCUMENT_BYTES = 256 * 1024
 
+function monotonicNow() {
+  return typeof performance === "undefined" ? 0 : performance.now()
+}
+
+function useTaskRunTiming(taskId: string, running: boolean) {
+  const previousRef = useRef({ running: false, taskId })
+  const [state, setState] = useState<Readonly<{ taskId: string; timing: TaskRunTiming | null }>>({
+    taskId,
+    timing: running ? { startedAt: monotonicNow(), completedAt: null } : null,
+  })
+
+  useEffect(() => {
+    const previous = previousRef.current
+    previousRef.current = { running, taskId }
+
+    if (previous.taskId !== taskId) {
+      setState({
+        taskId,
+        timing: running ? { startedAt: monotonicNow(), completedAt: null } : null,
+      })
+      return
+    }
+    if (running && !previous.running) {
+      setState({ taskId, timing: { startedAt: monotonicNow(), completedAt: null } })
+      return
+    }
+    if (!running && previous.running) {
+      const completedAt = monotonicNow()
+      setState((current) => ({
+        taskId,
+        timing:
+          current.taskId === taskId && current.timing
+            ? { ...current.timing, completedAt }
+            : { startedAt: completedAt, completedAt },
+      }))
+    }
+  }, [running, taskId])
+
+  return state.taskId === taskId ? state.timing : null
+}
+
 type TaskPageProps = Readonly<{
   currentDocument?: DocumentSnapshot | null
   currentDocumentContent?: string | undefined
@@ -68,6 +118,7 @@ type TaskPageProps = Readonly<{
   surface?: "page" | "sidebar"
   task: ActiveTask
   taskError: string | null
+  recentTasks?: readonly TaskSessionSummary[]
   sidebarOpen: boolean
   workspaceName: string | null
   onEnsureTask: (title: string) => Promise<unknown | null>
@@ -75,6 +126,7 @@ type TaskPageProps = Readonly<{
   onSkillChange: (skillId: ActiveTask["skillId"]) => void
   onOpenArtifact?: ((artifact: TaskArtifact) => void) | undefined
   onOpenDocument?: ((path: string, line?: number) => void) | undefined
+  onOpenRecentTask?: ((task: TaskSessionSummary) => void) | undefined
   onToggleSidebar: () => void
   onOpenSettings: () => void
 }>
@@ -137,6 +189,42 @@ function lastTaskModelKey(messages: readonly TaskMessage[]) {
   return null
 }
 
+export function withTaskMessageFeedback(
+  messages: readonly UIMessage[],
+  messageId: string,
+  rating: TaskMessageFeedbackRating | null,
+  updatedAt = Date.now(),
+): UIMessage[] {
+  return messages.map((message) => {
+    if (message.id !== messageId || message.role !== "assistant") return message
+    const metadata = message.metadata ?? {}
+    if (rating) {
+      return { ...message, metadata: { ...metadata, feedback: { rating, updatedAt } } }
+    }
+    if (!metadata.feedback) return message
+    const { feedback: _removedFeedback, ...remainingMetadata } = metadata
+    const { metadata: _removedMetadata, ...messageWithoutMetadata } = message
+    return Object.keys(remainingMetadata).length > 0
+      ? { ...messageWithoutMetadata, metadata: remainingMetadata }
+      : messageWithoutMetadata
+  })
+}
+
+type TaskPersistenceAction = "initialize" | "skip" | "persist"
+
+export function resolveTaskPersistenceAction(input: {
+  readonly activityObserved: boolean
+  readonly currentChatIdentity: string
+  readonly initialChatIdentity: string
+  readonly nextPersistenceIdentity: string
+  readonly previousPersistenceIdentity: string | null
+}): TaskPersistenceAction {
+  if (!input.activityObserved && input.currentChatIdentity === input.initialChatIdentity) {
+    return "initialize"
+  }
+  return input.previousPersistenceIdentity === input.nextPersistenceIdentity ? "skip" : "persist"
+}
+
 function taskStatus(
   status: "ready" | "submitted" | "streaming" | "error",
   messages: Parameters<typeof hasPendingTaskUserInput>[0],
@@ -167,6 +255,7 @@ export function TaskPage({
   surface = "page",
   task,
   taskError,
+  recentTasks = [],
   sidebarOpen,
   workspaceName,
   onEnsureTask,
@@ -174,6 +263,7 @@ export function TaskPage({
   onSkillChange,
   onOpenArtifact,
   onOpenDocument,
+  onOpenRecentTask,
   onToggleSidebar,
   onOpenSettings,
 }: TaskPageProps) {
@@ -226,8 +316,13 @@ export function TaskPage({
     resume: task.persisted,
   })
   const running = chat.status === "submitted" || chat.status === "streaming"
+  const runTiming = useTaskRunTiming(task.id, running)
   const waitingForInput = hasPendingTaskUserInput(chat.messages)
-  const lastPersistedRef = useRef(`${task.status}:${JSON.stringify(task.messages)}`)
+  const initialChatIdentityRef = useRef(JSON.stringify(chat.messages))
+  const taskActivityObservedRef = useRef(false)
+  const lastPersistedRef = useRef<string | null>(null)
+  const messageViewportRef = useRef<HTMLDivElement | null>(null)
+  const [messageViewportReady, setMessageViewportReady] = useState(task.messages.length === 0)
   const loadAgentChangePreview = useCallback(
     (approvalId: string) => {
       if (!window.tessera) return Promise.reject(new Error("桌面 Agent 服务不可用。"))
@@ -299,6 +394,13 @@ export function TaskPage({
     setNotice("")
   }, [])
 
+  const updateMessageFeedback = useCallback(
+    (messageId: string, rating: TaskMessageFeedbackRating | null) => {
+      chat.setMessages((messages) => withTaskMessageFeedback(messages, messageId, rating))
+    },
+    [chat.setMessages],
+  )
+
   useEffect(() => {
     if (!selectedModel?.inputModalities?.includes("image")) setImages([])
   }, [selectedModel])
@@ -330,7 +432,19 @@ export function TaskPage({
         ? snapshots.slice(0, -1)
         : snapshots
     const identity = `${status}:${JSON.stringify(messages)}`
-    if (identity === lastPersistedRef.current) return
+    const action = resolveTaskPersistenceAction({
+      activityObserved: taskActivityObservedRef.current,
+      currentChatIdentity: JSON.stringify(chat.messages),
+      initialChatIdentity: initialChatIdentityRef.current,
+      nextPersistenceIdentity: identity,
+      previousPersistenceIdentity: lastPersistedRef.current,
+    })
+    if (action === "initialize") {
+      lastPersistedRef.current = identity
+      return
+    }
+    taskActivityObservedRef.current = true
+    if (action === "skip") return
     const timer = window.setTimeout(
       () => {
         lastPersistedRef.current = identity
@@ -340,6 +454,18 @@ export function TaskPage({
     )
     return () => window.clearTimeout(timer)
   }, [chat.messages, chat.status, onPersistTask, running, selectedModel, task.persisted])
+
+  useLayoutEffect(() => {
+    if (messageViewportReady || task.messages.length === 0) return
+    const viewport = messageViewportRef.current
+    if (!viewport) return
+    viewport.scrollTop = viewport.scrollHeight
+    const frame = window.requestAnimationFrame(() => {
+      viewport.scrollTop = viewport.scrollHeight
+      setMessageViewportReady(true)
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [messageViewportReady, task.messages.length])
 
   const addImages = async (files: FileList) => {
     const availableSlots = MAX_IMAGES - images.length
@@ -455,6 +581,7 @@ export function TaskPage({
       skillId={task.skillId}
       status={chat.status}
       notice={composerNotice}
+      placeholder={chat.messages.length > 0 ? "继续提问…" : "描述你想完成的任务…"}
       scope={agentScope}
       onChange={(value) => {
         setPrompt(value)
@@ -480,9 +607,7 @@ export function TaskPage({
   )
 
   return (
-    <section
-      className={`flex h-full min-h-0 flex-col ${surface === "sidebar" ? "bg-sidebar/35" : "bg-background"}`}
-    >
+    <section className="flex h-full min-h-0 flex-col bg-background">
       {surface === "page" ? (
         <header
           className="app-drag-region window-titlebar-leading relative flex h-12 shrink-0 items-center pr-3"
@@ -502,9 +627,11 @@ export function TaskPage({
               </Button>
             ) : null}
           </div>
-          <span className="pointer-events-none absolute inset-x-0 text-center text-[13px] font-medium">
-            {task.title}
-          </span>
+          {chat.messages.length > 0 ? (
+            <span className="pointer-events-none absolute inset-x-0 text-center text-[13px] font-medium">
+              {task.title}
+            </span>
+          ) : null}
           <div className="app-no-drag ml-auto">
             <Button
               type="button"
@@ -522,28 +649,48 @@ export function TaskPage({
 
       {chat.messages.length === 0 && surface === "sidebar" ? (
         <>
-          <div className="min-h-0 flex-1 overflow-y-auto px-4">
-            <div className="flex min-h-full items-end justify-center pb-5 text-center">
-              <div>
-                <h1 className="text-sm font-medium">围绕当前文档协作</h1>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                  提问、研究或修改，当前文档会作为可见附件发送。
-                </p>
-              </div>
-            </div>
-          </div>
+          <div className="min-h-0 flex-1" />
           <div className="shrink-0 bg-gradient-to-t from-background via-background to-transparent px-3 pt-3 pb-3">
             {composer(true)}
           </div>
         </>
       ) : chat.messages.length === 0 ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col items-center justify-center px-6 py-14 pb-24">
-            <div className="mb-7 text-center">
-              <h1 className="text-xl font-semibold tracking-tight">今天想做点什么？</h1>
-              <p className="mt-1.5 text-sm text-muted-foreground">研究、阅读、理解与写作，从一个问题开始。</p>
+          <div className="mx-auto min-h-full w-full max-w-[600px] px-2 pb-16">
+            <div className="flex min-h-[56vh] flex-col items-center justify-end pb-10">
+              <div className="mb-5 flex h-8 max-w-60 items-center gap-2 rounded-xl border border-border/60 bg-background px-3 text-[11px] font-medium shadow-xs">
+                <Icon icon={workspaceName ? Folder01Icon : Home05Icon} size={14} />
+                <span className="truncate">{workspaceName ?? "默认空间"}</span>
+              </div>
+              <div className="mb-7 text-center">
+                <h1 className="text-2xl font-semibold tracking-tight">今天想做点什么？</h1>
+              </div>
+              {composer()}
             </div>
-            {composer()}
+
+            {recentTasks.length > 0 && onOpenRecentTask ? (
+              <section aria-labelledby="space-recent-tasks-title">
+                <div className="mb-3 flex items-center justify-between px-1">
+                  <h2 id="space-recent-tasks-title" className="text-[12px] font-medium">
+                    最近任务
+                  </h2>
+                  <span className="text-[10px] text-muted-foreground">{recentTasks.length} 个</span>
+                </div>
+                <div className="grid gap-1">
+                  {recentTasks.slice(0, 5).map((recentTask) => (
+                    <button
+                      key={recentTask.id}
+                      type="button"
+                      className="flex h-9 w-full items-center gap-2 rounded-xl bg-muted/70 px-3 text-left transition-colors hover:bg-muted"
+                      onClick={() => onOpenRecentTask(recentTask)}
+                    >
+                      <Icon icon={CheckmarkCircle02Icon} size={15} className="shrink-0 text-foreground/55" />
+                      <span className="min-w-0 flex-1 truncate text-[12px]">{recentTask.title}</span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            ) : null}
           </div>
         </div>
       ) : (
@@ -551,23 +698,28 @@ export function TaskPage({
           <MessageScrollerProvider autoScroll defaultScrollPosition="end">
             <MessageScroller className="min-h-0 flex-1">
               <MessageScrollerViewport
-                className={surface === "sidebar" ? "px-3" : "px-5"}
+                ref={messageViewportRef}
+                className={`${surface === "sidebar" ? "px-3" : "px-5"} ${messageViewportReady ? "" : "invisible"}`}
                 aria-label="对话消息"
+                aria-busy={!messageViewportReady}
               >
                 <MessageScrollerContent
-                  className={`mx-auto w-full ${surface === "sidebar" ? "gap-5 py-4 pb-7" : "max-w-3xl gap-8 py-8 pb-12"}`}
+                  className={`mx-auto w-full ${surface === "sidebar" ? "gap-5 py-4 pb-8" : "max-w-[600px] gap-7 pt-9 pb-16"}`}
                 >
                   {chat.messages.map((message, index) => (
                     <MessageScrollerItem
                       key={message.id}
                       messageId={message.id}
                       scrollAnchor={message.role === "user"}
+                      className={messageViewportReady ? undefined : "[content-visibility:visible]"}
                     >
                       <ChatMessage
                         message={message}
                         isLast={index === chat.messages.length - 1}
                         running={running}
+                        runTiming={index === chat.messages.length - 1 ? runTiming : null}
                         loadAgentChangePreview={loadAgentChangePreview}
+                        onFeedback={updateMessageFeedback}
                         onOpenDocument={onOpenDocument}
                         onRegenerate={() => void chat.regenerate({ messageId: message.id })}
                         onReadResearchNotebook={readResearchNotebook}
@@ -591,24 +743,29 @@ export function TaskPage({
                       />
                     </MessageScrollerItem>
                   ))}
+                  {onOpenArtifact && artifacts.length > 0 ? (
+                    <div className="pt-1">
+                      <TaskArtifactTray
+                        artifacts={artifacts}
+                        compact={surface === "sidebar"}
+                        onOpen={onOpenArtifact}
+                      />
+                    </div>
+                  ) : null}
+                  {running ? (
+                    <div className="pt-1">
+                      <TaskRunStatus />
+                    </div>
+                  ) : null}
                 </MessageScrollerContent>
               </MessageScrollerViewport>
               <MessageScrollerButton />
             </MessageScroller>
           </MessageScrollerProvider>
           <div
-            className={`shrink-0 bg-gradient-to-t from-background via-background to-transparent pt-3 ${surface === "sidebar" ? "px-3 pb-3" : "px-5 pb-4"}`}
+            className={`shrink-0 bg-gradient-to-t from-background from-70% via-background/95 to-transparent pt-5 ${surface === "sidebar" ? "px-3 pb-3" : "px-5 pb-4"}`}
           >
-            <div className={surface === "sidebar" ? "w-full" : "mx-auto w-full max-w-3xl"}>
-              {onOpenArtifact ? (
-                <div className="mb-2">
-                  <TaskArtifactTray
-                    artifacts={artifacts}
-                    compact={surface === "sidebar"}
-                    onOpen={onOpenArtifact}
-                  />
-                </div>
-              ) : null}
+            <div className={surface === "sidebar" ? "w-full" : "mx-auto w-full max-w-[600px]"}>
               {composer(true)}
             </div>
           </div>

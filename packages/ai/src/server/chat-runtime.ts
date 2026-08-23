@@ -28,8 +28,8 @@ const MAX_TEXT_CHARACTERS = 2_000_000
 const MAX_FILE_DATA_URL_CHARACTERS = 12_000_000
 const MAX_MARKDOWN_CONTEXT_BYTES = 256 * 1024
 const MAX_ERROR_MESSAGE_LENGTH = 320
-const DEFAULT_WEB_SEARCH_MAX_USES = 5
-const RESEARCH_WEB_SEARCH_MAX_USES = 15
+const DEFAULT_WEB_SEARCH_MAX_USES = 12
+const RESEARCH_WEB_SEARCH_MAX_USES = 30
 
 type UnknownRecord = Record<string, unknown>
 
@@ -83,6 +83,11 @@ function providerErrorSignals(error: unknown, apiKey: string) {
   }
 
   return { httpStatus, searchable: searchable.join(" ").toLowerCase() }
+}
+
+/** 识别供应商原生搜索工具的逐轮预算耗尽，供 Agent 将其降级为可继续的工具结果。 */
+export function isWebSearchMaxUsesExceededError(error: unknown, apiKey: string) {
+  return providerErrorSignals(error, apiKey).searchable.includes("max_uses_exceeded")
 }
 
 const RETRYABLE_STREAM_ERRORS = new Set<TaskRunErrorCode>([

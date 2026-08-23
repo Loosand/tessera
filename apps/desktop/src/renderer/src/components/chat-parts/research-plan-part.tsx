@@ -80,15 +80,15 @@ export function ResearchPlanPart({ part, streaming }: ResearchPlanPartProps) {
   }
 
   return (
-    <details open className="my-3 rounded-2xl border border-border bg-background text-xs" aria-busy={busy}>
-      <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 font-semibold text-foreground">
+    <details open className="my-4 overflow-hidden rounded-[18px] bg-muted/55 text-xs" aria-busy={busy}>
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3.5 font-semibold text-foreground">
         <Icon icon={ListChecksIcon} size={15} />
         <span className="flex-1">研究计划</span>
         <span className="font-normal text-muted-foreground">
           {busy ? "研究中" : `${input.questions.length} 个问题`}
         </span>
       </summary>
-      <div className="border-t border-border px-4 py-3">
+      <div className="border-t border-border/40 px-4 py-3.5">
         <p className="font-medium leading-5 text-foreground">{input.objective}</p>
         {input.scope ? <p className="mt-1 leading-5 text-muted-foreground">范围：{input.scope}</p> : null}
         {input.deliverable ? (
@@ -96,7 +96,7 @@ export function ResearchPlanPart({ part, streaming }: ResearchPlanPartProps) {
         ) : null}
         <ol className="mt-3 space-y-1.5">
           {input.questions.map((question, index) => (
-            <li key={question.id} className="flex gap-2 rounded-lg bg-muted/60 px-3 py-2 leading-5">
+            <li key={question.id} className="flex gap-2 rounded-xl bg-background/70 px-3 py-2.5 leading-5">
               <span className="shrink-0 font-mono text-muted-foreground">Q{index + 1}</span>
               <span className="text-foreground">{question.title}</span>
             </li>

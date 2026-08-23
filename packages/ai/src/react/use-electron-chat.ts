@@ -11,7 +11,7 @@
  */
 
 import { useChat } from "@ai-sdk/react"
-import { REQUEST_USER_INPUT_TOOL_NAME, isTaskRunErrorDataV1 } from "@tessera/contracts"
+import { REQUEST_USER_INPUT_TOOL_NAME, isTaskMessageFeedback, isTaskRunErrorDataV1 } from "@tessera/contracts"
 import type {
   AiChatStreamEvent,
   AiProviderId,
@@ -114,6 +114,7 @@ function isTaskMessageMetadata(value: unknown): value is TaskMessageMetadata {
   if (!isRecord(value)) return false
   return (
     (value.configId === undefined || typeof value.configId === "string") &&
+    (value.feedback === undefined || isTaskMessageFeedback(value.feedback)) &&
     (value.modelId === undefined || typeof value.modelId === "string") &&
     (value.requestId === undefined || typeof value.requestId === "string") &&
     (value.providerId === undefined ||

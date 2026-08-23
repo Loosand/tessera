@@ -37,7 +37,8 @@ Markdown 文件是已批准正文的内容事实源。SQLite 保存工作区登�
 - **已实现**：用户 Skill 仓储保存稳定 `user:<name>` 标识、标准描述、启用状态、文件数量/总大小与安装时间；正文和托管绝对路径不进入 SQLite，磁盘可用性由主进程服务复核。
 - **已实现**：`app_settings` 保存由主进程验证的非敏感应用偏好；研究网络只允许 `system` / `direct`，默认值由领域
   服务提供，当前值在研究启动时复制进该 run 的脱敏资源摘要。代理地址和凭据不写入此表。
-- **已实现**：通用任务仓储保存兼容 `chat` / `agent` mode、下一轮内置/用户 Skill 或 `question-answering` 标记、可选初始工作区、可恢复等待状态和版本化消息；mode 与初始归属创建后不可变，但不再决定当前轮权限，工作区工具只来自眼下打开且已授权的工作区。
+- **已实现**：通用任务仓储保存兼容 `chat` / `agent` mode、下一轮内置/用户 Skill 或 `question-answering` 标记、可选初始工作区、可恢复等待状态和版本化消息；助手消息 metadata 可保存仅限本机的 `positive` / `negative` 反馈与更新时间，并继续关联同一 `requestId`。mode 与初始归属创建后不可变，但不再决定当前轮权限，工作区工具只来自眼下打开且已授权的工作区。
+- **已实现**：默认空间与文件工作区任务通过 SQLite `limit` / `offset` 返回稳定分页和独立总数；排序使用 `updated_at`、`created_at` 与 `id` 作为确定性键，渲染层可以访问旧 100 条列表上限之外的全部会话。
 - **已实现**：任务可重命名或删除；删除 `task_sessions` 时由外键级联清理对应 `task_messages`。
 - **已实现**：`task_runs` / `task_run_events` 在模型调用前创建运行 ID，固化本轮完整 RunPolicy、兼容查询列与资源摘要，并按 task/request/sequence 保存公开流事件；结束时从 AI SDK `onStepEnd` / `onEnd` 写入 SDK call、完成原因、Token/缓存和性能汇总，启动时把未结束运行标记为中断供任务页重放。
 - **已实现**：连续正文、推理和工具参数增量在分配 sequence 前顺序安全合并，SQLite 仍保存完整语义边界与终止事件，
@@ -96,7 +97,7 @@ schema 变化必须追加迁移，并同步结构测试。`0015-research-questio
 | `agent_events` | 会话的有序事件流 | 否 |
 | `permission_decisions` | 工具动作、资源和权限结果审计 | 否 |
 | `task_sessions` | Chat/Agent 共用的内部 mode、创作方式/可选内置或用户 Skill、工作区绑定、标题、运行状态和等待输入标记 | 否 |
-| `task_messages` | 按序保存的版本化消息 Part 与模型元数据 | 否 |
+| `task_messages` | 按序保存的版本化消息 Part、模型/运行元数据与本地回答反馈 | 否 |
 | `task_runs` | 每次模型运行的供应商、模型、完整 RunPolicy、资源摘要、兼容策略列、状态、事件游标和无正文运行汇总 | 否 |
 | `task_run_events` | 按 request/sequence 保存的公开 AI SDK 流事件检查点 | 否 |
 | `research_runs` | 绑定 task run 的研究阶段、计划摘要、结果和限制 | 否 |

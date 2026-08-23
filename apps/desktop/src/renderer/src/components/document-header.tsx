@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 当前文档、保存状态、导航能力与顶栏操作
- * [OUTPUT]: 系统重命名入口、文件状态、历史导航和文档工具入口
+ * [INPUT]: 当前文档、保存状态、导航能力、编辑模式与左右侧栏操作
+ * [OUTPUT]: 系统重命名入口、文件状态、历史导航、编辑模式和独立侧边对话开关
  * [POS]: 文档详情页的统一窗口顶栏
  * [DOC]: design.md、docs/architecture/editor.md
  *
@@ -12,19 +12,19 @@
 
 import type { DocumentSnapshot, WorkspaceInfo } from "@tessera/contracts"
 import {
-  AiBrain01Icon,
   ArrowDown01Icon,
   ArrowLeft01Icon,
   ArrowRight01Icon,
   Edit02Icon,
   File02Icon,
   PanelLeftOpenIcon,
-  Settings01Icon,
+  PanelRightCloseIcon,
+  PanelRightOpenIcon,
   SourceCodeIcon,
 } from "@tessera/design-system/components/icons"
 import { Button } from "@tessera/design-system/components/ui/button"
 import { Icon } from "@tessera/design-system/components/ui/icon"
-import { useState } from "react"
+import React, { useState } from "react"
 import type { DefaultEditorMode } from "../hooks/use-app-preferences"
 import type { WorkspaceSaveStatus } from "../hooks/use-workspace"
 
@@ -42,7 +42,6 @@ type DocumentHeaderProps = Readonly<{
   onModeChange: (mode: DefaultEditorMode) => void
   onToggleAgent: () => void
   onToggleSidebar: () => void
-  onOpenSettings: () => void
   onRenameDocument: () => Promise<boolean>
 }>
 
@@ -117,7 +116,6 @@ export function DocumentHeader({
   onModeChange,
   onToggleAgent,
   onToggleSidebar,
-  onOpenSettings,
   onRenameDocument,
 }: DocumentHeaderProps) {
   const nextMode = mode === "rich" ? "source" : "rich"
@@ -194,22 +192,12 @@ export function DocumentHeader({
           size="icon-sm"
           className="data-[active=true]:bg-muted"
           data-active={agentOpen || undefined}
-          aria-label={agentOpen ? "关闭 AI 助手" : "打开 AI 助手"}
+          aria-label={agentOpen ? "关闭侧边对话" : "打开侧边对话"}
           aria-pressed={agentOpen}
-          title="AI 助手"
+          title="侧边对话"
           onClick={onToggleAgent}
         >
-          <Icon icon={AiBrain01Icon} size={15} />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          aria-label="打开设置"
-          title="设置"
-          onClick={onOpenSettings}
-        >
-          <Icon icon={Settings01Icon} size={15} />
+          <Icon icon={agentOpen ? PanelRightCloseIcon : PanelRightOpenIcon} size={15} />
         </Button>
       </div>
     </header>

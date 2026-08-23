@@ -1,6 +1,6 @@
 /**
- * [INPUT]: AI SDK dynamic-tool 或 tool-* Part、Agent 变更预览、内容领域操作与工具审批回调
- * [OUTPUT]: Tool Chips 工具状态、可由聚合活动复用的独立审批区、内容库创建/移动的紧凑确认，以及 Markdown 写工具的高亮 Diff 审批
+ * [INPUT]: AI SDK dynamic-tool 或 tool-* Part、过程区输入隐藏策略、Agent 变更预览、内容领域操作与工具审批回调
+ * [OUTPUT]: 不暴露自动过程原始 JSON 的 Tool Chips 工具状态、可由聚合活动复用的独立审批区、内容库创建/移动的紧凑确认，以及 Markdown 写工具的高亮 Diff 审批
  * [POS]: ChatMessage 内可独立演进的工具呈现单元
  * [DOC]: design.md、docs/architecture/unified-creation-agent.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
  *
@@ -32,6 +32,7 @@ type ToolPartProps = {
   readonly onOpenDocument?: ((path: string) => void) | undefined
   readonly onToolApproval?: ((approvalId: string, approved: boolean) => void) | undefined
   readonly part: ToolMessagePart
+  readonly showInputDetails?: boolean
 }
 
 const stateLabels: Record<ToolMessagePart["state"], string> = {
@@ -144,11 +145,12 @@ export function ToolPart({
   onOpenDocument,
   onToolApproval,
   part,
+  showInputDetails = true,
 }: ToolPartProps) {
   const toolName = uiMessageToolName(part)
   const resource = toolResource(part)
   const errorText = part.state === "output-error" ? part.errorText : ""
-  const inputText = toolInputText(part)
+  const inputText = showInputDetails ? toolInputText(part) : ""
   const details =
     inputText || errorText ? (
       <div className="space-y-2">

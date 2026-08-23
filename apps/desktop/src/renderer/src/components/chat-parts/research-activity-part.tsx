@@ -291,7 +291,7 @@ export function ResearchActivityPart({
 
   return (
     <section
-      className="my-3 rounded-xl border border-border bg-card/70 px-3.5 py-3 text-xs"
+      className="my-4 rounded-[18px] bg-muted/55 px-4 py-3.5 text-xs"
       aria-label="研究进度"
       aria-busy={summary.active || streaming}
     >

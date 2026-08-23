@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 应用信息、useWorkspace 文档会话与隐式统一 Agent、Artifact、内置/用户创作 Skill 的 useTasks 任务导航状态
- * [OUTPUT]: 首页/用户 Skill 管理/任务/工作区保活视图、Artifact 到文档加同一侧栏会话、侧栏任务切换、跨工作区恢复、源码行导航和文档主区域
+ * [OUTPUT]: 默认空间/文件工作区的持久化 Space 壳层、互斥的新任务/历史任务选中态、用户 Skill 管理、分页最近任务与全部任务页、文件树共存的统一侧栏、保活任务/编辑器、独立可调宽文档对话侧栏、Artifact 到文档加同一会话、跨空间恢复和文档主区域
  * [POS]: Tessera 桌面端的顶层产品壳层
  * [DOC]: design.md、docs/architecture.md、docs/architecture/unified-creation-agent.md、docs/architecture/editor.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -18,6 +18,7 @@ import { useTasks } from "../hooks/use-tasks"
 import { useWorkspace } from "../hooks/use-workspace"
 import { motionSprings } from "../motion"
 import { AgentSidebar } from "./agent-sidebar"
+import { AllTasksPage } from "./all-tasks-page"
 import { DocumentEditor } from "./document-editor"
 import { DocumentHeader } from "./document-header"
 import { getRichTextEditorGuard } from "./editor/editor-mode-policy"
@@ -26,19 +27,40 @@ import { HomeSidebar } from "./home-sidebar"
 import { SettingsPage } from "./settings-page"
 import { SkillManagementPage } from "./skill-management-page"
 import { TaskPage } from "./task-page"
-import { WorkspaceHomePage } from "./workspace-home-page"
-import { WorkspaceSidebar } from "./workspace-sidebar"
 
 type AppShellProps = Readonly<{
   appInfo: AppInfo | undefined
 }>
 
-type PrimaryView = "home" | "skills" | "task" | "workspace"
+type PrimaryView = "skills" | "task" | "tasks" | "workspace"
 type AppView = PrimaryView | "settings"
 
+type HomeSidebarSelectionInput = Readonly<{
+  activeTaskId: string
+  activeTaskPersisted: boolean
+  agentOpen: boolean
+  view: AppView
+}>
+
+export function resolveHomeSidebarSelection(input: HomeSidebarSelectionInput) {
+  const draftTaskActive = input.view === "task" && !input.activeTaskPersisted
+  const persistedTaskActive = input.activeTaskPersisted && (input.view === "task" || input.agentOpen)
+  return {
+    activeItem:
+      input.view === "skills"
+        ? ("skills" as const)
+        : input.view === "tasks"
+          ? ("all-tasks" as const)
+          : draftTaskActive
+            ? ("new-task" as const)
+            : null,
+    activeTaskId: persistedTaskActive ? input.activeTaskId : undefined,
+  }
+}
+
 export function AppShell({ appInfo }: AppShellProps) {
-  const [view, setView] = useState<AppView>("home")
-  const [settingsReturnView, setSettingsReturnView] = useState<PrimaryView>("home")
+  const [view, setView] = useState<AppView>("task")
+  const [settingsReturnView, setSettingsReturnView] = useState<PrimaryView>("task")
   const [pendingTask, setPendingTask] = useState<{
     taskId: string
     workspaceId: string
@@ -58,14 +80,15 @@ export function AppShell({ appInfo }: AppShellProps) {
     activeDocument,
     draftContent,
     status,
+    initialized: workspaceInitialized,
     saveStatus,
     hasExternalConflict,
     canGoBack,
     canGoForward,
     error,
     selectWorkspace,
+    openDefaultWorkspace,
     openRecentWorkspace,
-    revealCurrentWorkspace,
     revealWorkspace,
     copyWorkspacePath,
     removeRecentWorkspace,
@@ -90,8 +113,9 @@ export function AppShell({ appInfo }: AppShellProps) {
   const {
     activeTask,
     error: taskError,
+    listTasksPage,
     tasks,
-    recentTasks,
+    taskListRevision,
     ensureActiveTask,
     openTask,
     persistActiveTask,
@@ -100,6 +124,25 @@ export function AppShell({ appInfo }: AppShellProps) {
     setActiveTaskSkill,
     startNewTask,
   } = useTasks(workspace?.id)
+  const homeSidebarSelection = resolveHomeSidebarSelection({
+    activeTaskId: activeTask.id,
+    activeTaskPersisted: activeTask.persisted,
+    agentOpen,
+    view,
+  })
+
+  useEffect(() => {
+    if (!workspaceInitialized || activeTask.persisted || activeTask.messages.length > 0) return
+    const currentSpaceId = workspace?.id ?? null
+    if (activeTask.workspaceId !== currentSpaceId) startNewTask(currentSpaceId)
+  }, [
+    activeTask.messages.length,
+    activeTask.persisted,
+    activeTask.workspaceId,
+    startNewTask,
+    workspace?.id,
+    workspaceInitialized,
+  ])
 
   const activeDocumentIdentity = activeDocument
     ? `${workspace?.id ?? "workspace"}:${activeDocument.relativePath}`
@@ -145,21 +188,6 @@ export function AppShell({ appInfo }: AppShellProps) {
     })
   }, [openTask, pendingTask, workspace?.id])
 
-  const selectOutline = useCallback(
-    (index: number, line: number) => {
-      if (effectiveEditorMode === "rich") {
-        const headings = window.document.querySelectorAll<HTMLElement>(
-          ".rich-text-content h1, .rich-text-content h2, .rich-text-content h3, .rich-text-content h4, .rich-text-content h5, .rich-text-content h6",
-        )
-        headings[index]?.scrollIntoView({ behavior: "smooth", block: "center" })
-        return
-      }
-
-      requestSourceEditorLine(line)
-    },
-    [effectiveEditorMode],
-  )
-
   const changeEditorMode = useCallback(
     (nextMode: DefaultEditorMode) => {
       flushPendingEdits()
@@ -167,14 +195,6 @@ export function AppShell({ appInfo }: AppShellProps) {
     },
     [flushPendingEdits],
   )
-
-  const createStandaloneTask = useCallback(() => {
-    flushPendingEdits()
-    setAgentOpen(false)
-    startNewTask(null)
-    if (compactRef.current) setSidebarOpen(false)
-    setView("task")
-  }, [flushPendingEdits, startNewTask])
 
   const createWorkspaceTask = useCallback(() => {
     flushPendingEdits()
@@ -196,21 +216,6 @@ export function AppShell({ appInfo }: AppShellProps) {
     setAgentOpen(true)
   }, [activeTask.persisted, activeTask.workspaceId, agentOpen, flushPendingEdits, startNewTask, workspace])
 
-  const createAgentTask = useCallback(() => {
-    flushPendingEdits()
-    startNewTask(workspace?.id ?? null)
-    setAgentOpen(true)
-  }, [flushPendingEdits, startNewTask, workspace?.id])
-
-  const openAgentTask = useCallback(
-    async (taskId: string) => {
-      flushPendingEdits()
-      const opened = await openTask(taskId)
-      if (opened) setAgentOpen(true)
-    },
-    [flushPendingEdits, openTask],
-  )
-
   const openWorkspace = useCallback(
     async (workspaceId: string) => {
       flushPendingEdits()
@@ -231,6 +236,16 @@ export function AppShell({ appInfo }: AppShellProps) {
     setView("task")
   }, [selectWorkspace, startNewTask])
 
+  const openDefaultSpace = useCallback(async () => {
+    flushPendingEdits()
+    const opened = await openDefaultWorkspace()
+    if (!opened) return
+    startNewTask(null)
+    setAgentOpen(false)
+    if (compactRef.current) setSidebarOpen(false)
+    setView("task")
+  }, [flushPendingEdits, openDefaultWorkspace, startNewTask])
+
   const openTaskSummary = useCallback(
     async (task: TaskSessionSummary) => {
       flushPendingEdits()
@@ -241,30 +256,18 @@ export function AppShell({ appInfo }: AppShellProps) {
         if (!nextWorkspace) setPendingTask(null)
         return
       }
+      if (!task.workspaceId && workspace) {
+        const openedDefault = await openDefaultWorkspace()
+        if (!openedDefault) return
+      }
       setPendingTask(null)
       const opened = await openTask(task.id)
       if (!opened) return
       if (compactRef.current) setSidebarOpen(false)
       setView("task")
     },
-    [flushPendingEdits, openRecentWorkspace, openTask, workspace?.id],
+    [flushPendingEdits, openDefaultWorkspace, openRecentWorkspace, openTask, workspace],
   )
-
-  const openWorkspaceTask = useCallback(
-    async (taskId: string) => {
-      const opened = await openTask(taskId)
-      if (!opened) return
-      if (compactRef.current) setSidebarOpen(false)
-      setView("task")
-    },
-    [openTask],
-  )
-
-  const showHome = useCallback(() => {
-    flushPendingEdits()
-    setAgentOpen(false)
-    setView("home")
-  }, [flushPendingEdits])
 
   const showSkills = useCallback(() => {
     flushPendingEdits()
@@ -273,14 +276,21 @@ export function AppShell({ appInfo }: AppShellProps) {
     setView("skills")
   }, [flushPendingEdits])
 
+  const showAllTasks = useCallback(() => {
+    flushPendingEdits()
+    setAgentOpen(false)
+    if (compactRef.current) setSidebarOpen(false)
+    setView("tasks")
+  }, [flushPendingEdits])
+
   const createSkillTask = useCallback(
     (skillId: Exclude<TaskSkillId, null | "question-answering">) => {
       flushPendingEdits()
       setAgentOpen(false)
-      startNewTask(null, skillId)
+      startNewTask(workspace?.id ?? null, skillId)
       setView("task")
     },
-    [flushPendingEdits, startNewTask],
+    [flushPendingEdits, startNewTask, workspace?.id],
   )
 
   const showDocument = useCallback(
@@ -334,13 +344,10 @@ export function AppShell({ appInfo }: AppShellProps) {
     setView("settings")
   }, [view])
 
-  const standaloneTask = view === "task" && activeTask.workspaceId === null
-  const showHomeSidebar = view === "home" || view === "skills" || !workspace || standaloneTask
-
   return (
     <>
       <div
-        className={`${view === "settings" ? "hidden" : "flex"} relative h-screen min-h-0 bg-sidebar text-foreground`}
+        className={`${view === "settings" ? "hidden" : "flex"} relative h-screen min-h-0 gap-1 bg-muted/55 p-1 text-foreground`}
         data-platform={appInfo?.platform}
       >
         <AnimatePresence initial={false}>
@@ -362,8 +369,8 @@ export function AppShell({ appInfo }: AppShellProps) {
         <AnimatePresence initial={false}>
           {sidebarOpen ? (
             <m.div
-              key="workspace-sidebar"
-              className={compact ? "absolute inset-y-0 left-0 z-30" : "flex shrink-0 overflow-hidden"}
+              key="home-sidebar"
+              className={compact ? "absolute inset-y-1 left-1 z-30" : "flex shrink-0 overflow-hidden"}
               initial={
                 shouldReduceMotion ? false : compact ? { opacity: 0, x: -18 } : { opacity: 0, width: 0 }
               }
@@ -377,87 +384,46 @@ export function AppShell({ appInfo }: AppShellProps) {
               }
               transition={shouldReduceMotion ? { duration: 0 } : motionSprings.layout}
             >
-              {showHomeSidebar ? (
-                <HomeSidebar
-                  activeItem={view === "skills" ? "skills" : standaloneTask ? "new-task" : "workspaces"}
-                  activeTaskId={view === "task" ? activeTask.id : undefined}
-                  recentTasks={recentTasks}
-                  workspaces={recentWorkspaces}
-                  onCollapse={() => setSidebarOpen(false)}
-                  onNewTask={createStandaloneTask}
-                  onOpenSettings={openSettings}
-                  onOpenTask={(task) => void openTaskSummary(task)}
-                  onOpenWorkspace={(workspaceId) => void openWorkspace(workspaceId)}
-                  onRenameTask={renameTask}
-                  onDeleteTask={deleteTask}
-                  onRevealWorkspace={(workspaceId) => void revealWorkspace(workspaceId)}
-                  onCopyWorkspacePath={(workspaceId) => void copyWorkspacePath(workspaceId)}
-                  onRemoveWorkspace={(workspaceId) => void removeRecentWorkspace(workspaceId)}
-                  onShowSkills={showSkills}
-                  onShowWorkspaces={showHome}
-                />
-              ) : (
-                <WorkspaceSidebar
-                  activeSection={view === "task" ? "tasks" : "files"}
-                  activeTaskId={view === "task" ? activeTask.id : undefined}
-                  workspace={workspace}
-                  tasks={tasks}
-                  recentWorkspaces={recentWorkspaces}
-                  documents={documents}
-                  directories={directories}
-                  activePath={activeDocument?.relativePath}
-                  activeContent={draftContent}
-                  onCollapse={() => setSidebarOpen(false)}
-                  onGoHome={showHome}
-                  onNewTask={createWorkspaceTask}
-                  onOpenTask={(taskId) => void openWorkspaceTask(taskId)}
-                  onRenameTask={renameTask}
-                  onDeleteTask={deleteTask}
-                  onSectionChange={(section) => setView(section === "tasks" ? "task" : "workspace")}
-                  onSelectWorkspace={() => void chooseWorkspace()}
-                  onOpenRecentWorkspace={(workspaceId) => void openWorkspace(workspaceId)}
-                  onRevealRecentWorkspace={(workspaceId) => void revealWorkspace(workspaceId)}
-                  onCopyWorkspacePath={(workspaceId) => void copyWorkspacePath(workspaceId)}
-                  onRemoveRecentWorkspace={(workspaceId) => void removeRecentWorkspace(workspaceId)}
-                  onRevealWorkspace={() => void revealCurrentWorkspace()}
-                  onRefreshDocuments={() => void refreshDocuments()}
-                  onCreateDocument={createWorkspaceDocument}
-                  onCreateDirectory={createWorkspaceDirectory}
-                  onOpenDocument={showDocument}
-                  onRenameDocument={(relativePath) => void renameDocument(relativePath)}
-                  onRenameDirectory={(relativePath) => void renameDirectory(relativePath)}
-                  onDeleteWorkspaceEntry={(relativePath, kind) =>
-                    void deleteWorkspaceEntry(relativePath, kind)
-                  }
-                  onRevealWorkspaceEntry={(relativePath) => void revealWorkspaceEntry(relativePath)}
-                  onCopyWorkspaceEntryPath={(relativePath) => void copyWorkspaceEntryPath(relativePath)}
-                  onSelectOutline={selectOutline}
-                />
-              )}
+              <HomeSidebar
+                activeItem={homeSidebarSelection.activeItem}
+                activeTaskId={homeSidebarSelection.activeTaskId}
+                activeDocumentPath={activeDocument?.relativePath}
+                directories={directories}
+                documents={documents}
+                loadTasksPage={listTasksPage}
+                tasks={tasks}
+                taskListRevision={taskListRevision}
+                workspace={workspace}
+                workspaces={recentWorkspaces}
+                onCollapse={() => setSidebarOpen(false)}
+                onCopyWorkspacePath={(workspaceId) => void copyWorkspacePath(workspaceId)}
+                onCopyWorkspaceEntryPath={(relativePath) => void copyWorkspaceEntryPath(relativePath)}
+                onCreateDirectory={createWorkspaceDirectory}
+                onCreateDocument={createWorkspaceDocument}
+                onDeleteTask={deleteTask}
+                onDeleteWorkspaceEntry={(relativePath, kind) => void deleteWorkspaceEntry(relativePath, kind)}
+                onNewTask={createWorkspaceTask}
+                onOpenDefaultSpace={() => void openDefaultSpace()}
+                onOpenDocument={showDocument}
+                onOpenSettings={openSettings}
+                onOpenTask={(task) => void openTaskSummary(task)}
+                onOpenWorkspace={(workspaceId) => void openWorkspace(workspaceId)}
+                onRemoveWorkspace={(workspaceId) => void removeRecentWorkspace(workspaceId)}
+                onRefreshDocuments={() => void refreshDocuments()}
+                onRenameDirectory={(relativePath) => void renameDirectory(relativePath)}
+                onRenameDocument={(relativePath) => void renameDocument(relativePath)}
+                onRenameTask={renameTask}
+                onRevealWorkspace={(workspaceId) => void revealWorkspace(workspaceId)}
+                onRevealWorkspaceEntry={(relativePath) => void revealWorkspaceEntry(relativePath)}
+                onSelectWorkspace={() => void chooseWorkspace()}
+                onShowAllTasks={showAllTasks}
+                onShowSkills={showSkills}
+              />
             </m.div>
           ) : null}
         </AnimatePresence>
 
-        <main
-          className={`flex min-w-0 flex-1 flex-col overflow-hidden bg-background ${sidebarOpen && !compact ? "border-l border-sidebar-border" : ""}`}
-        >
-          <div className={`${view === "home" ? "block" : "hidden"} min-h-0 flex-1`}>
-            <WorkspaceHomePage
-              recentTasks={recentTasks}
-              sidebarOpen={sidebarOpen}
-              workspaces={recentWorkspaces}
-              onOpenTask={(task) => void openTaskSummary(task)}
-              onOpenWorkspace={(workspaceId) => void openWorkspace(workspaceId)}
-              onRenameTask={renameTask}
-              onDeleteTask={deleteTask}
-              onRevealWorkspace={(workspaceId) => void revealWorkspace(workspaceId)}
-              onCopyWorkspacePath={(workspaceId) => void copyWorkspacePath(workspaceId)}
-              onRemoveWorkspace={(workspaceId) => void removeRecentWorkspace(workspaceId)}
-              onSelectWorkspace={() => void chooseWorkspace()}
-              onToggleSidebar={() => setSidebarOpen((current) => !current)}
-            />
-          </div>
-
+        <main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl bg-background">
           <div className={`${view === "skills" ? "block" : "hidden"} min-h-0 flex-1`}>
             <SkillManagementPage
               sidebarOpen={sidebarOpen}
@@ -466,85 +432,96 @@ export function AppShell({ appInfo }: AppShellProps) {
             />
           </div>
 
-          <div className={`${view === "workspace" ? "flex" : "hidden"} min-h-0 flex-1 flex-col`}>
-            <DocumentHeader
-              workspace={workspace}
-              document={activeDocument}
-              saveStatus={saveStatus}
-              canGoBack={canGoBack}
-              canGoForward={canGoForward}
-              mode={effectiveEditorMode}
-              agentOpen={agentOpen}
+          <div className={`${view === "tasks" ? "block" : "hidden"} min-h-0 flex-1`}>
+            <AllTasksPage
+              activeTaskId={undefined}
+              liveTasks={tasks}
+              loadTasksPage={listTasksPage}
+              refreshKey={taskListRevision}
+              scopeKey={workspace?.id ?? "default-space"}
               sidebarOpen={sidebarOpen}
-              onGoBack={() => void goBack()}
-              onGoForward={() => void goForward()}
-              onModeChange={changeEditorMode}
-              onToggleAgent={toggleAgentSidebar}
-              onToggleSidebar={() => setSidebarOpen((current) => !current)}
+              spaceName={workspace?.name ?? "默认空间"}
+              onDeleteTask={deleteTask}
               onOpenSettings={openSettings}
-              onRenameDocument={renameActiveDocument}
+              onOpenTask={(task) => void openTaskSummary(task)}
+              onRenameTask={renameTask}
+              onToggleSidebar={() => setSidebarOpen((current) => !current)}
             />
+          </div>
 
-            {error ? (
-              <div className="border-b border-destructive/20 bg-destructive/8 px-4 py-2 text-xs text-destructive">
-                {error}
-              </div>
-            ) : null}
-
-            <div className="relative flex min-h-0 flex-1">
-              <DocumentEditor
+          <div className={`${view === "workspace" ? "flex" : "hidden"} min-h-0 flex-1`}>
+            <div className="flex min-w-0 flex-1 flex-col">
+              <DocumentHeader
+                workspace={workspace}
                 document={activeDocument}
-                content={draftContent}
-                hasWorkspace={Boolean(workspace)}
-                isLoading={status === "loading"}
-                hasExternalConflict={hasExternalConflict}
-                richEditorGuard={richEditorGuard}
+                saveStatus={saveStatus}
+                canGoBack={canGoBack}
+                canGoForward={canGoForward}
                 mode={effectiveEditorMode}
-                spellCheck={preferences.spellCheck}
-                onSelectWorkspace={selectWorkspace}
-                onAllowGuardedRich={() => {
-                  if (activeDocumentIdentity) setRichEditorGuardOverride(activeDocumentIdentity)
-                  setEditorMode("rich")
-                }}
-                onContentChange={updateDraft}
-                onFlushPendingEditsReady={registerPendingEditsFlusher}
+                agentOpen={agentOpen}
+                sidebarOpen={sidebarOpen}
+                onGoBack={() => void goBack()}
+                onGoForward={() => void goForward()}
                 onModeChange={changeEditorMode}
-                onSave={saveDocument}
-                onReload={reloadDocument}
+                onToggleAgent={toggleAgentSidebar}
+                onToggleSidebar={() => setSidebarOpen((current) => !current)}
+                onRenameDocument={renameActiveDocument}
               />
-              <AnimatePresence initial={false}>
-                {agentOpen ? (
-                  <AgentSidebar
-                    key="agent-sidebar"
-                    activeTask={activeTask}
-                    document={activeDocument}
-                    tasks={tasks}
-                    onClose={() => setAgentOpen(false)}
-                    onNewTask={createAgentTask}
-                    onOpenTask={(taskId) => void openAgentTask(taskId)}
-                  >
-                    <TaskPage
-                      key={activeTask.id}
-                      currentDocument={activeDocument}
-                      currentDocumentContent={draftContent}
-                      defaultAttachCurrentDocument
-                      surface="sidebar"
-                      task={activeTask}
-                      taskError={taskError}
-                      sidebarOpen={sidebarOpen}
-                      workspaceName={workspace?.name ?? null}
-                      onEnsureTask={ensureActiveTask}
-                      onPersistTask={persistActiveTask}
-                      onSkillChange={setActiveTaskSkill}
-                      onOpenArtifact={(artifact) => void openTaskArtifact(artifact)}
-                      onOpenDocument={showDocument}
-                      onToggleSidebar={() => setSidebarOpen((current) => !current)}
-                      onOpenSettings={openSettings}
-                    />
-                  </AgentSidebar>
-                ) : null}
-              </AnimatePresence>
+
+              {error ? (
+                <div className="border-b border-destructive/20 bg-destructive/8 px-4 py-2 text-xs text-destructive">
+                  {error}
+                </div>
+              ) : null}
+
+              <div className="relative flex min-h-0 flex-1">
+                <DocumentEditor
+                  document={activeDocument}
+                  content={draftContent}
+                  hasWorkspace={Boolean(workspace)}
+                  isLoading={status === "loading"}
+                  hasExternalConflict={hasExternalConflict}
+                  richEditorGuard={richEditorGuard}
+                  mode={effectiveEditorMode}
+                  spellCheck={preferences.spellCheck}
+                  onSelectWorkspace={selectWorkspace}
+                  onAllowGuardedRich={() => {
+                    if (activeDocumentIdentity) setRichEditorGuardOverride(activeDocumentIdentity)
+                    setEditorMode("rich")
+                  }}
+                  onContentChange={updateDraft}
+                  onFlushPendingEditsReady={registerPendingEditsFlusher}
+                  onModeChange={changeEditorMode}
+                  onSave={saveDocument}
+                  onReload={reloadDocument}
+                />
+              </div>
             </div>
+
+            <AnimatePresence initial={false}>
+              {agentOpen ? (
+                <AgentSidebar key="agent-sidebar" onClose={() => setAgentOpen(false)}>
+                  <TaskPage
+                    key={activeTask.id}
+                    currentDocument={activeDocument}
+                    currentDocumentContent={draftContent}
+                    defaultAttachCurrentDocument
+                    surface="sidebar"
+                    task={activeTask}
+                    taskError={taskError}
+                    sidebarOpen={sidebarOpen}
+                    workspaceName={workspace?.name ?? null}
+                    onEnsureTask={ensureActiveTask}
+                    onPersistTask={persistActiveTask}
+                    onSkillChange={setActiveTaskSkill}
+                    onOpenArtifact={(artifact) => void openTaskArtifact(artifact)}
+                    onOpenDocument={showDocument}
+                    onToggleSidebar={() => setSidebarOpen((current) => !current)}
+                    onOpenSettings={openSettings}
+                  />
+                </AgentSidebar>
+              ) : null}
+            </AnimatePresence>
           </div>
 
           <div className={`${view === "task" ? "block" : "hidden"} min-h-0 flex-1`}>
@@ -555,6 +532,7 @@ export function AppShell({ appInfo }: AppShellProps) {
                 currentDocumentContent={draftContent}
                 task={activeTask}
                 taskError={taskError}
+                recentTasks={tasks}
                 sidebarOpen={sidebarOpen}
                 workspaceName={workspace?.name ?? null}
                 onEnsureTask={ensureActiveTask}
@@ -562,6 +540,7 @@ export function AppShell({ appInfo }: AppShellProps) {
                 onSkillChange={setActiveTaskSkill}
                 onOpenArtifact={(artifact) => void openTaskArtifact(artifact)}
                 onOpenDocument={showDocument}
+                onOpenRecentTask={(task) => void openTaskSummary(task)}
                 onToggleSidebar={() => setSidebarOpen((current) => !current)}
                 onOpenSettings={openSettings}
               />

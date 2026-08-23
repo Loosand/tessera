@@ -1,6 +1,6 @@
 /**
  * [INPUT]: Electron 生命周期、共享 IPC 契约、AI Chat/Agent/Skill 配置、AI SDK 开发期日志、用户 Skill 扫描安装服务、研究网络偏好、可信研究服务、混合内容库、Agent 变更服务、模型服务、safeStorage 与 Tessera 核心服务
- * [OUTPUT]: 可选系统代理/直连的受限研究 Reader、显式研究续跑/已完成工具结果续跑与来源保存、顺序安全的流增量合并、工作区/MCP Agent 工具、托管内容库/Artifact 查询、内置/用户 Skill 校验后的 SQLite 可恢复后台 AI 运行、版本化公开错误与脱敏运行解释、官方 AI SDK 日志入口、Diff/MCP 审批、持久化研究/AI/MCP/用户 Skill 配置与扫描会话、关闭保存握手和桌面窗口
+ * [OUTPUT]: 可选系统代理/直连的受限研究 Reader、显式研究续跑/已完成工具结果续跑与来源保存、顺序安全的流增量合并、默认空间/工作区恢复与任务分页、工作区/MCP Agent 工具、托管内容库/Artifact 查询、内置/用户 Skill 校验后的 SQLite 可恢复后台 AI 运行、版本化公开错误与脱敏运行解释、官方 AI SDK 日志入口、Diff/MCP 审批、持久化研究/AI/MCP/用户 Skill 配置与扫描会话、关闭保存握手和满高桌面窗口
  * [POS]: Electron 主进程入口与平台安全边界
  * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/ai-observability.md、docs/architecture/database.md、docs/architecture/mcp.md、docs/architecture/research-workflow.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md、docs/architecture/unified-creation-agent.md
  *
@@ -46,7 +46,7 @@ import { createAppInfo } from "@tessera/core"
 import {
   type DatabaseClient,
   appendTaskRunEvent,
-  findMostRecentWorkspace,
+  findAppSetting,
   findTaskRun,
   findWorkspaceById,
   finishTaskRun,
@@ -58,6 +58,7 @@ import {
   saveWorkspace,
   startResearchRun,
   startTaskRun,
+  upsertAppSetting,
 } from "@tessera/database"
 import {
   BrowserWindow,
@@ -68,6 +69,7 @@ import {
   clipboard,
   dialog,
   safeStorage,
+  screen,
   shell,
 } from "electron"
 import { type AgentChangeService, createAgentChangeService } from "./agent-change-service"
@@ -109,6 +111,8 @@ const MAIN_DIRECTORY = dirname(fileURLToPath(import.meta.url))
 const MARKDOWN_EXTENSIONS = new Set([".md", ".markdown"])
 const IGNORED_DIRECTORIES = new Set([".git", ".tessera", "node_modules"])
 const WORKSPACE_CHANGE_DEBOUNCE_MS = 120
+const LAST_ACTIVE_SPACE_SETTING_KEY = "workspace.last-active-space.v1"
+const DEFAULT_SPACE_SETTING_VALUE = "default"
 
 type WorkspaceSession = {
   workspace: WorkspaceInfo
@@ -542,6 +546,20 @@ function persistWorkspace(workspace: WorkspaceInfo) {
     displayName: workspace.name,
     lastOpenedAt: new Date(),
   })
+  upsertAppSetting(databaseClient, {
+    key: LAST_ACTIVE_SPACE_SETTING_KEY,
+    value: workspace.id,
+    updatedAt: new Date(),
+  })
+}
+
+function persistDefaultSpace() {
+  if (!databaseClient) return
+  upsertAppSetting(databaseClient, {
+    key: LAST_ACTIVE_SPACE_SETTING_KEY,
+    value: DEFAULT_SPACE_SETTING_VALUE,
+    updatedAt: new Date(),
+  })
 }
 
 function workspaceFromRecord(record: {
@@ -558,10 +576,14 @@ function workspaceFromRecord(record: {
   }
 }
 
-function restoreMostRecentWorkspace(): WorkspaceInfo | null {
+function restoreLastActiveWorkspace(): WorkspaceInfo | null {
   if (!databaseClient) return null
-  const record = findMostRecentWorkspace(databaseClient)
-  return record ? workspaceFromRecord(record) : null
+  const workspaceId = findAppSetting(databaseClient, LAST_ACTIVE_SPACE_SETTING_KEY)?.value
+  if (!workspaceId || workspaceId === DEFAULT_SPACE_SETTING_VALUE) return null
+  const record = findWorkspaceById(databaseClient, workspaceId)
+  const workspace = record ? workspaceFromRecord(record) : null
+  if (!workspace) persistDefaultSpace()
+  return workspace
 }
 
 async function resolveWorkspacePath(rootPath: string, relativePath: string) {
@@ -1368,6 +1390,11 @@ function registerIpcHandlers() {
     IPC_CHANNELS.workspaceCurrent,
     (event) => activeWorkspaces.get(event.sender.id)?.workspace ?? null,
   )
+  handleDesktopInvoke(IPC_CHANNELS.workspaceOpenDefault, (event) => {
+    closeWorkspaceSession(event.sender.id)
+    persistDefaultSpace()
+    return null
+  })
   handleDesktopInvoke(IPC_CHANNELS.contentLibraryCurrent, () => {
     try {
       return { ok: true, library: requireContentLibraryService().current() }
@@ -1443,9 +1470,16 @@ function registerIpcHandlers() {
   handleDesktopInvoke(IPC_CHANNELS.taskListRecent, () => {
     return requireDesktopTaskService().listRecent()
   })
+  handleDesktopInvoke(IPC_CHANNELS.taskListDefault, () => {
+    return requireDesktopTaskService().listDefault()
+  })
   handleDesktopInvoke(IPC_CHANNELS.taskListWorkspace, (event) => {
     const workspace = workspaceForEvent(event)
     return requireDesktopTaskService().listWorkspace(workspace.id)
+  })
+  handleDesktopInvoke(IPC_CHANNELS.taskListPage, (event, request) => {
+    const workspaceId = activeWorkspaces.get(event.sender.id)?.workspace.id ?? null
+    return requireDesktopTaskService().listPage(workspaceId, request)
   })
   handleDesktopInvoke(IPC_CHANNELS.taskListArtifacts, (_event, taskId) => {
     requireDesktopTaskService().read(taskId)
@@ -1625,9 +1659,13 @@ function registerIpcHandlers() {
 }
 
 function createWindow(initialWorkspace: WorkspaceInfo | null = null) {
+  const workArea = screen.getPrimaryDisplay().workArea
+  const width = Math.min(1320, workArea.width)
   const window = new BrowserWindow({
-    width: 1320,
-    height: 860,
+    x: workArea.x + Math.round((workArea.width - width) / 2),
+    y: workArea.y,
+    width,
+    height: workArea.height,
     minWidth: 520,
     minHeight: 420,
     show: false,
@@ -1712,10 +1750,10 @@ app.whenReady().then(async () => {
     requireDesktopTaskService().setRunStatus(taskId, status),
   )
   registerIpcHandlers()
-  createWindow(restoreMostRecentWorkspace())
+  createWindow(restoreLastActiveWorkspace())
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow(restoreMostRecentWorkspace())
+    if (BrowserWindow.getAllWindows().length === 0) createWindow(restoreLastActiveWorkspace())
   })
 })
 

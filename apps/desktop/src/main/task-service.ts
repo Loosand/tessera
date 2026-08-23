@@ -1,6 +1,6 @@
 /**
  * [INPUT]: SQLite 任务仓储、可逐轮变化的显式可空 Skill、兼容工作区归属、等待输入状态的跨进程任务输入与主进程当前工作区
- * [OUTPUT]: 任务列表/必需或可选读取/保存/重命名/删除、主进程运行状态收口、等待输入恢复、创建期工作区校验、带 requestId 的版本化引申问题/运行/工具失败消息校验与运行前逐轮 Skill 校验
+ * [OUTPUT]: 默认空间/文件工作区任务列表、不会因相同快照刷新活动时间的幂等保存、必需或可选读取/重命名/删除、主进程运行状态收口、等待输入恢复、创建期工作区校验、带 requestId 的版本化引申问题/运行/工具失败及本地反馈消息校验与运行前逐轮 Skill 校验
  * [POS]: Electron 主进程中的统一任务会话领域服务；旧 mode/workspace 只保留兼容归属，不再决定逐轮资源授权
  * [DOC]: docs/architecture/database.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -15,6 +15,8 @@ import {
   type TaskMessage,
   type TaskMessagePart,
   type TaskMode,
+  type TaskSessionPage,
+  type TaskSessionPageRequest,
   type TaskSessionSaveInput,
   type TaskSessionSnapshot,
   type TaskSessionStatus,
@@ -23,6 +25,7 @@ import {
   type TaskToolState,
   type WorkspaceInfo,
   isTaskFollowUpQuestionsDataV1,
+  isTaskMessageFeedback,
   isTaskRunErrorDataV1,
   isTaskSkillId,
   isTaskToolErrorDataV1,
@@ -31,8 +34,11 @@ import {
   type DatabaseClient,
   deleteTaskSession,
   findTaskSession,
+  listDefaultTaskSessions,
+  listDefaultTaskSessionsPage,
   listRecentTaskSessions,
   listWorkspaceTaskSessions,
+  listWorkspaceTaskSessionsPage,
   renameTaskSession,
   saveTaskSession,
   updateTaskSessionStatus,
@@ -40,6 +46,7 @@ import {
 
 const MAX_TASK_MESSAGE_BYTES = 32 * 1024 * 1024
 const MAX_TASK_MESSAGES = 500
+const MAX_TASK_PAGE_SIZE = 50
 const TASK_STATUSES = [
   "idle",
   "running",
@@ -61,6 +68,10 @@ const TOOL_STATES = [
 
 type TaskRecord = NonNullable<ReturnType<typeof findTaskSession>>
 
+function sameMessagePayloads(left: readonly string[], right: readonly string[]) {
+  return left.length === right.length && left.every((payload, index) => payload === right[index])
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value))
 }
@@ -80,6 +91,16 @@ function validateTaskId(value: string) {
 function validateTaskTitle(value: string) {
   const title = value.trim().replace(/\s+/gu, " ").slice(0, 120)
   return title || "新任务"
+}
+
+function validateTaskPageRequest(value: TaskSessionPageRequest) {
+  const page = value?.page
+  const pageSize = value?.pageSize
+  if (!Number.isSafeInteger(page) || page < 1) throw new Error("任务页码无效。")
+  if (!Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > MAX_TASK_PAGE_SIZE) {
+    throw new Error(`每页任务数必须在 1–${MAX_TASK_PAGE_SIZE} 之间。`)
+  }
+  return { page, pageSize, offset: (page - 1) * pageSize }
 }
 
 function validateTaskMode(value: unknown): TaskMode {
@@ -195,6 +216,7 @@ function validateTaskMessage(message: unknown): message is TaskMessage {
   return (
     isRecord(message.metadata) &&
     validateOptionalString(message.metadata.configId) &&
+    (message.metadata.feedback === undefined || isTaskMessageFeedback(message.metadata.feedback)) &&
     validateOptionalString(message.metadata.modelId) &&
     validateOptionalString(message.metadata.requestId) &&
     (message.metadata.providerId === undefined || isStringValue(AI_PROVIDER_IDS, message.metadata.providerId))
@@ -246,6 +268,8 @@ export type DesktopTaskService = {
     skillId?: TaskSkillId,
   ) => void
   readonly delete: (taskId: string) => boolean
+  readonly listDefault: () => TaskSessionSummary[]
+  readonly listPage: (workspaceId: string | null, request: TaskSessionPageRequest) => TaskSessionPage
   readonly listRecent: () => TaskSessionSummary[]
   readonly listWorkspace: (workspaceId: string) => TaskSessionSummary[]
   readonly read: (taskId: string) => TaskSessionSnapshot
@@ -257,6 +281,20 @@ export type DesktopTaskService = {
 
 export function createDesktopTaskService(client: DatabaseClient): DesktopTaskService {
   return {
+    listDefault: () => listDefaultTaskSessions(client).map(toTaskSummary),
+    listPage: (workspaceId, request) => {
+      const { page, pageSize, offset } = validateTaskPageRequest(request)
+      const result = workspaceId
+        ? listWorkspaceTaskSessionsPage(client, workspaceId, { limit: pageSize, offset })
+        : listDefaultTaskSessionsPage(client, { limit: pageSize, offset })
+      return {
+        items: result.items.map(toTaskSummary),
+        page,
+        pageSize,
+        total: result.total,
+        totalPages: Math.max(1, Math.ceil(result.total / pageSize)),
+      }
+    },
     listRecent: () => listRecentTaskSessions(client).map(toTaskSummary),
     listWorkspace: (workspaceId) => listWorkspaceTaskSessions(client, workspaceId).map(toTaskSummary),
     read: (taskId) => {
@@ -300,6 +338,18 @@ export function createDesktopTaskService(client: DatabaseClient): DesktopTaskSer
       const workspaceId = existing ? existing.workspaceId : requestedWorkspaceId
       if (!existing && mode === "agent" && !workspaceId) throw new Error("Agent 任务必须绑定工作区。")
 
+      const messagePayloads = messages.map((message) => JSON.stringify(message))
+      if (
+        existing &&
+        existing.mode === mode &&
+        existing.skillId === skillId &&
+        existing.title === title &&
+        existing.status === status &&
+        sameMessagePayloads(existing.messagePayloads, messagePayloads)
+      ) {
+        return toTaskSnapshot(existing)
+      }
+
       const record = saveTaskSession(client, {
         id,
         mode,
@@ -308,7 +358,7 @@ export function createDesktopTaskService(client: DatabaseClient): DesktopTaskSer
         title,
         status,
         updatedAt: new Date(),
-        messagePayloads: messages.map((message) => JSON.stringify(message)),
+        messagePayloads,
       })
       if (!record) throw new Error("任务保存失败。")
       return toTaskSnapshot(record)

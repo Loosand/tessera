@@ -632,10 +632,15 @@ describe("ElectronChatTransport", () => {
     const persisted = toTaskMessages(messages, {
       providerId: "openrouter",
       modelId: "example/model",
+      feedback: { rating: "positive", updatedAt: 1_788_000_000_000 },
     })
 
     expect(persisted[0]).toMatchObject({
-      metadata: { providerId: "openrouter", modelId: "example/model" },
+      metadata: {
+        providerId: "openrouter",
+        modelId: "example/model",
+        feedback: { rating: "positive", updatedAt: 1_788_000_000_000 },
+      },
       parts: [
         { type: "reasoning", text: "核对来源" },
         { type: "text", text: "结论" },

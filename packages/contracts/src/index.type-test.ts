@@ -1,6 +1,6 @@
 /**
- * [INPUT]: DesktopApiContract、研究网络模式、统一 RunPolicy、用户 Skill 标识、托管内容库、Artifact 与后端无关内容引用及其泛型查询工具
- * [OUTPUT]: 编译期类型等价与错误用例，防止研究网络 IPC、运行/工具错误、方法关系和内容领域边界退化
+ * [INPUT]: DesktopApiContract、默认空间、研究网络模式、统一 RunPolicy、用户 Skill 标识、托管内容库、Artifact 与后端无关内容引用及其泛型查询工具
+ * [OUTPUT]: 编译期类型等价与错误用例，防止默认空间/研究网络 IPC、运行/工具错误、方法关系和内容领域边界退化
  * [POS]: contracts 包的零运行时类型回归测试
  * [DOC]: docs/architecture.md、docs/architecture/mcp.md、docs/architecture/research-workflow.md、docs/architecture/unified-creation-agent.md
  *
@@ -34,11 +34,16 @@ import type {
   TaskArtifact,
   TaskFollowUpQuestionsDataV1,
   TaskMessageData,
+  TaskMessageFeedback,
+  TaskMessageMetadata,
   TaskResearchNotebook,
   TaskResearchSaveSourcesResult,
   TaskRunErrorDataV1,
   TaskRunInspection,
   TaskRunPolicy,
+  TaskSessionPage,
+  TaskSessionPageRequest,
+  TaskSessionSummary,
   TaskSkillId,
   TaskToolErrorDataV1,
   UserTaskSkillId,
@@ -73,11 +78,16 @@ export type DesktopApiContractTypeTests = [
   Expect<Equal<Extract<AiChatStartResult, { ok: false }>["error"], TaskRunErrorDataV1>>,
   Expect<Equal<TaskMessageData["tool-error"], TaskToolErrorDataV1>>,
   Expect<Equal<TaskMessageData["follow-up-questions"], TaskFollowUpQuestionsDataV1>>,
+  Expect<Equal<TaskMessageMetadata["feedback"], TaskMessageFeedback | undefined>>,
   Expect<Equal<TaskRunPolicy["toolScope"], "conversation" | "workspace-read" | "workspace-write">>,
   Expect<Equal<ArtifactRef["relation"], "created" | "imported" | "updated">>,
   Expect<Equal<ResourceBinding["role"], "context" | "output" | "scope">>,
   Expect<Equal<DesktopApiReturn<"getCurrentContentLibrary">, Promise<ContentLibraryResult>>>,
   Expect<Equal<DesktopApiReturn<"listTaskArtifacts">, Promise<TaskArtifact[]>>>,
+  Expect<Equal<DesktopApiReturn<"openDefaultWorkspace">, Promise<null>>>,
+  Expect<Equal<DesktopApiReturn<"listDefaultTasks">, Promise<TaskSessionSummary[]>>>,
+  Expect<Equal<DesktopApiArguments<"listTasksPage">, [request: TaskSessionPageRequest]>>,
+  Expect<Equal<DesktopApiReturn<"listTasksPage">, Promise<TaskSessionPage>>>,
   Expect<Equal<DesktopApiReturn<"readTaskRun">, Promise<TaskRunInspection | null>>>,
   Expect<Equal<DesktopApiArguments<"readTaskRun">, [taskId: string, requestId: string]>>,
   Expect<Equal<DesktopApiReturn<"getResearchNetworkMode">, Promise<ResearchNetworkMode>>>,

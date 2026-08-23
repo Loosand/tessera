@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 当前模型、可用模型目录、选中键与切换回调
- * [OUTPUT]: 按供应商分组、展示模型图标/当前连接有效能力/选中态的模型选择浮层
+ * [OUTPUT]: 以小字号胶囊入口和统一圆角层级呈现供应商分组、模型图标、有效能力与选中态的模型选择浮层
  * [POS]: task-composer 中替代原生下拉的高信息密度模型入口
  * [DOC]: design.md、docs/architecture/ai-providers.md
  *
@@ -12,7 +12,7 @@
 
 import { resolveAiModelExecution } from "@tessera/ai"
 import { AiModelIcon } from "@tessera/ai/react"
-import { ArrowDown01Icon } from "@tessera/design-system/components/icons"
+import { ArrowDown01Icon, Tick02Icon } from "@tessera/design-system/components/icons"
 import { Button } from "@tessera/design-system/components/ui/button"
 import { Icon } from "@tessera/design-system/components/ui/icon"
 import { Popover, PopoverContent, PopoverTrigger } from "@tessera/design-system/components/ui/popover"
@@ -107,34 +107,36 @@ export function ModelPicker({ loading, model, models, onModelChange, selectedMod
             type="button"
             variant="ghost"
             size="sm"
-            className="h-7 min-w-0 max-w-48 rounded-full bg-muted/60 px-2 text-xs font-normal hover:bg-muted data-[popup-open]:bg-muted"
+            className="h-7 min-w-0 max-w-52 gap-1.5 rounded-full bg-transparent px-2 text-[9.5px] font-normal text-foreground/80 hover:bg-background/70 data-[popup-open]:bg-background/70"
+            data-control="model-picker-trigger"
             aria-label="选择模型"
             disabled={models.length === 0}
           />
         }
       >
-        {model ? <AiModelIcon modelId={model.id} size={16} /> : null}
-        <span className="truncate">
+        {model ? <AiModelIcon modelId={model.id} size={12} /> : null}
+        <span className="truncate text-[9.5px] leading-none">
           {model ? modelDisplayName(model) : loading ? "正在加载模型" : "未配置模型"}
         </span>
-        <Icon icon={ArrowDown01Icon} size={12} className="text-muted-foreground" />
+        <Icon icon={ArrowDown01Icon} size={9} className="text-muted-foreground/80" />
       </PopoverTrigger>
 
       <PopoverContent
         side="top"
         align="end"
         sideOffset={6}
-        className="flex max-h-[min(24rem,var(--available-height))] w-72 flex-col overflow-hidden rounded-xl border border-border/70 p-1.5 shadow-[0_18px_50px_-28px_color-mix(in_oklch,var(--foreground)_42%,transparent)] ring-0"
+        className="flex max-h-[min(24rem,var(--available-height))] w-72 flex-col overflow-hidden rounded-2xl border border-border/70 p-1.5 shadow-[0_18px_50px_-28px_color-mix(in_oklch,var(--foreground)_42%,transparent)] ring-0"
       >
-        <header className="flex h-8 shrink-0 items-center px-2">
-          <h2 className="text-[13px] font-medium">模型</h2>
+        <header className="flex h-8 shrink-0 items-center justify-between px-2.5">
+          <h2 className="text-[11px] font-medium">模型</h2>
+          <span className="text-[9px] text-muted-foreground">{models.length} 个可用</span>
         </header>
 
         <nav className="min-h-0 overflow-y-auto" aria-label="可用模型">
           {[...modelsByProvider].map(([providerName, providerModels]) => (
             <section key={providerName} className="not-first:mt-1" aria-label={providerName}>
               {modelsByProvider.size > 1 ? (
-                <div className="px-2 pt-2 pb-1 text-[10px] font-medium text-muted-foreground">
+                <div className="px-2.5 pt-2 pb-1 text-[9px] font-medium text-muted-foreground">
                   {providerName}
                 </div>
               ) : null}
@@ -149,7 +151,7 @@ export function ModelPicker({ loading, model, models, onModelChange, selectedMod
                       key={key}
                       type="button"
                       variant="ghost"
-                      className="h-9 w-full justify-start gap-2 rounded-lg px-2 text-left font-normal data-[selected=true]:bg-muted/60"
+                      className="h-auto min-h-10 w-full justify-start gap-2 rounded-xl px-2.5 py-1.5 text-left font-normal data-[selected=true]:bg-muted/75"
                       aria-current={selected ? "true" : undefined}
                       data-selected={selected || undefined}
                       title={candidate.id}
@@ -158,12 +160,19 @@ export function ModelPicker({ loading, model, models, onModelChange, selectedMod
                         setOpen(false)
                       }}
                     >
-                      <AiModelIcon modelId={candidate.id} size={18} />
-                      <span className="min-w-0 flex-1 truncate text-[13px]">
-                        {modelDisplayName(candidate)}
+                      <AiModelIcon modelId={candidate.id} size={16} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[11px] leading-4">
+                          {modelDisplayName(candidate)}
+                        </span>
+                        {capabilityLabel ? (
+                          <span className="block truncate text-[9px] leading-3.5 text-muted-foreground">
+                            {capabilityLabel}
+                          </span>
+                        ) : null}
                       </span>
-                      {capabilityLabel ? (
-                        <span className="shrink-0 text-[10px] text-muted-foreground">{capabilityLabel}</span>
+                      {selected ? (
+                        <Icon icon={Tick02Icon} size={12} className="shrink-0 text-foreground/70" />
                       ) : null}
                     </Button>
                   )

@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 工作区文档/目录条目、Markdown 草稿与侧栏排序偏好
- * [OUTPUT]: 文件树、扁平列表顺序与文档大纲模型
- * [POS]: 工作区侧栏不依赖 React 的派生数据层
+ * [INPUT]: 当前文件 Space 的 Markdown 文档与真实目录条目
+ * [OUTPUT]: 文件夹优先、按名称稳定排序的侧栏文件树、自然层级缩进及可用目录路径集合
+ * [POS]: 一级 Space 侧栏文件区块的不依赖 React 派生层
  * [DOC]: docs/architecture/editor.md
  *
  * [PROTOCOL]:
@@ -12,8 +12,6 @@
 
 import type { WorkspaceDirectoryEntry, WorkspaceDocumentEntry } from "@tessera/contracts"
 
-export type SidebarSort = "name-asc" | "modified-desc"
-
 export type DocumentTreeNode = {
   name: string
   path: string
@@ -21,24 +19,12 @@ export type DocumentTreeNode = {
   children: DocumentTreeNode[]
 }
 
-export type DocumentOutlineEntry = {
-  readonly depth: number
-  readonly line: number
-  readonly text: string
-}
-
-export function sortDocuments(documents: readonly WorkspaceDocumentEntry[], sort: SidebarSort) {
-  return [...documents].sort((left, right) => {
-    if (sort === "modified-desc" && left.modifiedAt !== right.modifiedAt) {
-      return right.modifiedAt - left.modifiedAt
-    }
-    return left.relativePath.localeCompare(right.relativePath, "zh-CN")
-  })
+export function fileTreeNodeInset(depth: number) {
+  return 6 + Math.max(0, depth) * 14
 }
 
 export function buildDocumentTree(
   documents: readonly WorkspaceDocumentEntry[],
-  sort: SidebarSort,
   directories: readonly WorkspaceDirectoryEntry[] = [],
 ) {
   const root: DocumentTreeNode = { name: "", path: "", children: [] }
@@ -61,22 +47,11 @@ export function buildDocumentTree(
   }
 
   for (const directory of directories) ensurePath(directory.relativePath)
-
-  for (const document of sortDocuments(documents, sort)) {
-    ensurePath(document.relativePath).document = document
-  }
+  for (const document of documents) ensurePath(document.relativePath).document = document
 
   const sortNodes = (nodes: DocumentTreeNode[]) => {
     nodes.sort((left, right) => {
       if (Boolean(left.document) !== Boolean(right.document)) return left.document ? 1 : -1
-      if (
-        sort === "modified-desc" &&
-        left.document?.modifiedAt !== undefined &&
-        right.document?.modifiedAt !== undefined &&
-        left.document.modifiedAt !== right.document.modifiedAt
-      ) {
-        return right.document.modifiedAt - left.document.modifiedAt
-      }
       return left.name.localeCompare(right.name, "zh-CN")
     })
     for (const node of nodes) sortNodes(node.children)
@@ -93,28 +68,4 @@ export function collectFolderPaths(nodes: readonly DocumentTreeNode[], paths = n
     collectFolderPaths(node.children, paths)
   }
   return paths
-}
-
-export function extractDocumentOutline(content: string) {
-  const entries: DocumentOutlineEntry[] = []
-  let insideFence = false
-
-  content.split(/\r?\n/).forEach((line, index) => {
-    if (/^\s*(```|~~~)/.test(line)) {
-      insideFence = !insideFence
-      return
-    }
-    if (insideFence) return
-
-    const match = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line)
-    if (!match) return
-    const [, marker = "", rawText = ""] = match
-    const text = rawText
-      .replace(/\[([^\]]+)]\([^)]+\)/g, "$1")
-      .replace(/[`*_~]/g, "")
-      .trim()
-    if (text) entries.push({ depth: marker.length, line: index + 1, text })
-  })
-
-  return entries
 }

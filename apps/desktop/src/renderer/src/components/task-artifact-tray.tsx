@@ -24,13 +24,13 @@ type TaskArtifactTrayProps = Readonly<{
 export function TaskArtifactTray({ artifacts, compact = false, onOpen }: TaskArtifactTrayProps) {
   if (artifacts.length === 0) return null
   return (
-    <div className="overflow-x-auto pb-1" aria-label="当前任务产物">
+    <div className="overflow-x-auto py-1" aria-label="当前任务产物">
       <div className="flex min-w-max gap-2">
         {artifacts.map((artifact) => (
           <button
             key={artifact.id}
             type="button"
-            className={`group flex items-center gap-2.5 rounded-xl border border-border bg-card text-left transition-colors hover:border-foreground/20 hover:bg-muted/60 ${compact ? "max-w-56 px-3 py-2" : "max-w-72 px-3.5 py-2.5"}`}
+            className={`group flex items-center gap-2.5 rounded-xl bg-muted/70 text-left transition-colors hover:bg-muted ${compact ? "max-w-56 px-3 py-2" : "max-w-64 px-3.5 py-2.5"}`}
             onClick={() => onOpen(artifact)}
           >
             <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
@@ -45,7 +45,7 @@ export function TaskArtifactTray({ artifacts, compact = false, onOpen }: TaskArt
                 {artifact.project.name}
               </span>
             </span>
-            <span className="text-[10px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
+            <span className="text-[10px] text-muted-foreground opacity-60 transition-opacity group-hover:opacity-100">
               打开
             </span>
           </button>

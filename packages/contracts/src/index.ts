@@ -1,6 +1,6 @@
 /**
- * [INPUT]: Electron 桌面应用当前需要的跨进程数据、生命周期、工作区条目、AI 模型事实/端点绑定、MCP 服务器、用户 Skill、研究网络偏好、任务运行策略、内容对象、开发期 AI 日志与 Agent 变更审批形状
- * [OUTPUT]: IPC 频道、工作区文件操作、模型/MCP/用户 Skill/研究网络配置、类型化 RunPolicy、版本化公开运行/工具错误与引申问题、脱敏运行解释、后端无关内容引用、可恢复流式运行、开发期 AI 日志入口、客户端问答/研究计划工具、Agent Diff 审批、关闭握手与可推导的桌面 API 类型契约
+ * [INPUT]: Electron 桌面应用当前需要的跨进程数据、生命周期、默认空间/文件工作区条目、AI 模型事实/端点绑定、MCP 服务器、用户 Skill、研究网络偏好、任务运行策略、消息反馈、内容对象、开发期 AI 日志与 Agent 变更审批形状
+ * [OUTPUT]: IPC 频道、默认空间切换、当前 Space 任务分页、工作区文件操作、模型/MCP/用户 Skill/研究网络配置、类型化 RunPolicy、版本化公开运行/工具错误与引申问题、本地消息反馈、脱敏运行解释、后端无关内容引用、可恢复流式运行、开发期 AI 日志入口、客户端问答/研究计划工具、Agent Diff 审批、关闭握手与可推导的桌面 API 类型契约
  * [POS]: 应用和共享包共同依赖的底层契约入口
  * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/ai-observability.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/mcp.md、docs/architecture/research-workflow.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md、docs/architecture/unified-creation-agent.md
  *
@@ -20,6 +20,7 @@ export const IPC_CHANNELS = {
   contentLibrarySelect: "content-library:select",
   contentLibraryRevoke: "content-library:revoke",
   workspaceCurrent: "workspace:current",
+  workspaceOpenDefault: "workspace:open-default",
   workspaceSelect: "workspace:select",
   workspaceRecent: "workspace:recent",
   workspaceOpenRecent: "workspace:open-recent",
@@ -67,7 +68,9 @@ export const IPC_CHANNELS = {
   taskRunRead: "task-run:read",
   agentChangePreview: "agent-change:preview",
   taskListRecent: "task:list-recent",
+  taskListDefault: "task:list-default",
   taskListWorkspace: "task:list-workspace",
+  taskListPage: "task:list-page",
   taskRead: "task:read",
   taskSave: "task:save",
   taskRename: "task:rename",
@@ -697,8 +700,30 @@ export type TaskResearchFinalizeOutput =
       status: "completed" | "partial"
     }
 
+export const TASK_MESSAGE_FEEDBACK_RATINGS = ["positive", "negative"] as const
+
+export type TaskMessageFeedbackRating = (typeof TASK_MESSAGE_FEEDBACK_RATINGS)[number]
+
+export type TaskMessageFeedback = {
+  rating: TaskMessageFeedbackRating
+  updatedAt: number
+}
+
+export function isTaskMessageFeedback(value: unknown): value is TaskMessageFeedback {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false
+  const feedback = value as Record<string, unknown>
+  return (
+    typeof feedback.rating === "string" &&
+    TASK_MESSAGE_FEEDBACK_RATINGS.some((rating) => rating === feedback.rating) &&
+    typeof feedback.updatedAt === "number" &&
+    Number.isSafeInteger(feedback.updatedAt) &&
+    feedback.updatedAt >= 0
+  )
+}
+
 export type TaskMessageMetadata = {
   configId?: string
+  feedback?: TaskMessageFeedback
   modelId?: string
   providerId?: AiProviderId
   requestId?: string
@@ -935,6 +960,17 @@ export type TaskSessionSummary = {
   updatedAt: number
   workspaceId: string | null
   workspaceName: string | null
+}
+
+export type TaskSessionPageRequest = {
+  page: number
+  pageSize: number
+}
+
+export type TaskSessionPage = TaskSessionPageRequest & {
+  items: TaskSessionSummary[]
+  total: number
+  totalPages: number
 }
 
 export type TaskSessionSnapshot = TaskSessionSummary & {
@@ -1259,6 +1295,7 @@ export type DesktopApiContract = {
   cancelClose: SendMethod<typeof IPC_CHANNELS.appCancelClose, []>
   confirmClose: SendMethod<typeof IPC_CHANNELS.appConfirmClose, []>
   getCurrentWorkspace: InvokeMethod<typeof IPC_CHANNELS.workspaceCurrent, [], WorkspaceInfo | null>
+  openDefaultWorkspace: InvokeMethod<typeof IPC_CHANNELS.workspaceOpenDefault, [], null>
   getCurrentContentLibrary: InvokeMethod<typeof IPC_CHANNELS.contentLibraryCurrent, [], ContentLibraryResult>
   selectContentLibrary: InvokeMethod<typeof IPC_CHANNELS.contentLibrarySelect, [], ContentLibraryResult>
   revokeContentLibrary: InvokeMethod<typeof IPC_CHANNELS.contentLibraryRevoke, [], ContentLibraryResult>
@@ -1396,7 +1433,13 @@ export type DesktopApiContract = {
     AgentChangePreview
   >
   listRecentTasks: InvokeMethod<typeof IPC_CHANNELS.taskListRecent, [], TaskSessionSummary[]>
+  listDefaultTasks: InvokeMethod<typeof IPC_CHANNELS.taskListDefault, [], TaskSessionSummary[]>
   listWorkspaceTasks: InvokeMethod<typeof IPC_CHANNELS.taskListWorkspace, [], TaskSessionSummary[]>
+  listTasksPage: InvokeMethod<
+    typeof IPC_CHANNELS.taskListPage,
+    [request: TaskSessionPageRequest],
+    TaskSessionPage
+  >
   listTaskArtifacts: InvokeMethod<typeof IPC_CHANNELS.taskListArtifacts, [taskId: string], TaskArtifact[]>
   readTask: InvokeMethod<typeof IPC_CHANNELS.taskRead, [taskId: string], TaskSessionSnapshot>
   saveTask: InvokeMethod<typeof IPC_CHANNELS.taskSave, [input: TaskSessionSaveInput], TaskSessionSnapshot>

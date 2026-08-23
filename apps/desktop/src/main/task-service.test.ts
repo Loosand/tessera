@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 内存 SQLite、通用任务会话输入与模拟工作区
- * [OUTPUT]: 无工作区任务、版本化引申问题/运行/工具失败、可选读取、内置/用户 Skill 标记、兼容工作区创建约束、动态逐轮资源、任务 mode 不可变、创作模式逐轮切换和重命名/删除的回归验证
+ * [OUTPUT]: 默认空间任务分页、相同快照不刷新活动时间、版本化引申问题/运行/工具失败/本地反馈、可选读取、内置/用户 Skill 标记、兼容工作区创建约束、动态逐轮资源、任务 mode 不可变、创作模式逐轮切换和重命名/删除的回归验证
  * [POS]: task-service 主进程权限边界的单元测试
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -10,9 +10,9 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import type { WorkspaceInfo } from "@tessera/contracts"
-import { openDatabase, saveWorkspace } from "@tessera/database"
-import { describe, expect, test } from "vitest"
+import type { TaskSessionSaveInput, WorkspaceInfo } from "@tessera/contracts"
+import { openDatabase, saveTaskSession, saveWorkspace } from "@tessera/database"
+import { describe, expect, test, vi } from "vitest"
 import { createDesktopTaskService } from "./task-service"
 
 const WORKSPACE = {
@@ -22,6 +22,39 @@ const WORKSPACE = {
 } satisfies WorkspaceInfo
 
 describe("DesktopTaskService", () => {
+  test("当前 Space 任务分页返回总数并校验页码边界", () => {
+    const client = openDatabase({ path: ":memory:" })
+    const service = createDesktopTaskService(client)
+    for (let index = 0; index < 13; index += 1) {
+      saveTaskSession(client, {
+        id: `service-page-task-${String(index).padStart(2, "0")}`,
+        mode: "chat",
+        workspaceId: null,
+        title: `任务 ${index}`,
+        status: "completed",
+        updatedAt: new Date(index + 1),
+        messagePayloads: [],
+      })
+    }
+
+    expect(service.listPage(null, { page: 2, pageSize: 5 })).toMatchObject({
+      page: 2,
+      pageSize: 5,
+      total: 13,
+      totalPages: 3,
+      items: [
+        { id: "service-page-task-07" },
+        { id: "service-page-task-06" },
+        { id: "service-page-task-05" },
+        { id: "service-page-task-04" },
+        { id: "service-page-task-03" },
+      ],
+    })
+    expect(() => service.listPage(null, { page: 0, pageSize: 5 })).toThrow("任务页码无效")
+    expect(() => service.listPage(null, { page: 1, pageSize: 51 })).toThrow("每页任务数")
+    client.close()
+  })
+
   test("Chat 可以在没有工作区时保存和授权运行", () => {
     const client = openDatabase({ path: ":memory:" })
     const service = createDesktopTaskService(client)
@@ -37,7 +70,11 @@ describe("DesktopTaskService", () => {
           {
             id: "assistant-message",
             role: "assistant",
-            metadata: { providerId: "openrouter", modelId: "example/model" },
+            metadata: {
+              providerId: "openrouter",
+              modelId: "example/model",
+              feedback: { rating: "negative", updatedAt: 1_788_000_000_000 },
+            },
             parts: [
               { type: "reasoning", text: "核对资料", state: "done" },
               { type: "text", text: "结论", state: "done" },
@@ -77,6 +114,7 @@ describe("DesktopTaskService", () => {
     )
 
     expect(snapshot).toMatchObject({ mode: "chat", skillId: "research", workspaceId: null })
+    expect(service.listDefault()).toMatchObject([{ id: "chat-task", workspaceId: null }])
     expect(() => service.authorizeTurn("chat-task", "chat", null, "research")).not.toThrow()
     expect(() => service.authorizeTurn("chat-task", "chat", null, "writing")).not.toThrow()
     expect(
@@ -94,7 +132,10 @@ describe("DesktopTaskService", () => {
       ),
     ).toMatchObject({ skillId: "writing" })
     expect(service.read("chat-task").messages[0]).toMatchObject({
-      metadata: { modelId: "example/model" },
+      metadata: {
+        modelId: "example/model",
+        feedback: { rating: "negative", updatedAt: 1_788_000_000_000 },
+      },
       parts: [
         { type: "reasoning", text: "核对资料" },
         { type: "text", text: "结论" },
@@ -244,6 +285,44 @@ describe("DesktopTaskService", () => {
     expect(snapshot.workspaceId).toBeNull()
     expect(snapshot.workspaceName).toBeNull()
     client.close()
+  })
+
+  test("重复保存相同对话快照不会改变最近活动时间", () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date("2026-08-23T01:00:00.000Z"))
+      const client = openDatabase({ path: ":memory:" })
+      const service = createDesktopTaskService(client)
+      const input: TaskSessionSaveInput = {
+        id: "idempotent-chat",
+        mode: "chat",
+        skillId: null,
+        status: "completed",
+        title: "不会因打开而置顶",
+        workspaceId: null,
+        messages: [{ id: "message-1", role: "user", parts: [{ type: "text", text: "你好" }] }],
+      }
+
+      const created = service.save(input, null)
+      vi.setSystemTime(new Date("2026-08-23T02:00:00.000Z"))
+      const unchanged = service.save(input, null)
+      const changed = service.save(
+        {
+          ...input,
+          messages: [
+            ...input.messages,
+            { id: "message-2", role: "assistant", parts: [{ type: "text", text: "你好。" }] },
+          ],
+        },
+        null,
+      )
+
+      expect(unchanged.updatedAt).toBe(created.updatedAt)
+      expect(changed.updatedAt).toBeGreaterThan(unchanged.updatedAt)
+      client.close()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   test("可以重命名和删除已保存的对话", () => {

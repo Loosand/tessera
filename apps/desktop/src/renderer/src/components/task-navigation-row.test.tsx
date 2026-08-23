@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 不同状态与选中态的 TaskNavigationRow
- * [OUTPUT]: 选中背景语义和运行中 loader 的静态回归验证
+ * [OUTPUT]: 右侧安全区、选中背景语义和运行中 loader 的静态回归验证
  * [POS]: 侧栏任务导航共享模式的单元测试
  * [DOC]: design.md、docs/architecture/task-navigation.md
  *
@@ -27,6 +27,8 @@ describe("TaskNavigationRow", () => {
     expect(markup).toContain("<output")
     expect(markup).toContain('aria-label="正在生成"')
     expect(markup).toContain("animate-spin")
+    expect(markup).toContain("pr-3")
+    expect(markup).toContain("ml-1")
   })
 
   it("完成任务不显示运行中 loader", () => {

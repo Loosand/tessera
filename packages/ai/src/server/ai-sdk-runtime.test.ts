@@ -77,9 +77,9 @@ describe("AI SDK 供应商适配", () => {
         modelId: "claude-sonnet-4",
         apiKey: "test-key",
       },
-      { webSearch: true, webSearchMaxUses: 15 },
+      { webSearch: true, webSearchMaxUses: 30 },
     )
-    expect(runtime.tools?.web_search).toMatchObject({ args: { maxUses: 15 } })
+    expect(runtime.tools?.web_search).toMatchObject({ args: { maxUses: 30 } })
   })
 
   it("强制把 DeepSeek Responses 自定义模型按推理模型请求摘要", () => {
@@ -106,7 +106,7 @@ describe("AI SDK 供应商适配", () => {
       },
       { webSearch: true, webSearchMaxUses: 99 },
     )
-    expect(runtime.tools?.web_search).toMatchObject({ args: { maxUses: 20 } })
+    expect(runtime.tools?.web_search).toMatchObject({ args: { maxUses: 50 } })
   })
 
   it("不会为能力未知的兼容端点伪装联网搜索", () => {

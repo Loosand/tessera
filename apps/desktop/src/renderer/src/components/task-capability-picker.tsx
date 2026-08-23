@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 当前逐轮创作方式与用户 Skill 目录
- * [OUTPUT]: 可随时切换自动编排、内置/用户 Skill 与问答预设的紧凑选择器
+ * [OUTPUT]: 以直接语义图标、双行说明和统一圆角层级呈现自动编排、内置/用户 Skill 与问答预设的紧凑选择器
  * [POS]: task-composer 底部工具栏中的创作方式快捷入口
  * [DOC]: design.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -12,13 +12,13 @@
 
 import { type BuiltInTaskSkillId, type TaskSkillId, isUserTaskSkillId } from "@tessera/contracts"
 import {
-  AiBrain01Icon,
-  AiWebBrowsingIcon,
   ArrowDown01Icon,
   BookOpen01Icon,
-  CheckmarkCircle02Icon,
   Edit02Icon,
   Message01Icon,
+  Search01Icon,
+  SparklesIcon,
+  Tick02Icon,
 } from "@tessera/design-system/components/icons"
 import { Button } from "@tessera/design-system/components/ui/button"
 import { Icon } from "@tessera/design-system/components/ui/icon"
@@ -36,20 +36,17 @@ const BASE_TASK_SKILL_OPTIONS = [
   {
     id: null,
     displayName: "自动",
-    shortDescription: "自动编排 · 根据请求、上下文与可用能力决定",
+    shortDescription: "按任务动态规划与调用工具",
   },
   ...listBuiltInSkills().map((skill) => ({
     id: skill.name,
     displayName: skill.displayName,
-    shortDescription:
-      skill.name === "research"
-        ? "Skill · 深度推理、联网核验并形成研究计划"
-        : "Skill · 阅读材料并产出可审查修改",
+    shortDescription: skill.name === "research" ? "搜索、阅读并核验可靠来源" : "基于材料起草、改写与润色",
   })),
   {
     id: "question-answering" as const,
     displayName: "问答",
-    shortDescription: "回答预设 · 不联网，使用当前对话与附件",
+    shortDescription: "直接回答，不主动展开研究",
   },
 ] satisfies readonly {
   id: TaskSkillId
@@ -58,12 +55,12 @@ const BASE_TASK_SKILL_OPTIONS = [
 }[]
 
 const SKILL_ICONS = {
-  research: AiWebBrowsingIcon,
+  research: Search01Icon,
   writing: Edit02Icon,
 } satisfies Record<BuiltInTaskSkillId, Parameters<typeof Icon>[0]["icon"]>
 
 function skillIcon(skillId: TaskSkillId) {
-  if (skillId === null) return AiBrain01Icon
+  if (skillId === null) return SparklesIcon
   if (skillId === "question-answering") return Message01Icon
   if (isUserTaskSkillId(skillId)) return BookOpen01Icon
   return SKILL_ICONS[skillId]
@@ -80,7 +77,7 @@ export function TaskCapabilityPicker({ skillId, onSkillChange }: TaskCapabilityP
         .map((skill) => ({
           id: skill.id as TaskSkillId,
           displayName: skill.displayName,
-          shortDescription: `Skill · ${skill.shortDescription}`,
+          shortDescription: skill.shortDescription,
         })),
     ],
     [userSkills],
@@ -96,39 +93,31 @@ export function TaskCapabilityPicker({ skillId, onSkillChange }: TaskCapabilityP
         render={
           <Button
             type="button"
-            variant={skillId !== null ? "secondary" : "ghost"}
+            variant="ghost"
             size="sm"
-            className="h-7 max-w-24 gap-1 rounded-full px-2 font-normal data-[popup-open]:bg-muted"
+            className="h-7 max-w-36 gap-1.5 rounded-full px-2 text-[10px] font-normal text-foreground/80 hover:bg-background/70 data-[popup-open]:bg-background/70"
+            data-control="task-capability-trigger"
             aria-label={`选择创作方式，当前为${currentSkillLabel}`}
             title={`创作方式：${currentSkillLabel}`}
           />
         }
       >
-        <Icon icon={skillIcon(skillId)} size={15} />
-        <span className="truncate text-[11px]">{currentSkillLabel}</span>
-        <Icon icon={ArrowDown01Icon} size={11} className="text-muted-foreground" />
+        <Icon icon={skillIcon(skillId)} size={13} className="text-foreground/75" />
+        <span className="truncate text-[10px] leading-none">{currentSkillLabel}</span>
+        <Icon icon={ArrowDown01Icon} size={9} className="text-muted-foreground/80" />
       </PopoverTrigger>
 
       <PopoverContent
         side="top"
         align="start"
         sideOffset={6}
-        className="w-80 rounded-xl border border-border/70 p-1.5 shadow-[0_18px_50px_-28px_color-mix(in_oklch,var(--foreground)_42%,transparent)] ring-0"
+        className="flex max-h-[min(26rem,var(--available-height))] w-72 flex-col overflow-hidden rounded-2xl border border-border/70 p-1.5 shadow-[0_18px_50px_-28px_color-mix(in_oklch,var(--foreground)_42%,transparent)] ring-0"
       >
-        <header className="px-2 pt-1.5 pb-2">
-          <h2 className="text-[13px] font-medium">创作方式</h2>
-          <p className="mt-0.5 text-[10px] text-muted-foreground">
-            默认自动；研究和写作会加载 Skill，问答是离线回答预设。
-          </p>
+        <header className="shrink-0 px-2.5 pt-1.5 pb-2">
+          <h2 className="text-[11px] font-medium">创作方式</h2>
+          <p className="mt-0.5 text-[9px] leading-4 text-muted-foreground">决定这一轮如何处理请求</p>
         </header>
-
-        <section aria-labelledby="task-skill-options-title">
-          <h3
-            id="task-skill-options-title"
-            className="px-2 py-1 text-[10px] font-medium text-muted-foreground"
-          >
-            选择方式
-          </h3>
+        <section className="min-h-0 overflow-y-auto" aria-label="创作方式">
           <div className="grid gap-0.5">
             {options.map((option) => {
               const selected = skillId === option.id
@@ -137,7 +126,7 @@ export function TaskCapabilityPicker({ skillId, onSkillChange }: TaskCapabilityP
                   key={option.id ?? "auto"}
                   type="button"
                   variant="ghost"
-                  className="h-auto min-h-11 w-full justify-start gap-2 rounded-lg px-2 py-1.5 text-left font-normal data-[selected=true]:bg-muted/65"
+                  className="h-auto min-h-11 w-full justify-start gap-2.5 rounded-xl px-2.5 py-1.5 text-left font-normal data-[selected=true]:bg-muted/75"
                   data-selected={selected || undefined}
                   aria-pressed={selected}
                   onClick={() => {
@@ -145,27 +134,27 @@ export function TaskCapabilityPicker({ skillId, onSkillChange }: TaskCapabilityP
                     setOpen(false)
                   }}
                 >
-                  <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-                    <Icon icon={skillIcon(option.id)} size={14} />
-                  </span>
+                  <Icon
+                    icon={skillIcon(option.id)}
+                    size={15}
+                    className={selected ? "shrink-0 text-foreground" : "shrink-0 text-muted-foreground"}
+                  />
                   <span className="min-w-0 flex-1">
-                    <span className="block text-[12px] font-medium">{option.displayName}</span>
-                    <span className="mt-0.5 block truncate text-[10px] text-muted-foreground">
+                    <span className="block truncate text-[11px] leading-4 font-medium">
+                      {option.displayName}
+                    </span>
+                    <span className="block truncate text-[9px] leading-3.5 text-muted-foreground">
                       {option.shortDescription}
                     </span>
                   </span>
                   {selected ? (
-                    <Icon icon={CheckmarkCircle02Icon} size={14} className="shrink-0 text-foreground" />
+                    <Icon icon={Tick02Icon} size={12} className="shrink-0 text-foreground/70" />
                   ) : null}
                 </Button>
               )
             })}
           </div>
         </section>
-
-        <p className="border-t border-border px-2 pt-2 pb-1 text-[9px] leading-4 text-muted-foreground">
-          可以随时切换；已开始的运行保持原策略。文件写入仍需 Diff 审批。
-        </p>
       </PopoverContent>
     </Popover>
   )
