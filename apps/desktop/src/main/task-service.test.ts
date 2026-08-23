@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 内存 SQLite、通用任务会话输入与模拟工作区
- * [OUTPUT]: 无工作区任务、可选读取、内置/用户 Skill 标记、兼容工作区创建约束、动态逐轮资源、任务 mode 不可变、创作模式逐轮切换和重命名/删除的回归验证
+ * [OUTPUT]: 无工作区任务、版本化运行/工具失败、可选读取、内置/用户 Skill 标记、兼容工作区创建约束、动态逐轮资源、任务 mode 不可变、创作模式逐轮切换和重命名/删除的回归验证
  * [POS]: task-service 主进程权限边界的单元测试
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -46,6 +46,18 @@ describe("DesktopTaskService", () => {
                 id: "task-error-request-1",
                 data: { message: "供应商连接中断。", retryable: true },
               },
+              {
+                type: "data-tool-error",
+                id: "tool-error-call-1",
+                data: {
+                  code: "conflict",
+                  message: "文档已被修改。",
+                  retryable: false,
+                  toolCallId: "call-1",
+                  toolName: "write-workspace-document",
+                  version: 1,
+                },
+              },
             ],
           },
         ],
@@ -78,6 +90,10 @@ describe("DesktopTaskService", () => {
         {
           type: "data-task-error",
           data: { message: "供应商连接中断。", retryable: true },
+        },
+        {
+          type: "data-tool-error",
+          data: { code: "conflict", toolCallId: "call-1", version: 1 },
         },
       ],
     })
@@ -233,6 +249,29 @@ describe("DesktopTaskService", () => {
     expect(service.delete("managed-chat")).toBe(true)
     expect(service.readIfExists("managed-chat")).toBeNull()
     expect(() => service.read("managed-chat")).toThrow("找不到这个任务")
+    client.close()
+  })
+
+  test("主进程运行生命周期会直接收口任务状态并保留等待输入语义", () => {
+    const client = openDatabase({ path: ":memory:" })
+    const service = createDesktopTaskService(client)
+    service.save(
+      {
+        id: "runtime-status",
+        mode: "chat",
+        skillId: "research",
+        status: "idle",
+        title: "运行状态",
+        workspaceId: null,
+        messages: [],
+      },
+      null,
+    )
+
+    expect(service.setRunStatus("runtime-status", "running")?.status).toBe("running")
+    expect(service.setRunStatus("runtime-status", "waiting-input")?.status).toBe("waiting-input")
+    expect(service.setRunStatus("runtime-status", "completed")?.status).toBe("completed")
+    expect(service.setRunStatus("missing-task", "failed")).toBeNull()
     client.close()
   })
 })

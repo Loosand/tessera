@@ -20,11 +20,13 @@ const progress = {
   questionCounts: { pending: 1, covered: 0, partial: 0, uncovered: 0 },
   sourceCounts: { discovered: 0, shortlisted: 0, reading: 0, read: 1, unusable: 0 },
   evidenceCount: 0,
+  recommendationCount: 0,
 }
 
 describe("研究领域工具", () => {
   it("注册完整研究工具，但网页正文不会进入公共消息事件", async () => {
     const readSource = vi.fn(async () => ({
+      requestId: "request-1",
       sourceId: "source-1",
       status: "read" as const,
       finalUrl: "https://example.com/interview",
@@ -40,6 +42,7 @@ describe("研究领域工具", () => {
         publishPlan: vi.fn(),
         readSource,
         recordEvidence: vi.fn(),
+        recommendSources: vi.fn(),
         finalize: vi.fn(),
       },
       new AbortController().signal,
@@ -48,10 +51,12 @@ describe("研究领域工具", () => {
       "publish-research-plan",
       "read-web-source",
       "record-research-evidence",
+      "recommend-research-sources",
       "finalize-research",
     ])
     const output = await readSource()
     expect(publicResearchToolOutput("read-web-source", output)).toEqual({
+      requestId: "request-1",
       sourceId: "source-1",
       status: "read",
       finalUrl: "https://example.com/interview",

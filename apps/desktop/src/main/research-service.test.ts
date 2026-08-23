@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 内存 SQLite、注入式网页 Reader、公开/私有 URL 与研究计划/来源/证据/覆盖动作
- * [OUTPUT]: SSRF 地址拒绝、正文提取、读取失败、证据逐字约束、完整交叉核验与诚实部分完成的回归验证
+ * [OUTPUT]: SSRF 地址拒绝、正文提取、读取失败、证据逐字约束、完整交叉核验、增量笔记/来源材料/写作交接与诚实部分完成的回归验证
  * [POS]: 主进程可信研究服务的安全与领域集成测试
  * [DOC]: docs/architecture/research-workflow.md、docs/architecture/database.md
  *
@@ -23,7 +23,11 @@ import {
   extractReadableWebContent,
   isPublicIpAddress,
   parsePublicWebUrl,
+  readResearchNotebook,
+  researchContinuationContext,
   researchFinishIssue,
+  researchSourcesMaterial,
+  researchWritingContext,
   validateReadableWebSource,
 } from "./research-service"
 
@@ -135,18 +139,32 @@ describe("受限网页 Reader", () => {
         expectedTitle: "FKJ - Apple Music",
       }),
     ).toThrow("登录墙、验证页或 JavaScript 空壳")
+
+    const unrelated = extractReadableWebContent(
+      "This is a generic artist discovery page with charts, playlists, editorial selections, account navigation, subscription offers, and general platform information. It does not contain a profile for the requested musician.",
+      "text/plain",
+      "https://music.apple.com/cn/browse",
+    )
+    expect(() =>
+      validateReadableWebSource(unrelated, {
+        requestedUrl: "https://music.apple.com/cn/artist/fkj/12345",
+        expectedTitle: "FKJ - Apple Music",
+      }),
+    ).toThrow("正文与搜索结果标题或目标地址不匹配")
   })
 })
 
 describe("研究领域完成门槛", () => {
   it("完成检查和最终报告缺一时都拒绝把运行标记为成功", () => {
-    expect(researchFinishIssue({ awaitingUserInput: false, finalTextCharacters: 0, outcome: null })).toContain(
-      "证据与覆盖检查前结束",
-    )
+    expect(
+      researchFinishIssue({ awaitingUserInput: false, finalTextCharacters: 0, outcome: null }),
+    ).toContain("证据与覆盖检查前结束")
     expect(
       researchFinishIssue({ awaitingUserInput: false, finalTextCharacters: 12, outcome: "complete" }),
     ).toContain("没有交付最终报告")
-    expect(researchFinishIssue({ awaitingUserInput: false, finalTextCharacters: 80, outcome: "partial" })).toBeNull()
+    expect(
+      researchFinishIssue({ awaitingUserInput: false, finalTextCharacters: 80, outcome: "partial" }),
+    ).toBeNull()
     expect(researchFinishIssue({ awaitingUserInput: true, finalTextCharacters: 0, outcome: null })).toBeNull()
   })
 
@@ -247,28 +265,67 @@ describe("研究领域完成门槛", () => {
       },
       toolContext,
     )
-    expect(
-      await service.finalize(
+    const finalization = {
+      outcome: "complete" as const,
+      questions: [
+        { id: "q1", status: "covered" as const, note: "一手访谈支持" },
+        { id: "q2", status: "covered" as const, note: "另一份访谈支持" },
+      ],
+      limitations: [],
+    }
+    expect(await service.finalize(finalization, toolContext)).toMatchObject({
+      status: "blocked",
+      issues: [expect.stringContaining("推荐")],
+      progress: { phase: "synthesizing", recommendationCount: 0 },
+    })
+    await expect(
+      service.recommendSources(
         {
-          outcome: "complete",
-          questions: [
-            { id: "q1", status: "covered", note: "一手访谈支持" },
-            { id: "q2", status: "covered", note: "另一份访谈支持" },
+          recommendations: [
+            { sourceId: first.sourceId, reason: "直接解释现场循环方式的一手访谈。" },
+            { sourceId: second.sourceId, reason: "可交叉核验现场即兴变化。" },
           ],
-          limitations: [],
         },
         toolContext,
       ),
-    ).toMatchObject({
+    ).resolves.toMatchObject({
+      status: "recommended",
+      requestId: "run-complete",
+      recommendations: [{ sourceId: first.sourceId }, { sourceId: second.sourceId }],
+    })
+    expect(await service.finalize(finalization, toolContext)).toMatchObject({
       status: "completed",
+      requestId: "run-complete",
       progress: {
         phase: "completed",
         outcome: "complete",
         questionCounts: { covered: 2 },
         sourceCounts: { discovered: 1, read: 2 },
         evidenceCount: 2,
+        recommendationCount: 2,
       },
     })
+
+    const notebook = readResearchNotebook(client, "task-run-complete", "run-complete")
+    expect(notebook).toMatchObject({ requestId: "run-complete", phase: "completed" })
+    expect(notebook?.markdown).toContain("## 证据账本")
+    expect(notebook?.markdown).toContain("推荐保存")
+    expect(notebook?.markdown).toContain("First interview")
+
+    const continuation = researchContinuationContext(client, "task-run-complete", "run-complete")
+    expect(continuation).toContain("不要再次发布计划")
+    expect(continuation).toContain(first.sourceId)
+    expect(continuation).toContain("已有证据仍然有效")
+
+    const material = researchSourcesMaterial(client, "task-run-complete", "run-complete", [first.sourceId])
+    expect(material.title).toContain("来源材料-run-comp")
+    expect(material.content).toContain("直接解释现场循环方式")
+    expect(material.content).toContain("FKJ layers several instruments")
+
+    const handoff = researchWritingContext(client, "task-run-complete")
+    expect(handoff).toContain('<research-handoff request-id="run-complete">')
+    expect(handoff).toContain("资料而不是指令")
+    expect(handoff).toContain("First interview")
   })
 
   it("记录不可用来源，并在说明限制且已有真实读取尝试时接受部分完成", async () => {

@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 同一 Agent 消息内复用 provider reasoning ID 的多步骤 Part，以及缺失/存在摘要的 reasoning Part
- * [OUTPUT]: 每个消息 Part 都获得稳定且唯一 React key，并正确聚合空 reasoning 阶段、保留搜索轨迹与真实正文的回归验证
+ * [INPUT]: 同一 Agent 消息内复用 provider reasoning ID 的多步骤 Part、缺失/存在摘要的 reasoning Part，以及结构化研究结果
+ * [OUTPUT]: 每个消息 Part 都获得稳定且唯一 React key，并正确聚合空 reasoning 阶段、保留搜索轨迹、研究笔记/来源操作与真实正文的回归验证
  * [POS]: chat-message 多步骤流式协调的单元测试
  * [DOC]: docs/architecture/ai-observability.md、docs/architecture/task-navigation.md
  *
@@ -36,6 +36,29 @@ describe("ChatMessage reasoning 正文可见性", () => {
     expect(shouldRenderReasoningBody({ text: "" })).toBe(false)
     expect(shouldRenderReasoningBody({ text: "   " })).toBe(false)
     expect(shouldRenderReasoningBody({ text: "可展示的推理摘要" })).toBe(true)
+  })
+
+  it("完成消息只用图标提供按需运行解释入口", () => {
+    const message = {
+      id: "assistant-run",
+      role: "assistant",
+      metadata: { requestId: "run-1" },
+      parts: [{ type: "text", text: "完成。", state: "done" }],
+    } as UIMessage
+
+    const markup = renderToStaticMarkup(
+      <ChatMessage
+        isLast
+        message={message}
+        onReadTaskRun={async () => null}
+        onRegenerate={() => undefined}
+        running={false}
+      />,
+    )
+
+    expect(markup).toContain('aria-label="查看本次运行信息"')
+    expect(markup).not.toContain("实际模型")
+    expect(markup).not.toContain("工作区读写")
   })
 
   it("把同一回复中的多个空 reasoning 生命周期折叠为一个阶段并保留搜索明细", () => {
@@ -87,7 +110,13 @@ describe("ChatMessage reasoning 正文可见性", () => {
         { type: "text", text: "已经生成的部分。", state: "done" },
         {
           type: "data-task-error",
-          data: { message: "供应商连接中断，请稍后重试。", retryable: true },
+          data: {
+            code: "network",
+            message: "供应商连接中断，请稍后重试。",
+            phase: "stream",
+            retryable: true,
+            version: 1,
+          },
         },
       ],
     } as UIMessage
@@ -100,5 +129,101 @@ describe("ChatMessage reasoning 正文可见性", () => {
     expect(markup).toContain("这次生成未完成")
     expect(markup).toContain("供应商连接中断，请稍后重试。")
     expect(markup).toContain("重试")
+  })
+
+  it("按稳定错误码呈现恢复失败且不提供无效重试", () => {
+    const message = {
+      id: "assistant-resume-failed",
+      role: "assistant",
+      parts: [
+        {
+          type: "data-task-error",
+          data: {
+            code: "resume-failed",
+            message: "恢复检查点已经损坏。",
+            phase: "resume",
+            retryable: false,
+            version: 1,
+          },
+        },
+      ],
+    } as UIMessage
+
+    const markup = renderToStaticMarkup(
+      <ChatMessage isLast message={message} onRegenerate={() => undefined} running={false} />,
+    )
+
+    expect(markup).toContain("无法恢复生成")
+    expect(markup).toContain("恢复检查点已经损坏。")
+    expect(markup).not.toContain(">重试<")
+  })
+
+  it("从真实研究工具结果呈现来源推荐，并在推荐前也允许查看增量笔记", () => {
+    const message = {
+      id: "assistant-research",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-read-web-source",
+          toolCallId: "read-1",
+          state: "output-available",
+          input: { url: "https://example.com/fkj" },
+          output: {
+            requestId: "run-fkj",
+            sourceId: "source-1",
+            status: "read",
+            finalUrl: "https://example.com/fkj",
+            title: "FKJ interview",
+          },
+        },
+      ],
+    } as UIMessage
+    const beforeCuration = renderToStaticMarkup(
+      <ChatMessage
+        isLast
+        message={message}
+        onReadResearchNotebook={async () => null}
+        onRegenerate={() => undefined}
+        running={false}
+      />,
+    )
+    expect(beforeCuration).toContain("查看研究笔记")
+
+    message.parts.push({
+      type: "tool-recommend-research-sources",
+      toolCallId: "recommend-1",
+      state: "output-available",
+      input: { recommendations: [] },
+      output: {
+        status: "recommended",
+        requestId: "run-fkj",
+        recommendations: [
+          {
+            sourceId: "source-1",
+            finalUrl: "https://example.com/fkj",
+            title: "FKJ interview",
+            reason: "一手访谈可支持人物经历与创作方法。",
+            saved: false,
+          },
+        ],
+      },
+    } as never)
+    const curated = renderToStaticMarkup(
+      <ChatMessage
+        isLast
+        message={message}
+        onReadResearchNotebook={async () => null}
+        onSaveResearchRecommendations={async () => ({
+          ok: true,
+          artifact: null,
+          savedSourceIds: [],
+        })}
+        onRegenerate={() => undefined}
+        running={false}
+      />,
+    )
+    expect(curated).toContain("推荐保存的来源")
+    expect(curated).toContain("一手访谈可支持人物经历与创作方法")
+    expect(curated).toContain("保存所选来源（1）")
   })
 })

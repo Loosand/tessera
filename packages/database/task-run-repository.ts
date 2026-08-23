@@ -1,6 +1,6 @@
 /**
  * [INPUT]: Drizzle 数据库实例、含完整 RunPolicy/资源摘要的任务运行元数据、AI SDK 生命周期完成指标与按序序列化的 UIMessageChunk 事件
- * [OUTPUT]: 带实际执行策略、可见资源摘要、完成原因、Token/缓存与耗时指标的任务运行创建、事件追加、结束、崩溃中断标记、恢复读取与清理
+ * [OUTPUT]: 带实际执行策略、可见资源摘要、完成原因、Token/缓存与耗时指标的任务运行创建、幂等事件追加与单调检查点、结束、崩溃中断标记、恢复读取与清理
  * [POS]: Electron 主进程持久化 AI 运行检查点的数据库边界
  * [DOC]: docs/architecture/database.md、docs/architecture/task-navigation.md
  *
@@ -10,7 +10,7 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import { asc, desc, eq } from "drizzle-orm"
+import { asc, desc, eq, sql } from "drizzle-orm"
 import type { DatabaseClient } from "./client"
 import { type TaskRun, type TaskRunEventRecord, taskRunEvents, taskRuns } from "./schema"
 
@@ -84,7 +84,7 @@ export function startTaskRun(client: DatabaseClient, input: TaskRunInput) {
 export function appendTaskRunEvent(client: DatabaseClient, input: TaskRunEventInput) {
   const now = new Date()
   client.db.transaction((transaction) => {
-    transaction
+    const inserted = transaction
       .insert(taskRunEvents)
       .values({
         id: `${input.requestId}:${input.sequence}`,
@@ -94,9 +94,13 @@ export function appendTaskRunEvent(client: DatabaseClient, input: TaskRunEventIn
       })
       .onConflictDoNothing()
       .run()
+    if (inserted.changes === 0) return
     transaction
       .update(taskRuns)
-      .set({ lastSequence: input.sequence, updatedAt: now })
+      .set({
+        lastSequence: sql<number>`max(${taskRuns.lastSequence}, ${input.sequence})`,
+        updatedAt: now,
+      })
       .where(eq(taskRuns.requestId, input.requestId))
       .run()
   })
@@ -135,6 +139,30 @@ export function findLatestTaskRun(client: DatabaseClient, taskId: string) {
     .select()
     .from(taskRunEvents)
     .where(eq(taskRunEvents.requestId, run.requestId))
+    .orderBy(asc(taskRunEvents.sequence))
+    .all()
+  return { ...run, events }
+}
+
+export function findLatestTaskRunStatus(client: DatabaseClient, taskId: string) {
+  return (
+    client.db
+      .select({ status: taskRuns.status })
+      .from(taskRuns)
+      .where(eq(taskRuns.taskId, taskId))
+      .orderBy(desc(taskRuns.updatedAt))
+      .limit(1)
+      .get()?.status ?? null
+  )
+}
+
+export function findTaskRun(client: DatabaseClient, requestId: string) {
+  const run = client.db.select().from(taskRuns).where(eq(taskRuns.requestId, requestId)).get()
+  if (!run) return null
+  const events = client.db
+    .select()
+    .from(taskRunEvents)
+    .where(eq(taskRunEvents.requestId, requestId))
     .orderBy(asc(taskRunEvents.sequence))
     .all()
   return { ...run, events }

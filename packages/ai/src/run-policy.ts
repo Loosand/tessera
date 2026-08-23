@@ -50,8 +50,9 @@ function researchEmergencyMaxSteps(model: AiProviderModel) {
 function resolveLimits(skillId: TaskSkillId, model: AiProviderModel): TaskRunPolicy["limits"] {
   if (skillId === "research") {
     return {
-      // 研究轮次需要容纳长工具输入、证据登记与最终报告，不用应用侧抽象额度覆盖模型上限。
-      maxOutputTokens: null,
+      // 显式透传模型档案的原生输出上限，避免兼容供应商被 AI SDK 静默回落到 4096。
+      // 未知上限仍交给供应商；Tessera 不在研究层另造抽象 token 预算。
+      maxOutputTokens: model.maxOutputTokens,
       maxSteps: researchEmergencyMaxSteps(model),
       timeoutMs: RESEARCH_TIMEOUT_MS,
     }

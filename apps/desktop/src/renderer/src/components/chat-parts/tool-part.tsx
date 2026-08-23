@@ -10,7 +10,12 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import type { UIMessage } from "@tessera/ai/react"
+import {
+  type UIMessagePart,
+  type UIMessageToolPart,
+  isUIMessageToolPart,
+  uiMessageToolName,
+} from "@tessera/ai/react"
 import type { AgentChangePreview } from "@tessera/contracts"
 import { TaskAdd01Icon } from "@tessera/design-system/components/icons"
 import { ToolChips } from "@tessera/design-system/components/tool-chips"
@@ -19,8 +24,7 @@ import { Icon } from "@tessera/design-system/components/ui/icon"
 import React from "react"
 import { AgentChangeReview } from "./agent-change-review"
 
-type MessagePart = UIMessage["parts"][number]
-type ToolMessagePart = Extract<MessagePart, { type: "dynamic-tool" | `tool-${string}` }>
+type ToolMessagePart = UIMessageToolPart
 
 type ToolPartProps = {
   readonly hideSummary?: boolean
@@ -55,6 +59,7 @@ const toolLabels: Record<string, string> = {
   "move-documents": "移动正式文档",
   "read-web-source": "阅读网页来源",
   "record-research-evidence": "登记研究证据",
+  "recommend-research-sources": "推荐研究来源",
   "finalize-research": "检查研究覆盖",
   web_search: "联网搜索",
 }
@@ -123,8 +128,8 @@ function approvalPresentation(toolName: string, input: unknown) {
   return { title: "这个工具需要你的确认", detail: JSON.stringify(input, null, 2) }
 }
 
-export function isToolPart(part: MessagePart): part is ToolMessagePart {
-  return part.type === "dynamic-tool" || part.type.startsWith("tool-")
+export function isToolPart(part: UIMessagePart): part is ToolMessagePart {
+  return isUIMessageToolPart(part)
 }
 
 function stateLabel(part: ToolMessagePart) {
@@ -140,7 +145,7 @@ export function ToolPart({
   onToolApproval,
   part,
 }: ToolPartProps) {
-  const toolName = part.type === "dynamic-tool" ? part.toolName : part.type.slice("tool-".length)
+  const toolName = uiMessageToolName(part)
   const resource = toolResource(part)
   const errorText = part.state === "output-error" ? part.errorText : ""
   const inputText = toolInputText(part)

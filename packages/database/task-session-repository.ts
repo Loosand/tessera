@@ -1,6 +1,6 @@
 /**
  * [INPUT]: Drizzle 数据库实例、任务执行模式、作为下一轮默认值的可选 Skill、工作区绑定、等待输入状态与版本化任务消息
- * [OUTPUT]: 跨工作区最近任务、工作区任务列表，以及带可变 Skill 默认值/等待输入的通用任务会话幂等读写、重命名和删除
+ * [OUTPUT]: 跨工作区最近任务、工作区任务列表，以及带可变 Skill 默认值/等待输入的通用任务会话幂等读写、主进程运行状态收口、重命名和删除
  * [POS]: 普通对话与后续 Agent 共用的任务会话持久化边界
  * [DOC]: docs/architecture/database.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -55,6 +55,14 @@ export function listWorkspaceTaskSessions(client: DatabaseClient, workspaceId: s
 
 export function listRecentTaskSessions(client: DatabaseClient, limit = 12) {
   return selectTaskSummaries(client).orderBy(desc(taskSessions.updatedAt)).limit(limit).all()
+}
+
+export function listTaskSessionRunStates(client: DatabaseClient) {
+  return client.db
+    .select({ id: taskSessions.id, status: taskSessions.status })
+    .from(taskSessions)
+    .where(eq(taskSessions.waitingForInput, false))
+    .all()
 }
 
 export function findTaskSession(client: DatabaseClient, taskId: string) {
@@ -122,6 +130,21 @@ export function renameTaskSession(client: DatabaseClient, taskId: string, title:
   const result = client.db
     .update(taskSessions)
     .set({ title, updatedAt: new Date() })
+    .where(eq(taskSessions.id, taskId))
+    .run()
+  return result.changes > 0 ? findTaskSession(client, taskId) : null
+}
+
+export function updateTaskSessionStatus(
+  client: DatabaseClient,
+  taskId: string,
+  status: TaskSessionRecordStatus,
+) {
+  const waitingForInput = status === "waiting-input"
+  const persistedStatus = waitingForInput ? "running" : status
+  const result = client.db
+    .update(taskSessions)
+    .set({ status: persistedStatus, waitingForInput, updatedAt: new Date() })
     .where(eq(taskSessions.id, taskId))
     .run()
   return result.changes > 0 ? findTaskSession(client, taskId) : null

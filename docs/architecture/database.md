@@ -5,18 +5,21 @@
 > `packages/database/task-session-repository.ts`、`packages/database/task-run-repository.ts`、
 > `packages/database/agent-change-repository.ts`、`packages/database/ai-provider-config-repository.ts`、
 > `packages/database/mcp-server-config-repository.ts`、`packages/database/user-skill-config-repository.ts`、
+> `packages/database/app-setting-repository.ts`、
 > `packages/database/content-domain-repository.ts`、`packages/database/research-repository.ts`、
 > `packages/database/migrations/0013-unified-content-domain.ts`、
 > `packages/database/migrations/0014-research-workflow.ts`、
-> `packages/database/migrations/0015-research-question-position.ts`
+> `packages/database/migrations/0015-research-question-position.ts`、
+> `packages/database/migrations/0016-app-settings.ts`、
+> `packages/database/migrations/0017-research-source-recommendations.ts`
 >
-> 状态：部分实现。任务、运行、研究计划/来源/证据、工作区、审批、动态资源、Artifact、内容库和项目操作审计仓储
+> 状态：部分实现。任务、运行、研究计划/来源/证据/推荐、工作区、审批、动态资源、Artifact、内容库和项目操作审计仓储
 > 已实现；每轮完整 RunPolicy、脱敏资源摘要与 AI SDK 生命周期汇总已写入运行记录。正文存储仍在探索，当前仅实现
 > 托管内容库混合原型；网页正文不作为长期内容副本写入 SQLite。
 
 ## 边界
 
-Markdown 文件是已批准正文的内容事实源。SQLite 保存工作区登记、通用任务消息、AI 供应商普通配置与加密密钥、MCP 连接元数据与加密环境/请求头、用户 Skill 安装元数据、可重建文档索引、Agent 运行事件、待审批候选内容和权限审计，
+Markdown 文件是已批准正文的内容事实源。SQLite 保存工作区登记、通用任务消息、非敏感应用偏好、AI 供应商普通配置与加密密钥、MCP 连接元数据与加密环境/请求头、用户 Skill 安装元数据、可重建文档索引、Agent 运行事件、待审批候选内容和权限审计，
 不能成为文档正文的唯一副本。渲染层不直接访问数据库，后续查询通过核心服务和类型化 IPC 暴露。
 
 当前混合实验把本地目录与 Markdown 定义为内容层，把 SQLite 定义为控制层。项目创建、文档移动和 Artifact 关联可以像数据库业务操作一样由领域服务编排，但磁盘事实优先于可重建索引。最终可能选择数据库正文或完全开放外部工作区；在独立 ADR 替换当前边界前，不能维护“数据库正文 + Markdown 正文”双事实源。
@@ -32,9 +35,13 @@ Markdown 文件是已批准正文的内容事实源。SQLite 保存工作区登�
 - **已实现**：供应商仓储保存 Base URL、启用状态、模型 JSON 和 `safeStorage` 密文；关闭并重新打开数据库后可恢复。
 - **已实现**：MCP 仓储保存传输配置、显式信任/启用状态、逐工具禁用清单和环境变量/请求头 `safeStorage` 密文；运行状态与发现能力不伪造成持久化事实。
 - **已实现**：用户 Skill 仓储保存稳定 `user:<name>` 标识、标准描述、启用状态、文件数量/总大小与安装时间；正文和托管绝对路径不进入 SQLite，磁盘可用性由主进程服务复核。
+- **已实现**：`app_settings` 保存由主进程验证的非敏感应用偏好；研究网络只允许 `system` / `direct`，默认值由领域
+  服务提供，当前值在研究启动时复制进该 run 的脱敏资源摘要。代理地址和凭据不写入此表。
 - **已实现**：通用任务仓储保存兼容 `chat` / `agent` mode、下一轮内置/用户 Skill 或 `question-answering` 标记、可选初始工作区、可恢复等待状态和版本化消息；mode 与初始归属创建后不可变，但不再决定当前轮权限，工作区工具只来自眼下打开且已授权的工作区。
 - **已实现**：任务可重命名或删除；删除 `task_sessions` 时由外键级联清理对应 `task_messages`。
 - **已实现**：`task_runs` / `task_run_events` 在模型调用前创建运行 ID，固化本轮完整 RunPolicy、兼容查询列与资源摘要，并按 task/request/sequence 保存公开流事件；结束时从 AI SDK `onStepEnd` / `onEnd` 写入 SDK call、完成原因、Token/缓存和性能汇总，启动时把未结束运行标记为中断供任务页重放。
+- **已实现**：连续正文、推理和工具参数增量在分配 sequence 前顺序安全合并，SQLite 仍保存完整语义边界与终止事件，
+  不把逐 token 粒度当作恢复事实。
 - **已实现**：`agent_change_proposals` 冻结 Markdown 基准与候选内容、模型、工具调用、人工决定和写入结果；它不是已批准正文事实源，任务删除时级联清理。
 - **已实现**：`0013-unified-content-domain` 增加内容库、托管工作区来源、逐轮资源关系、Artifact 与项目操作审计；
   这些表只保存稳定 ID、相对位置和控制状态，不保存 Markdown 正文。
@@ -42,13 +49,21 @@ Markdown 文件是已批准正文的内容事实源。SQLite 保存工作区登�
   网页正文只在当前工具执行内提供给模型，SQLite 保存必要片段、定位、哈希、数量、失败和覆盖状态。
 - **已实现**：`0015-research-question-position` 为已经执行旧版 `0014` 的数据库补齐问题顺序并回填既有记录；
   已记录的迁移不会因同编号文件在开发期发生变化而被静默重跑。
+- **已实现**：`0016-app-settings` 增加应用级键值表，首个消费者是研究网页的系统代理/直连模式。
+- **已实现**：`0017-research-source-recommendations` 把证据链来源推荐、用户保存状态与材料文档稳定 ID 分开保存；
+  推荐本身不创建正文，用户明确选择后才关联内容库中的 Markdown Artifact。
+- **已实现**：研究重新生成创建新 task run，并在 `resource_summary_json.resumedResearchRequestId` 保存 provenance；仓储把
+  计划、问题、来源元数据、证据、推荐和完成状态克隆到新 request，重新映射稳定 ID。网页正文不克隆，继承来源如需
+  新证据必须重新读取；旧 run 保持不可变。
+- **已实现**：主进程在 AI 运行开始和结束时同步更新 `task_sessions`，不再依赖渲染层稍后保存来收口运行状态；
+  重启恢复也会把中断 run 对应任务标记为失败，避免运行表与侧栏状态漂移。
 
 ## 统一创作 Agent 数据探索
 
 以下控制层能力已随混合原型实现，最终正文方案仍按[统一创作 Agent 与内容存储探索](unified-creation-agent.md)评审：
 
 - `task_sessions` 只承担会话身份、标题、状态和时间；已发布的 mode、`skill_id` 与单一 `workspace_id` 保留为旧任务兼容字段，不继续作为新任务的完整权限事实。
-- `task_runs` 已保存本轮实际内部 mode、显式 Skill、联网/思考兼容查询列、完整 `policy_json`、`resource_summary_json`，以及完成原因、输入/输出/推理与缓存读写 Token、步骤/工具计数、首输出/模型/工具/总耗时；后续增加规范化资源关系。同一会话不同 run 可以使用不同策略。
+- `task_runs` 已保存本轮实际内部 mode、显式 Skill、联网/思考兼容查询列、完整 `policy_json`、包含可选研究续跑来源的 `resource_summary_json`，以及完成原因、输入/输出/推理与缓存读写 Token、步骤/工具计数、首输出/模型/工具/总耗时；后续增加规范化资源关系。同一会话不同 run 可以使用不同策略。
 - `task_resource_bindings` 记录 Task/Run 与 Workspace、Document、Attachment 的动态关系和角色；恢复历史时以 run 快照解释模型当时可见的资源。
 - `artifacts` 为 Agent 创建或修改的 Markdown 建立稳定逻辑 ID、当前工作区/相对路径、创建 run 和状态。移动文件改变路径关系，不改变会话或 Artifact 身份。
 - `workspace_operations` 记录创建项目、移动/重命名文档的授权依据、来源、目标、冲突、结果与恢复信息；正文候选继续使用现有 `agent_change_proposals`。
@@ -62,6 +77,7 @@ Markdown 文件是已批准正文的内容事实源。SQLite 保存工作区登�
 `__tessera_migrations`，再在单个事务内按顺序应用尚未记录的迁移。已经发布的迁移不可修改；
 schema 变化必须追加迁移，并同步结构测试。`0015-research-question-position` 是迁移漂移校准样本：恢复 `0014` 的
 已执行物理形态后，再用新 ID 追加 `position`，从而让已有开发数据库与全新数据库收敛到同一结构。
+`0016-app-settings` 只新增表，不为旧安装写入默认行；读取缺省或损坏值时由主进程回退到 `system`。
 
 已发布的任务状态列带固定 `CHECK`，新增 `waiting-input` 不重写旧表：`0007-task-waiting-input` 追加布尔标记，仓储把公开等待态编码为物理 `status = running` 与 `waiting_for_input = 1`，读取时再统一还原。问题输入和用户答案仍保存在版本化消息 Part 中，布尔列只服务列表、恢复和状态查询。
 
@@ -73,6 +89,7 @@ schema 变化必须追加迁移，并同步结构测试。`0015-research-questio
 
 | 表 | 用途 | 是否可重建 |
 | --- | --- | --- |
+| `app_settings` | 主进程验证后的非敏感应用偏好；当前保存研究网页网络模式 | 否 |
 | `workspaces` | 登记用户打开过的本地工作区及最近列表隐藏状态 | 否 |
 | `document_index` | 文件路径、修改时间和内容哈希 | 是 |
 | `agent_sessions` | Agent 会话状态与标题 | 否 |
@@ -86,6 +103,7 @@ schema 变化必须追加迁移，并同步结构测试。`0015-research-questio
 | `research_questions` | 计划问题、稳定顺序、覆盖状态与说明 | 否 |
 | `research_sources` | 候选/已读/不可用来源、读取元数据、哈希和失败原因，不含网页全文 | 否 |
 | `research_evidence` | 已读来源短片段到研究问题和声明的支持/反驳/限定关系 | 否 |
+| `research_source_recommendations` | 证据链来源的推荐理由、用户保存状态及材料文档关联 | 否 |
 | `agent_change_proposals` | 冻结的 Markdown 基准/候选、审批决定、冲突和写入审计 | 否 |
 | `ai_provider_configs` | 供应商连接、模型状态与 Electron safeStorage 密文 | 否 |
 | `mcp_server_configs` | MCP 传输、信任/启用状态、禁用工具与 Electron safeStorage 密文 | 否 |

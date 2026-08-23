@@ -10,7 +10,12 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import type { UIMessage } from "@tessera/ai/react"
+import {
+  type UIMessagePart,
+  type UIMessageToolPart,
+  isUIMessageToolPart,
+  uiMessageToolName,
+} from "@tessera/ai/react"
 import type { AgentChangePreview } from "@tessera/contracts"
 import {
   FileAddIcon,
@@ -18,13 +23,13 @@ import {
   FolderOpenIcon,
   FolderTreeIcon,
 } from "@tessera/design-system/components/icons"
-import { ToolChips, type ToolChipItem } from "@tessera/design-system/components/tool-chips"
+import { type ToolChipItem, ToolChips } from "@tessera/design-system/components/tool-chips"
 import { Icon } from "@tessera/design-system/components/ui/icon"
 import React from "react"
 import { ToolPart } from "./tool-part"
 
-type MessagePart = UIMessage["parts"][number]
-type ToolMessagePart = Extract<MessagePart, { type: "dynamic-tool" | `tool-${string}` }>
+type MessagePart = UIMessagePart
+type ToolMessagePart = UIMessageToolPart
 
 const contentOperationNames = new Set([
   "create-document",
@@ -48,15 +53,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function toolName(part: ToolMessagePart) {
-  return part.type === "dynamic-tool" ? part.toolName : part.type.slice("tool-".length)
-}
-
-function isToolMessagePart(part: MessagePart): part is ToolMessagePart {
-  return part.type === "dynamic-tool" || part.type.startsWith("tool-")
+  return uiMessageToolName(part)
 }
 
 export function isContentOperationToolPart(part: MessagePart): part is ToolMessagePart {
-  if (!isToolMessagePart(part)) return false
+  if (!isUIMessageToolPart(part)) return false
   return contentOperationNames.has(toolName(part))
 }
 

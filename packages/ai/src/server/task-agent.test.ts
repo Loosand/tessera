@@ -10,12 +10,15 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
+import { InvalidToolInputError, tool } from "ai"
 import { MockLanguageModelV4 } from "ai/test"
 import { describe, expect, it } from "vitest"
+import { z } from "zod"
 import {
   type TaskAgentRunMetrics,
   activeTaskAgentTools,
   createTaskAgent,
+  createTaskToolCallRepair,
   researchRunShouldStopAfterStep,
   researchStepPolicy,
   taskAgentCallOptionsSchema,
@@ -107,6 +110,7 @@ describe("统一 Task Agent 动态配置", () => {
           questionCounts: { pending: 0, covered: 0, partial: 0, uncovered: 0 },
           sourceCounts: { discovered: 0, shortlisted: 0, reading: 0, read: 0, unusable: 0 },
           evidenceCount: 0,
+          recommendationCount: 0,
         },
         stepNumber: 0,
       }),
@@ -125,6 +129,7 @@ describe("统一 Task Agent 动态配置", () => {
       questionCounts: { pending: 2, covered: 1, partial: 0, uncovered: 0 },
       sourceCounts: { discovered: 3, shortlisted: 0, reading: 0, read: 2, unusable: 1 },
       evidenceCount: 2,
+      recommendationCount: 0,
     }
     expect(
       researchStepPolicy({
@@ -156,6 +161,7 @@ describe("统一 Task Agent 动态配置", () => {
           questionCounts: { pending: 4, covered: 0, partial: 0, uncovered: 0 },
           sourceCounts: { discovered: 4, shortlisted: 0, reading: 0, read: 2, unusable: 1 },
           evidenceCount: 0,
+          recommendationCount: 0,
         },
         stepNumber: 6,
       }),
@@ -168,6 +174,36 @@ describe("统一 Task Agent 动态配置", () => {
       false,
     )
     expect(researchRunShouldStopAfterStep({ finalAnswerStarted: true, maxSteps: 8, stepCount: 9 })).toBe(true)
+  })
+
+  it("完成检查满足证据门槛后先推荐来源，再冻结研究结果", () => {
+    const progress = {
+      phase: "synthesizing" as const,
+      planPublished: true,
+      outcome: null,
+      questionCounts: { pending: 2, covered: 0, partial: 0, uncovered: 0 },
+      sourceCounts: { discovered: 1, shortlisted: 0, reading: 0, read: 2, unusable: 0 },
+      evidenceCount: 4,
+      recommendationCount: 0,
+    }
+    const activeTools = ["web_search", "recommend-research-sources", "finalize-research"]
+    expect(researchStepPolicy({ activeTools, maxSteps: 32, progress, stepNumber: 8 })).toEqual({
+      activeTools: ["recommend-research-sources"],
+      mode: "curation",
+      toolChoice: "required",
+    })
+    expect(
+      researchStepPolicy({
+        activeTools,
+        maxSteps: 32,
+        progress: { ...progress, recommendationCount: 2 },
+        stepNumber: 9,
+      }),
+    ).toEqual({
+      activeTools: ["finalize-research"],
+      mode: "finalize",
+      toolChoice: "required",
+    })
   })
 
   it("把端点专属 provider options 与本轮推理强度一起传给模型", async () => {
@@ -231,5 +267,60 @@ describe("统一 Task Agent 动态配置", () => {
     expect(metrics?.callId).toEqual(expect.any(String))
     expect(metrics?.modelDurationMs).toBeGreaterThanOrEqual(0)
     expect(metrics?.toolDurationMs).toBe(0)
+  })
+
+  it("用单工具短调用修复被截断的研究工具参数", async () => {
+    const model = new MockLanguageModelV4({
+      doGenerate: {
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "repair-call",
+            toolName: "record-research-evidence",
+            input: '{"claim":"已修复"}',
+          },
+        ],
+        finishReason: { unified: "tool-calls", raw: "tool-calls" },
+        usage: {
+          inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
+          outputTokens: { total: 5, text: 5, reasoning: 0 },
+        },
+        warnings: [],
+      },
+    })
+    const evidenceTool = tool({
+      inputSchema: z.strictObject({ claim: z.string() }),
+      execute: async ({ claim }) => ({ claim }),
+    })
+    const repair = createTaskToolCallRepair(model)
+    const repaired = await repair({
+      error: new InvalidToolInputError({
+        toolInput: '{"claim":',
+        toolName: "record-research-evidence",
+        cause: new Error("JSON 被截断"),
+      }),
+      instructions: "只登记已读来源证据。",
+      system: "只登记已读来源证据。",
+      messages: [{ role: "user", content: "登记证据" }],
+      toolCall: {
+        type: "tool-call",
+        toolCallId: "broken-call",
+        toolName: "record-research-evidence",
+        input: '{"claim":',
+      },
+      tools: { "record-research-evidence": evidenceTool },
+      inputSchema: async () => ({ type: "object" }),
+    })
+
+    expect(repaired).toMatchObject({
+      toolCallId: "broken-call",
+      toolName: "record-research-evidence",
+      input: '{"claim":"已修复"}',
+    })
+    expect(model.doGenerateCalls[0]).toMatchObject({
+      maxOutputTokens: 4_096,
+      reasoning: "none",
+      toolChoice: { type: "tool", toolName: "record-research-evidence" },
+    })
   })
 })

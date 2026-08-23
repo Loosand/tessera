@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 研究 run、结构化计划、规范化网页来源、证据片段与完成覆盖结果
- * [OUTPUT]: 绑定 task_run 的研究状态创建、幂等来源记录、证据写入、完成冻结与进度快照
+ * [INPUT]: 研究 run、结构化计划、规范化网页来源、证据片段、来源推荐/保存决策与完成覆盖结果
+ * [OUTPUT]: 绑定 task_run 的研究状态创建、幂等来源记录、证据/推荐写入、完成冻结、进度快照与跨新 request 的显式状态克隆
  * [POS]: 可信研究工作流的 SQLite 控制层仓储
  * [DOC]: docs/architecture/database.md、docs/architecture/research-workflow.md
  *
@@ -10,16 +10,19 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import { and, asc, eq } from "drizzle-orm"
+import { createHash } from "node:crypto"
+import { and, asc, desc, eq } from "drizzle-orm"
 import type { DatabaseClient } from "./client"
 import {
   type ResearchEvidenceRecord,
   type ResearchQuestionRecord,
   type ResearchRunRecord,
+  type ResearchSourceRecommendationRecord,
   type ResearchSourceRecord,
   researchEvidence,
   researchQuestions,
   researchRuns,
+  researchSourceRecommendations,
   researchSources,
 } from "./schema"
 
@@ -80,6 +83,13 @@ export type ResearchQuestionResultPersistenceInput = Readonly<{
   status: Exclude<ResearchQuestionRecord["status"], "pending">
 }>
 
+export type ResearchRecommendationPersistenceInput = Readonly<{
+  id: string
+  reason: string
+  requestId: string
+  sourceId: string
+}>
+
 export function startResearchRun(
   client: DatabaseClient,
   input: Readonly<{ requestId: string; taskId: string; startedAt: Date }>,
@@ -96,6 +106,169 @@ export function startResearchRun(
     .onConflictDoNothing()
     .run()
   return findResearchRun(client, input.requestId)
+}
+
+function resumedSourceId(requestId: string, canonicalUrl: string) {
+  return `source-${createHash("sha256").update(`${requestId}\0${canonicalUrl}`).digest("hex").slice(0, 32)}`
+}
+
+function resumedRecordId(kind: "evidence" | "recommendation", requestId: string, sourceId: string) {
+  return `${kind}-${createHash("sha256").update(`${requestId}\0${sourceId}`).digest("hex").slice(0, 32)}`
+}
+
+/**
+ * 把上一轮研究的领域状态复制到新的 task run。网页正文不持久化；已有证据可直接复用，
+ * 若模型要从继承来源登记新证据，仍需重新读取并通过逐字校验。
+ */
+export function resumeResearchRun(
+  client: DatabaseClient,
+  input: Readonly<{ fromRequestId: string; taskId: string; toRequestId: string }>,
+) {
+  const resumedAt = new Date()
+  client.db.transaction((transaction) => {
+    const sourceRun = transaction
+      .select()
+      .from(researchRuns)
+      .where(eq(researchRuns.requestId, input.fromRequestId))
+      .get()
+    const targetRun = transaction
+      .select()
+      .from(researchRuns)
+      .where(eq(researchRuns.requestId, input.toRequestId))
+      .get()
+    if (!sourceRun || sourceRun.taskId !== input.taskId) throw new Error("找不到可续研的上一轮运行。")
+    if (!targetRun || targetRun.taskId !== input.taskId) throw new Error("新的研究运行不存在。")
+    if (targetRun.planVersion > 0) throw new Error("新的研究运行已经开始，不能再次继承进度。")
+
+    const questions = transaction
+      .select()
+      .from(researchQuestions)
+      .where(eq(researchQuestions.requestId, input.fromRequestId))
+      .orderBy(asc(researchQuestions.position))
+      .all()
+    const sources = transaction
+      .select()
+      .from(researchSources)
+      .where(eq(researchSources.requestId, input.fromRequestId))
+      .orderBy(asc(researchSources.discoveredAt))
+      .all()
+    const evidence = transaction
+      .select()
+      .from(researchEvidence)
+      .where(eq(researchEvidence.requestId, input.fromRequestId))
+      .orderBy(asc(researchEvidence.createdAt))
+      .all()
+    const recommendations = transaction
+      .select()
+      .from(researchSourceRecommendations)
+      .where(eq(researchSourceRecommendations.requestId, input.fromRequestId))
+      .orderBy(asc(researchSourceRecommendations.createdAt))
+      .all()
+    const sourceIds = new Map(
+      sources.map((source) => [source.id, resumedSourceId(input.toRequestId, source.canonicalUrl)]),
+    )
+    const questionIds = new Map(
+      questions.map((question) => [question.id, `${input.toRequestId}:${question.questionId}`]),
+    )
+    const phase: ResearchRunRecord["phase"] = sourceRun.outcome
+      ? "completed"
+      : recommendations.length > 0
+        ? "synthesizing"
+        : evidence.length > 0
+          ? "verifying"
+          : sources.some((source) => source.status === "read" || source.status === "unusable")
+            ? "reading"
+            : sourceRun.planVersion > 0
+              ? "discovering"
+              : "preparing"
+
+    transaction
+      .update(researchRuns)
+      .set({
+        phase,
+        outcome: sourceRun.outcome,
+        objective: sourceRun.objective,
+        scope: sourceRun.scope,
+        deliverable: sourceRun.deliverable,
+        planVersion: sourceRun.planVersion,
+        limitationsJson: sourceRun.limitationsJson,
+        updatedAt: resumedAt,
+        completedAt: sourceRun.outcome ? resumedAt : null,
+      })
+      .where(eq(researchRuns.requestId, input.toRequestId))
+      .run()
+
+    if (questions.length > 0) {
+      transaction
+        .insert(researchQuestions)
+        .values(
+          questions.map((question) => ({
+            id: questionIds.get(question.id) ?? `${input.toRequestId}:${question.questionId}`,
+            requestId: input.toRequestId,
+            questionId: question.questionId,
+            title: question.title,
+            position: question.position,
+            status: question.status,
+            coverageNote: question.coverageNote,
+            createdAt: question.createdAt,
+            updatedAt: resumedAt,
+          })),
+        )
+        .run()
+    }
+    if (sources.length > 0) {
+      transaction
+        .insert(researchSources)
+        .values(
+          sources.map((source) => ({
+            ...source,
+            id: sourceIds.get(source.id) ?? resumedSourceId(input.toRequestId, source.canonicalUrl),
+            requestId: input.toRequestId,
+            status: source.status === "reading" ? ("discovered" as const) : source.status,
+            updatedAt: resumedAt,
+          })),
+        )
+        .run()
+    }
+    if (evidence.length > 0) {
+      transaction
+        .insert(researchEvidence)
+        .values(
+          evidence.map((item) => {
+            const sourceId = sourceIds.get(item.sourceId)
+            const researchQuestionId = questionIds.get(item.researchQuestionId)
+            if (!sourceId || !researchQuestionId) throw new Error("上一轮研究证据关系不完整。")
+            return {
+              ...item,
+              id: resumedRecordId("evidence", input.toRequestId, item.id),
+              requestId: input.toRequestId,
+              sourceId,
+              researchQuestionId,
+            }
+          }),
+        )
+        .run()
+    }
+    if (recommendations.length > 0) {
+      transaction
+        .insert(researchSourceRecommendations)
+        .values(
+          recommendations.map((recommendation) => {
+            const sourceId = sourceIds.get(recommendation.sourceId)
+            if (!sourceId) throw new Error("上一轮研究推荐关系不完整。")
+            return {
+              ...recommendation,
+              id: resumedRecordId("recommendation", input.toRequestId, recommendation.id),
+              requestId: input.toRequestId,
+              sourceId,
+              updatedAt: resumedAt,
+            }
+          }),
+        )
+        .run()
+    }
+  })
+  return findResearchRun(client, input.toRequestId)
 }
 
 export function publishResearchPlan(client: DatabaseClient, input: ResearchPlanPersistenceInput) {
@@ -241,6 +414,78 @@ export function saveResearchEvidence(client: DatabaseClient, input: ResearchEvid
   return client.db.select().from(researchEvidence).where(eq(researchEvidence.id, input.id)).get() ?? null
 }
 
+export function saveResearchRecommendations(
+  client: DatabaseClient,
+  inputs: readonly ResearchRecommendationPersistenceInput[],
+) {
+  if (inputs.length === 0) throw new Error("研究来源推荐不能为空。")
+  const requestId = inputs[0]?.requestId
+  if (!requestId || inputs.some((input) => input.requestId !== requestId)) {
+    throw new Error("研究来源推荐必须属于同一运行。")
+  }
+  if (new Set(inputs.map((input) => input.sourceId)).size !== inputs.length) {
+    throw new Error("研究来源推荐不能包含重复来源。")
+  }
+  const run = findResearchRun(client, requestId)
+  if (!run) throw new Error("研究运行不存在。")
+  const readSourceIds = new Set(
+    run.sources.filter((source) => source.status === "read").map((source) => source.id),
+  )
+  if (inputs.some((input) => !readSourceIds.has(input.sourceId))) {
+    throw new Error("只能推荐已经阅读的研究来源。")
+  }
+  const now = new Date()
+  client.db.transaction((transaction) => {
+    for (const input of inputs) {
+      transaction
+        .insert(researchSourceRecommendations)
+        .values({
+          id: input.id,
+          requestId: input.requestId,
+          sourceId: input.sourceId,
+          reason: input.reason,
+          status: "recommended",
+          savedDocumentId: null,
+          updatedAt: now,
+        })
+        .onConflictDoUpdate({
+          target: [researchSourceRecommendations.requestId, researchSourceRecommendations.sourceId],
+          set: { reason: input.reason, updatedAt: now },
+        })
+        .run()
+    }
+    transaction
+      .update(researchRuns)
+      .set({ phase: "synthesizing", updatedAt: now })
+      .where(eq(researchRuns.requestId, requestId))
+      .run()
+  })
+  return findResearchRun(client, requestId)
+}
+
+export function markResearchRecommendationsSaved(
+  client: DatabaseClient,
+  input: Readonly<{ documentId: string; requestId: string; sourceIds: readonly string[] }>,
+) {
+  const uniqueSourceIds = [...new Set(input.sourceIds)]
+  const now = new Date()
+  client.db.transaction((transaction) => {
+    for (const sourceId of uniqueSourceIds) {
+      transaction
+        .update(researchSourceRecommendations)
+        .set({ status: "saved", savedDocumentId: input.documentId, updatedAt: now })
+        .where(
+          and(
+            eq(researchSourceRecommendations.requestId, input.requestId),
+            eq(researchSourceRecommendations.sourceId, sourceId),
+          ),
+        )
+        .run()
+    }
+  })
+  return findResearchRun(client, input.requestId)
+}
+
 export function finishResearchRun(
   client: DatabaseClient,
   input: Readonly<{
@@ -299,5 +544,24 @@ export function findResearchRun(client: DatabaseClient, requestId: string) {
       .where(eq(researchEvidence.requestId, requestId))
       .orderBy(asc(researchEvidence.createdAt))
       .all(),
+    recommendations: client.db
+      .select()
+      .from(researchSourceRecommendations)
+      .where(eq(researchSourceRecommendations.requestId, requestId))
+      .orderBy(asc(researchSourceRecommendations.createdAt))
+      .all(),
   }
 }
+
+export function findLatestCompletedResearchRun(client: DatabaseClient, taskId: string) {
+  const run = client.db
+    .select({ requestId: researchRuns.requestId })
+    .from(researchRuns)
+    .where(and(eq(researchRuns.taskId, taskId), eq(researchRuns.phase, "completed")))
+    .orderBy(desc(researchRuns.updatedAt))
+    .limit(1)
+    .get()
+  return run ? findResearchRun(client, run.requestId) : null
+}
+
+export type ResearchSourceRecommendationStatus = ResearchSourceRecommendationRecord["status"]

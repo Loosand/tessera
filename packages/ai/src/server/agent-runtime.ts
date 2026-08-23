@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 已解析供应商连接、自动联网/思考策略、当前 Skill、完整 AI SDK UIMessage 历史、主进程按授权注入的研究/内容库/工作区/MCP 能力、中止信号与运行指标回调
- * [OUTPUT]: 普通对话和工作区任务共用、同时承载供应商原生搜索、可信研究闭环、内容领域、按 RunPolicy 收窄的工作区读写、强制审批 MCP、Skill instructions、标准 needsApproval 与原生生命周期观测的 AI SDK ToolLoopAgent 增量流
+ * [INPUT]: 已解析供应商连接、自动联网/思考策略、当前 Skill、完整 AI SDK UIMessage 历史、主进程按授权注入的研究/写作交接/内容库/工作区/MCP 能力、中止信号与运行指标回调
+ * [OUTPUT]: 普通对话和工作区任务共用、以 InferAgentUIMessage 约束并由 createAgentUIStream 标准转换模型消息，同时承载供应商原生搜索、可信研究闭环、证据化写作交接、内容领域、按 RunPolicy 收窄的工作区读写、强制审批 MCP、Skill instructions、标准 needsApproval 与原生生命周期观测的 AI SDK ToolLoopAgent 增量流
  * [POS]: @tessera/ai/server 中统一自然对话的 ToolLoopAgent 编排边界
  * [DOC]: docs/architecture/unified-creation-agent.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/ai-observability.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -14,7 +14,7 @@ import type { AgentRuntime } from "@tessera/agent-runtime"
 import type { AiChatStreamChunk } from "@tessera/contracts"
 import type { LoadedSkill } from "@tessera/skills"
 import { ToolLoopAgent, createAgentUIStream, dynamicTool, isStepCount, jsonSchema, tool } from "ai"
-import type { InferUITools, JSONSchema7, ToolSet, UIMessage, UIMessageChunk } from "ai"
+import type { InferAgentUIMessage, JSONSchema7, ToolSet, UIMessageChunk } from "ai"
 import { z } from "zod"
 import { createAiSdkChatRuntime } from "./ai-sdk-runtime"
 import {
@@ -25,13 +25,13 @@ import {
   webSearchMaxUsesForSkill,
 } from "./chat-runtime"
 import { type ContentDomainAgentTools, createContentDomainToolSet } from "./content-domain-tools"
+import { type ResearchAgentTools, createResearchToolSet, publicResearchToolOutput } from "./research-tools"
 import { buildTaskSkillInstructions } from "./skill-instructions"
 import { type TaskAgentRunMetrics, createTaskAgent } from "./task-agent"
 import {
   createTaskInteractionTools,
   hasRequestedUserInputSinceLastUserMessage,
 } from "./task-interaction-tools"
-import { type ResearchAgentTools, createResearchToolSet, publicResearchToolOutput } from "./research-tools"
 
 export type ListWorkspaceFilesInput = Readonly<{
   directory?: string | undefined
@@ -114,6 +114,7 @@ export type AiAgentRuntimeOptions = Readonly<{
   externalTools?: readonly ExternalAgentTool[]
   onChunk: (chunk: AiChatStreamChunk) => void | Promise<void>
   onRunMetrics?: (metrics: TaskAgentRunMetrics) => void
+  researchContext?: string
   researchTools?: ResearchAgentTools
   skill?: LoadedSkill
   tools?: WorkspaceAgentTools
@@ -125,6 +126,7 @@ export type AiSdkAgentRuntimeRequest = Readonly<{
   externalTools?: readonly ExternalAgentTool[]
   input: AiChatRuntimeInput
   onRunMetrics?: (metrics: TaskAgentRunMetrics) => void
+  researchContext?: string
   researchTools?: ResearchAgentTools
   skill?: LoadedSkill
   tools?: WorkspaceAgentTools
@@ -132,10 +134,7 @@ export type AiSdkAgentRuntimeRequest = Readonly<{
 }>
 
 export function shouldHideResearchDraftText(chunkType: string, outcome: "complete" | "partial" | null) {
-  return (
-    !outcome &&
-    (chunkType === "text-start" || chunkType === "text-delta" || chunkType === "text-end")
-  )
+  return !outcome && (chunkType === "text-start" || chunkType === "text-delta" || chunkType === "text-end")
 }
 
 export function createExternalAgentToolSet(
@@ -159,7 +158,11 @@ export function createExternalAgentToolSet(
   ) satisfies ToolSet
 }
 
-function agentInstructions(workspaceName: string | undefined, contentLibraryAvailable: boolean) {
+function agentInstructions(
+  workspaceName: string | undefined,
+  contentLibraryAvailable: boolean,
+  researchContext?: string,
+) {
   return `你是 Tessera 的统一创作 Agent。用户不需要选择 Chat 或 Agent；你应自然回答，并在任务确实需要时自行调用当前可用工具。
 
 ${workspaceName ? `当前已授权工作区「${workspaceName}」中的 Markdown 文档。` : "当前没有已授权的外部工作区。"}
@@ -177,7 +180,7 @@ ${contentLibraryAvailable ? "当前可使用托管内容库；正式产物默认
 9. MCP 工具来自用户显式启用的外部服务器，每次执行都必须等待用户批准；不要用多个相似 MCP 调用绕过拒绝。
 10. 只有用户明确要求“写成稿、保存、创建文档或交付正式内容”时才创建 Artifact；不要把普通回答自动存成文件。
 11. 创建正式文档时，未明确指定项目就省略 projectId，让它进入“未归档”；不要编造项目 ID。
-12. 只有用户明确要求建立独立项目或移动文档时才调用对应工具；移动前先查询当前任务 Artifact 和项目 ID，不得覆盖同名文档。`
+12. 只有用户明确要求建立独立项目或移动文档时才调用对应工具；移动前先查询当前任务 Artifact 和项目 ID，不得覆盖同名文档。${researchContext ? `\n\n${researchContext}` : ""}`
 }
 
 async function* runAiSdkAgent(
@@ -186,6 +189,7 @@ async function* runAiSdkAgent(
     externalTools = [],
     input,
     onRunMetrics,
+    researchContext,
     researchTools,
     skill,
     tools: workspaceTools,
@@ -290,7 +294,7 @@ async function* runAiSdkAgent(
     ...mcpTools,
   }
   const agent = createTaskAgent({
-    baseInstructions: agentInstructions(workspaceName, Boolean(contentTools)),
+    baseInstructions: agentInstructions(workspaceName, Boolean(contentTools), researchContext),
     model,
     ...(onRunMetrics ? { onRunMetrics } : {}),
     ...(runtime.providerOptions ? { providerOptions: runtime.providerOptions } : {}),
@@ -302,7 +306,7 @@ async function* runAiSdkAgent(
       workspaceWrite: Object.keys(workspaceWriteTools),
     },
   })
-  type AgentUiMessage = UIMessage<unknown, never, InferUITools<typeof tools>>
+  type AgentUiMessage = InferAgentUIMessage<typeof agent>
   const originalMessages = await toUiMessages<AgentUiMessage>(input.messages, { tools })
   const stream = await createAgentUIStream({
     agent,
@@ -339,7 +343,10 @@ async function* runAiSdkAgent(
             output: publicResearchToolOutput(toolNames.get(chunk.toolCallId) ?? "", chunk.output),
           }
         : chunk
-    if (researchWorkflow && shouldHideResearchDraftText(publicInput.type, researchWorkflow.getProgress().outcome)) {
+    if (
+      researchWorkflow &&
+      shouldHideResearchDraftText(publicInput.type, researchWorkflow.getProgress().outcome)
+    ) {
       continue
     }
     const sanitized = publicChunk(publicInput)
@@ -360,6 +367,7 @@ export async function streamAiAgent(
     externalTools,
     onChunk,
     onRunMetrics,
+    researchContext,
     researchTools,
     skill,
     tools,
@@ -371,6 +379,7 @@ export async function streamAiAgent(
       input,
       ...(contentTools ? { contentTools } : {}),
       ...(onRunMetrics ? { onRunMetrics } : {}),
+      ...(researchContext ? { researchContext } : {}),
       ...(researchTools ? { researchTools } : {}),
       ...(tools ? { tools } : {}),
       ...(workspaceName ? { workspaceName } : {}),

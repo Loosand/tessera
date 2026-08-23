@@ -1,6 +1,6 @@
 /**
- * [INPUT]: AI SDK UIMessage、当前回复状态、客户端问答结果、reasoning 生命周期/摘要、变更预览/审批、文件跳转与重新生成回调
- * [OUTPUT]: 用户文本/图片/文档附件与按原始 Part 顺序组合的助手回复、思考阶段/摘要、问答/研究计划、搜索轨迹、工具审查及轻量消息操作
+ * [INPUT]: AI SDK UIMessage、当前回复状态、客户端问答结果、reasoning 生命周期/摘要、变更预览/审批、文件跳转、运行解释读取与重新生成回调
+ * [OUTPUT]: 用户文本/图片/文档附件与按原始 Part 顺序组合的助手回复、思考阶段/摘要、问答/研究计划、搜索轨迹、工具审查及按需运行解释等轻量消息操作
  * [POS]: task-page 的 Chat/Agent 消息协调层
  * [DOC]: design.md、docs/architecture/ai-observability.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
  *
@@ -11,7 +11,13 @@
  */
 
 import type { UIMessage } from "@tessera/ai/react"
-import type { AgentChangePreview, TaskUserInputResult } from "@tessera/contracts"
+import type {
+  AgentChangePreview,
+  TaskResearchNotebook,
+  TaskResearchSaveSourcesResult,
+  TaskRunInspection,
+  TaskUserInputResult,
+} from "@tessera/contracts"
 import { Copy01Icon, File02Icon, Refresh01Icon } from "@tessera/design-system/components/icons"
 import { LoadingState } from "@tessera/design-system/components/loading-state"
 import { Button } from "@tessera/design-system/components/ui/button"
@@ -27,6 +33,7 @@ import { TextPart } from "./chat-parts/text-part"
 import { ToolPart, isToolPart } from "./chat-parts/tool-part"
 import { UserInputPart, isUserInputToolPart } from "./chat-parts/user-input-part"
 import { WebSearchPart, isWebSearchToolPart } from "./chat-parts/web-search-part"
+import { RunInspectionPopover } from "./run-inspection-popover"
 
 type ChatMessageProps = Readonly<{
   isLast: boolean
@@ -34,6 +41,11 @@ type ChatMessageProps = Readonly<{
   loadAgentChangePreview?: ((approvalId: string) => Promise<AgentChangePreview>) | undefined
   onOpenDocument?: ((path: string, line?: number) => void) | undefined
   onRegenerate: () => void
+  onReadTaskRun?: ((requestId: string) => Promise<TaskRunInspection | null>) | undefined
+  onReadResearchNotebook?: ((requestId: string) => Promise<TaskResearchNotebook | null>) | undefined
+  onSaveResearchRecommendations?:
+    | ((requestId: string, sourceIds: string[]) => Promise<TaskResearchSaveSourcesResult>)
+    | undefined
   onToolApproval?: ((approvalId: string, approved: boolean) => void) | undefined
   onUserInput?: ((toolCallId: string, output: TaskUserInputResult) => void | PromiseLike<void>) | undefined
   running: boolean
@@ -60,6 +72,9 @@ export function ChatMessage({
   message,
   onOpenDocument,
   onRegenerate,
+  onReadTaskRun,
+  onReadResearchNotebook,
+  onSaveResearchRecommendations,
   onToolApproval,
   onUserInput,
   running,
@@ -69,6 +84,7 @@ export function ChatMessage({
   const imageFiles = files.filter((file) => file.mediaType.startsWith("image/"))
   const documentFiles = files.filter((file) => !file.mediaType.startsWith("image/"))
   const assistantStreaming = running && isLast
+  const runRequestId = message.metadata?.requestId
   const firstWebSearchIndex = message.parts.findIndex(isWebSearchToolPart)
   const firstContentOperationIndex = message.parts.findIndex(isContentOperationToolPart)
   const firstResearchActivityIndex = message.parts.findIndex(isResearchActivityToolPart)
@@ -179,7 +195,13 @@ export function ChatMessage({
         }
         if (isResearchActivityToolPart(part)) {
           return index === firstResearchActivityIndex ? (
-            <ResearchActivityPart key={partKey} parts={message.parts} streaming={assistantStreaming} />
+            <ResearchActivityPart
+              key={partKey}
+              parts={message.parts}
+              streaming={assistantStreaming}
+              onReadNotebook={onReadResearchNotebook}
+              onSaveRecommendations={onSaveResearchRecommendations}
+            />
           ) : null
         }
         if (isContentOperationToolPart(part)) {
@@ -215,18 +237,23 @@ export function ChatMessage({
         streaming={assistantStreaming}
       />
 
-      {text && !(running && isLast) ? (
+      {(text || runRequestId) && !(running && isLast) ? (
         <div className="mt-2 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            aria-label="复制回复"
-            title="复制"
-            onClick={() => void navigator.clipboard.writeText(text)}
-          >
-            <Icon icon={Copy01Icon} size={13} />
-          </Button>
+          {text ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              aria-label="复制回复"
+              title="复制"
+              onClick={() => void navigator.clipboard.writeText(text)}
+            >
+              <Icon icon={Copy01Icon} size={13} />
+            </Button>
+          ) : null}
+          {runRequestId && onReadTaskRun ? (
+            <RunInspectionPopover requestId={runRequestId} onRead={onReadTaskRun} />
+          ) : null}
           {isLast ? (
             <Button
               type="button"

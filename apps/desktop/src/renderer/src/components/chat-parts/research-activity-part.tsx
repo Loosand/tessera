@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 同一助手消息中的 read-web-source、record-research-evidence、finalize-research 标准 Tool Parts
- * [OUTPUT]: 由真实工具结果聚合的阅读、失败、证据、问题覆盖与完成状态卡片
+ * [INPUT]: 同一助手消息中的 read-web-source、record-research-evidence、recommend-research-sources、finalize-research 标准 Tool Parts，以及研究笔记读取/来源保存回调
+ * [OUTPUT]: 由真实工具结果聚合的阅读、失败、证据、问题覆盖、增量笔记、来源选择保存与完成状态卡片
  * [POS]: 研究计划和联网搜索之后的领域进度呈现，不从模型旁白推断状态
  * [DOC]: design.md、docs/architecture/research-workflow.md
  *
@@ -10,25 +10,36 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import type { UIMessage } from "@tessera/ai/react"
+import {
+  type UIMessagePart,
+  type UIMessageToolPart,
+  isUIMessageToolPart,
+  uiMessageToolName,
+} from "@tessera/ai/react"
 import {
   FINALIZE_RESEARCH_TOOL_NAME,
   READ_WEB_SOURCE_TOOL_NAME,
+  RECOMMEND_RESEARCH_SOURCES_TOOL_NAME,
   RECORD_RESEARCH_EVIDENCE_TOOL_NAME,
+  type TaskResearchNotebook,
+  type TaskResearchSaveSourcesResult,
 } from "@tessera/contracts"
-import React from "react"
+import { Button } from "@tessera/design-system/components/ui/button"
+import React, { useEffect, useRef, useState } from "react"
+import { TextPart } from "./text-part"
 
-type MessagePart = UIMessage["parts"][number]
-type ToolPart = Extract<MessagePart, { type: "dynamic-tool" | `tool-${string}` }>
+type MessagePart = UIMessagePart
+type ToolPart = UIMessageToolPart
 
 const RESEARCH_TOOL_NAMES = new Set<string>([
   READ_WEB_SOURCE_TOOL_NAME,
   RECORD_RESEARCH_EVIDENCE_TOOL_NAME,
+  RECOMMEND_RESEARCH_SOURCES_TOOL_NAME,
   FINALIZE_RESEARCH_TOOL_NAME,
 ])
 
 function toolName(part: ToolPart) {
-  return part.type === "dynamic-tool" ? part.toolName : part.type.slice("tool-".length)
+  return uiMessageToolName(part)
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -38,10 +49,7 @@ function record(value: unknown): Record<string, unknown> | null {
 }
 
 export function isResearchActivityToolPart(part: MessagePart): part is ToolPart {
-  return (
-    (part.type === "dynamic-tool" || part.type.startsWith("tool-")) &&
-    RESEARCH_TOOL_NAMES.has(toolName(part as ToolPart))
-  )
+  return isUIMessageToolPart(part) && RESEARCH_TOOL_NAMES.has(toolName(part))
 }
 
 export type ResearchActivitySummary = Readonly<{
@@ -50,6 +58,14 @@ export type ResearchActivitySummary = Readonly<{
   finalizeStatus: "blocked" | "completed" | "partial" | null
   questionCounts: Readonly<{ covered: number; partial: number; pending: number; uncovered: number }> | null
   readCount: number
+  recommendations: readonly Readonly<{
+    finalUrl: string
+    reason: string
+    saved: boolean
+    sourceId: string
+    title: string
+  }>[]
+  requestId: string | null
   sourceCounts: Readonly<{
     discovered: number
     read: number
@@ -71,17 +87,18 @@ export function collectResearchActivity(parts: readonly MessagePart[]): Research
   let finalizeStatus: ResearchActivitySummary["finalizeStatus"] = null
   let questionCounts: ResearchActivitySummary["questionCounts"] = null
   let sourceCounts: ResearchActivitySummary["sourceCounts"] = null
-  let readCount = 0
-  let unusableCount = 0
-  const sources = new Map<
+  let requestId: string | null = null
+  const recommendations = new Map<
     string,
-    { detail?: string; label: string; status: "failed" | "read" | "reading" }
+    { finalUrl: string; reason: string; saved: boolean; sourceId: string; title: string }
   >()
+  const sources = new Map<string, { detail?: string; label: string; status: "failed" | "read" | "reading" }>()
 
   for (const part of parts.filter(isResearchActivityToolPart)) {
     const name = toolName(part)
     const output = "output" in part ? record(part.output) : null
     const input = "input" in part ? record(part.input) : null
+    if (typeof output?.requestId === "string") requestId = output.requestId
     if (
       ["input-streaming", "input-available", "approval-requested", "approval-responded"].includes(part.state)
     ) {
@@ -104,19 +121,35 @@ export function collectResearchActivity(parts: readonly MessagePart[]): Research
           label = url
         }
       }
-      const status =
-        output?.status === "read"
-          ? "read"
-          : output?.status === "unusable"
-            ? "failed"
-            : "reading"
-      if (status === "read") readCount += 1
-      if (status === "failed") unusableCount += 1
+      const status = output?.status === "read" ? "read" : output?.status === "unusable" ? "failed" : "reading"
       const key = typeof output?.sourceId === "string" ? output.sourceId : url || part.toolCallId
-      const detail = status === "failed" && typeof output?.error === "string" ? output.error.slice(0, 160) : undefined
+      const detail =
+        status === "failed" && typeof output?.error === "string" ? output.error.slice(0, 160) : undefined
       sources.set(key, { label: label || "网页来源", status, ...(detail ? { detail } : {}) })
     }
     if (name === RECORD_RESEARCH_EVIDENCE_TOOL_NAME && output?.status === "recorded") evidenceCount += 1
+    if (name === RECOMMEND_RESEARCH_SOURCES_TOOL_NAME && output?.status === "recommended") {
+      if (typeof output.requestId === "string") requestId = output.requestId
+      if (Array.isArray(output.recommendations)) {
+        for (const value of output.recommendations) {
+          const recommendation = record(value)
+          if (
+            typeof recommendation?.sourceId !== "string" ||
+            typeof recommendation.finalUrl !== "string" ||
+            typeof recommendation.reason !== "string"
+          ) {
+            continue
+          }
+          recommendations.set(recommendation.sourceId, {
+            sourceId: recommendation.sourceId,
+            finalUrl: recommendation.finalUrl,
+            reason: recommendation.reason,
+            saved: recommendation.saved === true,
+            title: typeof recommendation.title === "string" ? recommendation.title : recommendation.finalUrl,
+          })
+        }
+      }
+    }
     if (name === FINALIZE_RESEARCH_TOOL_NAME) {
       if (output?.status === "blocked" || output?.status === "completed" || output?.status === "partial") {
         finalizeStatus = output.status
@@ -144,25 +177,60 @@ export function collectResearchActivity(parts: readonly MessagePart[]): Research
       if (typeof progress?.evidenceCount === "number") evidenceCount = progress.evidenceCount
     }
   }
+  const sourceValues = [...sources.values()]
   return {
     active,
     evidenceCount,
     finalizeStatus,
     questionCounts,
-    readCount: sourceCounts?.read ?? readCount,
+    readCount: sourceCounts?.read ?? sourceValues.filter((source) => source.status === "read").length,
+    recommendations: [...recommendations.values()],
+    requestId,
     sourceCounts,
-    sources: [...sources.values()],
-    unusableCount: sourceCounts?.unusable ?? unusableCount,
+    sources: sourceValues,
+    unusableCount:
+      sourceCounts?.unusable ?? sourceValues.filter((source) => source.status === "failed").length,
   }
 }
 
 const sourceStatusLabels = { reading: "读取中", read: "已阅读", failed: "不可用" } as const
 
 export function ResearchActivityPart({
+  onReadNotebook,
+  onSaveRecommendations,
   parts,
   streaming,
-}: Readonly<{ parts: readonly MessagePart[]; streaming: boolean }>) {
+}: Readonly<{
+  onReadNotebook?: ((requestId: string) => Promise<TaskResearchNotebook | null>) | undefined
+  onSaveRecommendations?:
+    | ((requestId: string, sourceIds: string[]) => Promise<TaskResearchSaveSourcesResult>)
+    | undefined
+  parts: readonly MessagePart[]
+  streaming: boolean
+}>) {
   const summary = collectResearchActivity(parts)
+  const mountedRef = useRef(false)
+  const [notebook, setNotebook] = useState<TaskResearchNotebook | null>(null)
+  const [notebookVisible, setNotebookVisible] = useState(false)
+  const [notebookLoading, setNotebookLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [notice, setNotice] = useState("")
+  const [unselectedSourceIds, setUnselectedSourceIds] = useState<ReadonlySet<string>>(() => new Set())
+  const [savedSourceIds, setSavedSourceIds] = useState<ReadonlySet<string>>(() => new Set())
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+  const selectedSourceIds = summary.recommendations
+    .filter(
+      (recommendation) =>
+        !recommendation.saved &&
+        !savedSourceIds.has(recommendation.sourceId) &&
+        !unselectedSourceIds.has(recommendation.sourceId),
+    )
+    .map((recommendation) => recommendation.sourceId)
   const finalLabel =
     summary.finalizeStatus === "completed"
       ? "研究完成"
@@ -179,6 +247,47 @@ export function ResearchActivityPart({
   const discoveredTotal = summary.sourceCounts
     ? Object.values(summary.sourceCounts).reduce((total, count) => total + count, 0)
     : null
+
+  const toggleNotebook = async () => {
+    if (notebook) {
+      setNotebookVisible((visible) => !visible)
+      return
+    }
+    if (!summary.requestId || !onReadNotebook || notebookLoading) return
+    setNotebookLoading(true)
+    setNotice("")
+    try {
+      const nextNotebook = await onReadNotebook(summary.requestId)
+      if (!mountedRef.current) return
+      setNotebook(nextNotebook)
+      setNotebookVisible(Boolean(nextNotebook))
+      if (!nextNotebook) setNotice("研究笔记暂时不可用。")
+    } catch (error) {
+      if (mountedRef.current) setNotice(error instanceof Error ? error.message : "读取研究笔记失败。")
+    } finally {
+      if (mountedRef.current) setNotebookLoading(false)
+    }
+  }
+
+  const saveRecommendations = async () => {
+    if (!summary.requestId || !onSaveRecommendations || selectedSourceIds.length === 0 || saving) return
+    setSaving(true)
+    setNotice("")
+    try {
+      const result = await onSaveRecommendations(summary.requestId, selectedSourceIds)
+      if (!mountedRef.current) return
+      if (!result.ok) {
+        setNotice(result.error)
+        return
+      }
+      setSavedSourceIds((current) => new Set([...current, ...result.savedSourceIds]))
+      setNotice(result.artifact ? `已保存为「${result.artifact.document.title}」。` : "来源已经保存。")
+    } catch (error) {
+      if (mountedRef.current) setNotice(error instanceof Error ? error.message : "保存研究来源失败。")
+    } finally {
+      if (mountedRef.current) setSaving(false)
+    }
+  }
 
   return (
     <section
@@ -215,6 +324,89 @@ export function ResearchActivityPart({
             </li>
           ))}
         </ul>
+      ) : null}
+      {summary.recommendations.length > 0 ? (
+        <div className="mt-3 border-t border-border/70 pt-3">
+          <p className="font-medium text-foreground">推荐保存的来源</p>
+          <ul className="mt-2 space-y-2">
+            {summary.recommendations.map((recommendation) => {
+              const saved = recommendation.saved || savedSourceIds.has(recommendation.sourceId)
+              const checked = saved || !unselectedSourceIds.has(recommendation.sourceId)
+              return (
+                <li key={recommendation.sourceId} className="flex items-start gap-2.5">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 size-3.5 accent-foreground"
+                    aria-label={`选择保存 ${recommendation.title}`}
+                    checked={checked}
+                    disabled={saved || saving}
+                    onChange={(event) =>
+                      setUnselectedSourceIds((current) => {
+                        const next = new Set(current)
+                        if (event.target.checked) next.delete(recommendation.sourceId)
+                        else next.add(recommendation.sourceId)
+                        return next
+                      })
+                    }
+                  />
+                  <span className="min-w-0 flex-1">
+                    <a
+                      className="block truncate text-foreground/85 underline-offset-2 hover:underline"
+                      href={recommendation.finalUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {recommendation.title}
+                    </a>
+                    <span className="mt-0.5 block text-[10px] leading-4 text-muted-foreground">
+                      {recommendation.reason}
+                    </span>
+                  </span>
+                  {saved ? <span className="shrink-0 text-[10px] text-muted-foreground">已保存</span> : null}
+                </li>
+              )
+            })}
+          </ul>
+          <div className="mt-2.5 flex flex-wrap gap-2">
+            {onSaveRecommendations ? (
+              <Button
+                type="button"
+                variant="secondary"
+                size="xs"
+                disabled={selectedSourceIds.length === 0 || saving}
+                onClick={() => void saveRecommendations()}
+              >
+                {saving
+                  ? "保存中…"
+                  : `保存所选来源${selectedSourceIds.length > 0 ? `（${selectedSourceIds.length}）` : ""}`}
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+      {onReadNotebook && summary.requestId ? (
+        <div className={summary.recommendations.length > 0 ? "mt-2" : "mt-3 border-t border-border/70 pt-3"}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            disabled={notebookLoading}
+            aria-expanded={notebookVisible}
+            onClick={() => void toggleNotebook()}
+          >
+            {notebookLoading ? "读取笔记中…" : notebookVisible ? "收起研究笔记" : "查看研究笔记"}
+          </Button>
+        </div>
+      ) : null}
+      {notebookVisible && notebook ? (
+        <div className="mt-3 max-h-96 overflow-auto rounded-lg bg-muted/60 px-3 py-2.5">
+          <TextPart part={{ type: "text", text: notebook.markdown, state: "done" }} streaming={false} />
+        </div>
+      ) : null}
+      {notice ? (
+        <p className="mt-2 text-[10px] leading-4 text-muted-foreground" aria-live="polite">
+          {notice}
+        </p>
       ) : null}
     </section>
   )

@@ -27,6 +27,8 @@ import { taskRunObservabilityMigration } from "./0012-task-run-observability"
 import { unifiedContentDomainMigration } from "./0013-unified-content-domain"
 import { researchWorkflowMigration } from "./0014-research-workflow"
 import { researchQuestionPositionMigration } from "./0015-research-question-position"
+import { appSettingsMigration } from "./0016-app-settings"
+import { researchSourceRecommendationsMigration } from "./0017-research-source-recommendations"
 import type { DatabaseMigration } from "./types"
 
 export type { DatabaseMigration } from "./types"
@@ -48,6 +50,8 @@ export const DATABASE_MIGRATIONS = [
   unifiedContentDomainMigration,
   researchWorkflowMigration,
   researchQuestionPositionMigration,
+  appSettingsMigration,
+  researchSourceRecommendationsMigration,
 ] as const satisfies readonly DatabaseMigration[]
 
 export type DatabaseMigrationId = (typeof DATABASE_MIGRATIONS)[number]["id"]

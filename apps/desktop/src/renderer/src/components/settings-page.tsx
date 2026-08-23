@@ -1,8 +1,8 @@
 /**
- * [INPUT]: 应用信息、外部工作区/托管内容库摘要、界面偏好、AI/MCP/开发期日志安全桥、设置导航操作与共享 Motion 参数
- * [OUTPUT]: 带连续选中态的可搜索分类、外部工作区与探索期托管内容库设置、官方 AI SDK 日志入口和独立供应商/MCP 工作区
+ * [INPUT]: 应用信息、外部工作区/托管内容库摘要、界面偏好、AI/MCP/研究网络/开发期日志安全桥、设置导航操作与共享 Motion 参数
+ * [OUTPUT]: 带连续选中态的可搜索分类、外部工作区与探索期托管内容库设置、研究网页系统代理/直连选择、官方 AI SDK 日志入口和独立供应商/MCP 工作区
  * [POS]: 桌面应用的产品级设置视图
- * [DOC]: design.md、docs/architecture/unified-creation-agent.md、docs/architecture/ai-providers.md、docs/architecture/ai-observability.md、docs/architecture/mcp.md
+ * [DOC]: design.md、docs/architecture/unified-creation-agent.md、docs/architecture/ai-providers.md、docs/architecture/ai-observability.md、docs/architecture/mcp.md、docs/architecture/research-workflow.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -20,6 +20,7 @@ import type {
   McpServerConfig,
   McpServerSaveInput,
   McpServerTestResult,
+  ResearchNetworkMode,
   WorkspaceInfo,
 } from "@tessera/contracts"
 import {
@@ -164,6 +165,18 @@ async function deleteAiProviderConfig(configId: string): Promise<void> {
   if (!desktopApi) throw new Error("桌面安全桥尚未就绪，请重新打开应用。")
   const result = await desktopApi.deleteAiProviderConfig(configId)
   if (!result.ok) throw new Error(result.error)
+}
+
+async function getResearchNetworkMode(): Promise<ResearchNetworkMode> {
+  const desktopApi = window.tessera
+  if (!desktopApi) throw new Error("桌面安全桥尚未就绪，请重新打开应用。")
+  return desktopApi.getResearchNetworkMode()
+}
+
+async function setResearchNetworkMode(mode: ResearchNetworkMode): Promise<ResearchNetworkMode> {
+  const desktopApi = window.tessera
+  if (!desktopApi) throw new Error("桌面安全桥尚未就绪，请重新打开应用。")
+  return desktopApi.setResearchNetworkMode(mode)
 }
 
 function subscribeToAiProviderConfigChanges(listener: () => void) {
@@ -519,7 +532,10 @@ export function SettingsPage({
 
             <div className="mt-10">
               <div className={activeSection === "ai" ? undefined : "hidden"}>
-                <AiSettings />
+                <AiSettings
+                  getResearchNetworkMode={getResearchNetworkMode}
+                  setResearchNetworkMode={setResearchNetworkMode}
+                />
               </div>
 
               {activeSection === "ai" ||

@@ -1,6 +1,6 @@
 /**
- * [INPUT]: Electron 桌面应用当前需要的跨进程数据、生命周期、工作区条目、AI 模型事实/端点绑定、MCP 服务器、用户 Skill、任务运行策略、内容对象、开发期 AI 日志与 Agent 变更审批形状
- * [OUTPUT]: IPC 频道、工作区文件操作、模型/MCP/用户 Skill 配置、类型化 RunPolicy、后端无关内容引用、可恢复流式运行、开发期 AI 日志入口、客户端问答/研究计划工具、Agent Diff 审批、关闭握手与可推导的桌面 API 类型契约
+ * [INPUT]: Electron 桌面应用当前需要的跨进程数据、生命周期、工作区条目、AI 模型事实/端点绑定、MCP 服务器、用户 Skill、研究网络偏好、任务运行策略、内容对象、开发期 AI 日志与 Agent 变更审批形状
+ * [OUTPUT]: IPC 频道、工作区文件操作、模型/MCP/用户 Skill/研究网络配置、类型化 RunPolicy、版本化公开运行/工具错误、脱敏运行解释、后端无关内容引用、可恢复流式运行、开发期 AI 日志入口、客户端问答/研究计划工具、Agent Diff 审批、关闭握手与可推导的桌面 API 类型契约
  * [POS]: 应用和共享包共同依赖的底层契约入口
  * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/ai-observability.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/mcp.md、docs/architecture/research-workflow.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md、docs/architecture/unified-creation-agent.md
  *
@@ -44,6 +44,10 @@ export const IPC_CHANNELS = {
   aiProviderListConfigs: "ai-provider:list-configs",
   aiProviderListModels: "ai-provider:list-models",
   aiProviderSaveConfig: "ai-provider:save-config",
+  researchNetworkGet: "research-network:get",
+  researchNetworkSet: "research-network:set",
+  researchNotebookRead: "research:notebook-read",
+  researchSourcesSave: "research:sources-save",
   mcpServersChanged: "mcp:servers-changed",
   mcpServerDelete: "mcp:server-delete",
   mcpServerList: "mcp:server-list",
@@ -60,6 +64,7 @@ export const IPC_CHANNELS = {
   aiChatEvent: "ai-chat:event",
   aiChatResume: "ai-chat:resume",
   aiChatStart: "ai-chat:start",
+  taskRunRead: "task-run:read",
   agentChangePreview: "agent-change:preview",
   taskListRecent: "task:list-recent",
   taskListWorkspace: "task:list-workspace",
@@ -371,6 +376,14 @@ export type TaskSessionStatus = "idle" | "running" | "waiting-input" | "complete
 
 export type TaskToolScope = "conversation" | "workspace-read" | "workspace-write"
 
+export const RESEARCH_NETWORK_MODES = ["system", "direct"] as const
+
+export type ResearchNetworkMode = (typeof RESEARCH_NETWORK_MODES)[number]
+
+export function isResearchNetworkMode(value: unknown): value is ResearchNetworkMode {
+  return typeof value === "string" && RESEARCH_NETWORK_MODES.some((mode) => mode === value)
+}
+
 export type TaskRunPolicy = {
   limits: {
     /** null 表示研究运行不人为覆盖供应商/模型的单次输出上限。 */
@@ -385,17 +398,107 @@ export type TaskRunPolicy = {
   webSearch: boolean
 }
 
+export function isTaskRunPolicy(value: unknown): value is TaskRunPolicy {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false
+  const policy = value as Record<string, unknown>
+  const limits = policy.limits
+  return (
+    (policy.mode === "chat" || policy.mode === "agent") &&
+    (policy.reasoning === "auto" ||
+      policy.reasoning === "none" ||
+      policy.reasoning === "low" ||
+      policy.reasoning === "medium" ||
+      policy.reasoning === "high") &&
+    isTaskSkillId(policy.skillId) &&
+    (policy.toolScope === "conversation" ||
+      policy.toolScope === "workspace-read" ||
+      policy.toolScope === "workspace-write") &&
+    typeof policy.webSearch === "boolean" &&
+    Boolean(limits) &&
+    typeof limits === "object" &&
+    !Array.isArray(limits) &&
+    (typeof (limits as Record<string, unknown>).maxOutputTokens === "number" ||
+      (limits as Record<string, unknown>).maxOutputTokens === null) &&
+    typeof (limits as Record<string, unknown>).maxSteps === "number" &&
+    typeof (limits as Record<string, unknown>).timeoutMs === "number"
+  )
+}
+
 export type TaskRunResourceSummary = {
   attachmentCount: number
   currentDocumentPath: string | null
+  researchNetworkMode: ResearchNetworkMode | null
+  resumedResearchRequestId?: string | null
   workspaceId: string | null
   workspaceName: string | null
+}
+
+export function isTaskRunResourceSummary(value: unknown): value is TaskRunResourceSummary {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false
+  const summary = value as Record<string, unknown>
+  return (
+    typeof summary.attachmentCount === "number" &&
+    Number.isSafeInteger(summary.attachmentCount) &&
+    summary.attachmentCount >= 0 &&
+    (summary.currentDocumentPath === null || typeof summary.currentDocumentPath === "string") &&
+    (summary.researchNetworkMode === null || isResearchNetworkMode(summary.researchNetworkMode)) &&
+    (summary.resumedResearchRequestId === undefined ||
+      summary.resumedResearchRequestId === null ||
+      typeof summary.resumedResearchRequestId === "string") &&
+    (summary.workspaceId === null || typeof summary.workspaceId === "string") &&
+    (summary.workspaceName === null || typeof summary.workspaceName === "string")
+  )
+}
+
+export const TASK_RUN_STATUSES = ["running", "completed", "failed", "cancelled", "interrupted"] as const
+
+export type TaskRunStatus = (typeof TASK_RUN_STATUSES)[number]
+
+export type TaskRunToolInspection = {
+  callCount: number
+  denialCount: number
+  failureCount: number
+  name: string
+}
+
+/** 面向产品 UI 的只读运行解释；不包含提示词、正文、绝对路径或供应商秘密。 */
+export type TaskRunInspection = {
+  completedAt: number | null
+  failure: TaskRunErrorDataV1 | null
+  finishReason: string | null
+  model: {
+    configId: string
+    modelId: string
+    providerId: string
+  }
+  policy: TaskRunPolicy | null
+  requestId: string
+  resources: TaskRunResourceSummary | null
+  startedAt: number
+  status: TaskRunStatus
+  taskId: string
+  timing: {
+    durationMs: number | null
+    modelDurationMs: number | null
+    timeToFirstOutputMs: number | null
+    toolDurationMs: number | null
+  }
+  tools: TaskRunToolInspection[]
+  usage: {
+    cacheReadTokens: number | null
+    cacheWriteTokens: number | null
+    inputTokens: number | null
+    outputTokens: number | null
+    reasoningTokens: number | null
+    totalTokens: number | null
+  }
 }
 
 export const REQUEST_USER_INPUT_TOOL_NAME = "request-user-input" as const
 export const PUBLISH_RESEARCH_PLAN_TOOL_NAME = "publish-research-plan" as const
 export const READ_WEB_SOURCE_TOOL_NAME = "read-web-source" as const
 export const RECORD_RESEARCH_EVIDENCE_TOOL_NAME = "record-research-evidence" as const
+export const RECOMMEND_RESEARCH_SOURCES_TOOL_NAME = "recommend-research-sources" as const
 export const FINALIZE_RESEARCH_TOOL_NAME = "finalize-research" as const
 
 export type TaskUserInputOption = {
@@ -494,6 +597,7 @@ export type TaskResearchReadSourceOutput = {
     | "unknown"
   finalUrl: string
   publishedAt?: string
+  requestId: string
   sourceId: string
   status: "read" | "unusable"
   title?: string
@@ -511,7 +615,33 @@ export type TaskResearchEvidenceInput = {
 
 export type TaskResearchEvidenceOutput = {
   evidenceId: string
+  requestId: string
   status: "recorded"
+}
+
+export type TaskResearchRecommendationInput = {
+  reason: string
+  sourceId: string
+}
+
+export type TaskResearchRecommendedSource = {
+  author?: string
+  finalUrl: string
+  publishedAt?: string
+  reason: string
+  saved: boolean
+  sourceId: string
+  title?: string
+}
+
+export type TaskResearchRecommendSourcesInput = {
+  recommendations: TaskResearchRecommendationInput[]
+}
+
+export type TaskResearchRecommendSourcesOutput = {
+  recommendations: TaskResearchRecommendedSource[]
+  requestId: string
+  status: "recommended"
 }
 
 export type TaskResearchQuestionResult = {
@@ -532,17 +662,34 @@ export type TaskResearchProgress = {
   phase: TaskResearchPhase
   planPublished: boolean
   questionCounts: Record<"covered" | "partial" | "pending" | "uncovered", number>
+  recommendationCount: number
   sourceCounts: Record<TaskResearchSourceStatus, number>
 }
+
+export type TaskResearchNotebook = {
+  markdown: string
+  phase: TaskResearchPhase
+  requestId: string
+  revision: number
+  taskId: string
+  updatedAt: number
+}
+
+export type TaskResearchSaveSourcesResult = OperationResult<{
+  artifact: TaskArtifact | null
+  savedSourceIds: string[]
+}>
 
 export type TaskResearchFinalizeOutput =
   | {
       issues: string[]
       progress: TaskResearchProgress
+      requestId: string
       status: "blocked"
     }
   | {
       progress: TaskResearchProgress
+      requestId: string
       status: "completed" | "partial"
     }
 
@@ -550,22 +697,126 @@ export type TaskMessageMetadata = {
   configId?: string
   modelId?: string
   providerId?: AiProviderId
+  requestId?: string
 }
 
-/** 一次助手生成失败后写入 UIMessage 的可持久化错误数据。 */
-export type TaskRunErrorData = {
+export const TASK_RUN_ERROR_CODES = [
+  "provider-config",
+  "provider-auth",
+  "provider-rate-limit",
+  "provider-timeout",
+  "provider-unavailable",
+  "provider-response",
+  "network",
+  "invalid-request",
+  "tool-failed",
+  "stream-interrupted",
+  "resume-failed",
+  "transport",
+  "runtime",
+] as const
+
+export type TaskRunErrorCode = (typeof TASK_RUN_ERROR_CODES)[number]
+
+export const TASK_RUN_ERROR_PHASES = ["start", "stream", "resume"] as const
+
+export type TaskRunErrorPhase = (typeof TASK_RUN_ERROR_PHASES)[number]
+
+/** 新运行写入 UIMessage 的版本化、可持久化公开错误。 */
+export type TaskRunErrorDataV1 = {
+  code: TaskRunErrorCode
+  message: string
+  phase: TaskRunErrorPhase
+  retryable: boolean
+  version: 1
+}
+
+/** 只用于读取尚未携带稳定 code/phase 的历史任务消息。 */
+export type LegacyTaskRunErrorData = {
+  code?: never
+  message: string
+  phase?: never
+  retryable: boolean
+  version?: never
+}
+
+export type TaskRunErrorData = TaskRunErrorDataV1 | LegacyTaskRunErrorData
+
+export function isTaskRunErrorCode(value: unknown): value is TaskRunErrorCode {
+  return typeof value === "string" && TASK_RUN_ERROR_CODES.some((candidate) => candidate === value)
+}
+
+export function isTaskRunErrorPhase(value: unknown): value is TaskRunErrorPhase {
+  return typeof value === "string" && TASK_RUN_ERROR_PHASES.some((candidate) => candidate === value)
+}
+
+export function isTaskRunErrorDataV1(value: unknown): value is TaskRunErrorDataV1 {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false
+  const data = value as Record<string, unknown>
+  return (
+    data.version === 1 &&
+    isTaskRunErrorCode(data.code) &&
+    isTaskRunErrorPhase(data.phase) &&
+    typeof data.message === "string" &&
+    typeof data.retryable === "boolean"
+  )
+}
+
+export const TASK_TOOL_ERROR_CODES = [
+  "invalid-input",
+  "permission-denied",
+  "not-found",
+  "conflict",
+  "timeout",
+  "network",
+  "unavailable",
+  "cancelled",
+  "execution",
+] as const
+
+export type TaskToolErrorCode = (typeof TASK_TOOL_ERROR_CODES)[number]
+
+export type TaskToolErrorDataV1 = {
+  code: TaskToolErrorCode
   message: string
   retryable: boolean
+  toolCallId: string
+  toolName: string
+  version: 1
+}
+
+export function isTaskToolErrorCode(value: unknown): value is TaskToolErrorCode {
+  return typeof value === "string" && TASK_TOOL_ERROR_CODES.some((candidate) => candidate === value)
+}
+
+export function isTaskToolErrorDataV1(value: unknown): value is TaskToolErrorDataV1 {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false
+  const data = value as Record<string, unknown>
+  return (
+    data.version === 1 &&
+    isTaskToolErrorCode(data.code) &&
+    typeof data.message === "string" &&
+    typeof data.retryable === "boolean" &&
+    typeof data.toolCallId === "string" &&
+    typeof data.toolName === "string"
+  )
 }
 
 export type TaskMessageData = {
   "task-error": TaskRunErrorData
+  "tool-error": TaskToolErrorDataV1
 }
 
 export type TaskRunErrorMessagePart = {
   data: TaskRunErrorData
   id?: string
   type: "data-task-error"
+}
+
+export type TaskToolErrorMessagePart = {
+  data: TaskToolErrorDataV1
+  id?: string
+  type: "data-tool-error"
 }
 
 export type TaskToolApproval = {
@@ -611,6 +862,7 @@ export type TaskMessagePart =
       filename?: string
     }
   | TaskRunErrorMessagePart
+  | TaskToolErrorMessagePart
   | { type: "step-start" }
   | TaskToolMessagePart
 
@@ -650,12 +902,14 @@ export type TaskSessionSaveInput = {
 export type AiChatStartInput = {
   configId: string
   currentDocumentPath?: string
+  regenerateMessageId?: string
   messages: TaskMessage[]
   mode: TaskMode
   skillId: TaskSkillId
   modelId: string
   providerId: AiProviderId
   requestId: string
+  resumeResearchRequestId?: string
   taskId: string
 }
 
@@ -692,10 +946,16 @@ export type AiChatStreamChunk =
       toolName: string
       input: unknown
       errorText: string
+      failure?: TaskToolErrorDataV1
       title?: string
     }
   | { type: "tool-output-available"; toolCallId: string; output: unknown }
-  | { type: "tool-output-error"; toolCallId: string; errorText: string }
+  | {
+      type: "tool-output-error"
+      toolCallId: string
+      errorText: string
+      failure?: TaskToolErrorDataV1
+    }
   | { type: "tool-output-denied"; toolCallId: string }
   | {
       type: "tool-approval-request"
@@ -712,7 +972,7 @@ export type AiChatStreamChunk =
     }
   | { type: "finish"; finishReason?: "stop" | "length" | "content-filter" | "tool-calls" | "error" | "other" }
   | { type: "abort"; reason?: string }
-  | { type: "error"; errorText: string }
+  | { type: "error"; errorText: string; failure?: TaskRunErrorDataV1 }
 
 export type AiChatStreamEvent = {
   chunk: AiChatStreamChunk
@@ -721,7 +981,12 @@ export type AiChatStreamEvent = {
   taskId: string
 }
 
-export type AiChatStartResult = OperationResult
+export type AiChatOperationFailure = {
+  error: TaskRunErrorDataV1
+  ok: false
+}
+
+export type AiChatStartResult = { ok: true } | AiChatOperationFailure
 
 export type AiChatResumeRun = {
   active: boolean
@@ -732,7 +997,7 @@ export type AiChatResumeRun = {
   requestId: string
 }
 
-export type AiChatResumeResult = OperationResult<{ run: AiChatResumeRun | null }>
+export type AiChatResumeResult = { ok: true; run: AiChatResumeRun | null } | AiChatOperationFailure
 
 export type AgentChangeOperation = "create" | "update"
 export type AgentChangeStatus = "pending" | "approved" | "rejected" | "applied" | "conflict" | "failed"
@@ -1006,6 +1271,22 @@ export type DesktopApiContract = {
     [input: AiProviderSaveInput],
     AiProviderConfigResult
   >
+  getResearchNetworkMode: InvokeMethod<typeof IPC_CHANNELS.researchNetworkGet, [], ResearchNetworkMode>
+  setResearchNetworkMode: InvokeMethod<
+    typeof IPC_CHANNELS.researchNetworkSet,
+    [mode: ResearchNetworkMode],
+    ResearchNetworkMode
+  >
+  readResearchNotebook: InvokeMethod<
+    typeof IPC_CHANNELS.researchNotebookRead,
+    [taskId: string, requestId: string],
+    TaskResearchNotebook | null
+  >
+  saveResearchSources: InvokeMethod<
+    typeof IPC_CHANNELS.researchSourcesSave,
+    [taskId: string, requestId: string, sourceIds: string[]],
+    TaskResearchSaveSourcesResult
+  >
   listMcpServers: InvokeMethod<typeof IPC_CHANNELS.mcpServerList, [], McpServerConfig[]>
   saveMcpServer: InvokeMethod<typeof IPC_CHANNELS.mcpServerSave, [input: McpServerSaveInput], McpServerResult>
   deleteMcpServer: InvokeMethod<
@@ -1035,6 +1316,11 @@ export type DesktopApiContract = {
   startAiChat: InvokeMethod<typeof IPC_CHANNELS.aiChatStart, [input: AiChatStartInput], AiChatStartResult>
   resumeAiChat: InvokeMethod<typeof IPC_CHANNELS.aiChatResume, [taskId: string], AiChatResumeResult>
   cancelAiChat: SendMethod<typeof IPC_CHANNELS.aiChatCancel, [requestId: string]>
+  readTaskRun: InvokeMethod<
+    typeof IPC_CHANNELS.taskRunRead,
+    [taskId: string, requestId: string],
+    TaskRunInspection | null
+  >
   readAgentChangePreview: InvokeMethod<
     typeof IPC_CHANNELS.agentChangePreview,
     [taskId: string, approvalId: string],

@@ -1,6 +1,6 @@
 /**
- * [INPUT]: Tessera 对内容库/托管工作区、动态资源、Artifact、项目操作、通用任务会话/创作方式、AI 供应商模型事实、MCP 服务器、用户 Skill、完整逐轮执行策略/资源摘要、AI SDK 生命周期指标、Agent 运行检查点、变更审批和权限审计的持久化需求
- * [OUTPUT]: Drizzle SQLite 表、索引和可推导行类型，包括不含 Markdown 正文的统一内容控制层、用户 Skill 安装目录、可恢复任务状态、逐轮 RunPolicy/资源上下文摘要与完成原因/Token/耗时指标（AI Key 与 MCP 凭据仅保存 safeStorage 密文）
+ * [INPUT]: Tessera 对内容库/托管工作区、动态资源、Artifact、项目操作、通用任务会话/创作方式、应用级偏好、AI 供应商模型事实、MCP 服务器、用户 Skill、完整逐轮执行策略/资源摘要、AI SDK 生命周期指标、Agent 运行检查点、变更审批和权限审计的持久化需求
+ * [OUTPUT]: Drizzle SQLite 表、索引和可推导行类型，包括不含 Markdown 正文的统一内容控制层、应用级偏好、用户 Skill 安装目录、可恢复任务状态、逐轮 RunPolicy/资源上下文摘要与完成原因/Token/耗时指标（AI Key 与 MCP 凭据仅保存 safeStorage 密文）
  * [POS]: 数据库结构的类型事实源；不保存 Markdown 正文
  * [DOC]: docs/architecture/database.md
  *
@@ -14,6 +14,12 @@ import { sql } from "drizzle-orm"
 import { check, index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core"
 
 const createdAt = integer("created_at", { mode: "timestamp_ms" }).notNull().default(sql`(unixepoch() * 1000)`)
+
+export const appSettings = sqliteTable("app_settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+})
 
 export const contentLibraries = sqliteTable(
   "content_libraries",
@@ -330,6 +336,32 @@ export const researchEvidence = sqliteTable(
   ],
 )
 
+export const researchSourceRecommendations = sqliteTable(
+  "research_source_recommendations",
+  {
+    id: text("id").primaryKey(),
+    requestId: text("request_id")
+      .notNull()
+      .references(() => researchRuns.requestId, { onDelete: "cascade" }),
+    sourceId: text("source_id")
+      .notNull()
+      .references(() => researchSources.id, { onDelete: "cascade" }),
+    reason: text("reason").notNull(),
+    status: text("status", { enum: ["recommended", "saved", "dismissed"] })
+      .notNull()
+      .default("recommended"),
+    savedDocumentId: text("saved_document_id").references(() => documentIndex.id, {
+      onDelete: "set null",
+    }),
+    createdAt,
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("research_source_recommendations_run_source_unique").on(table.requestId, table.sourceId),
+    index("research_source_recommendations_run_status_idx").on(table.requestId, table.status),
+  ],
+)
+
 export const agentChangeProposals = sqliteTable(
   "agent_change_proposals",
   {
@@ -508,6 +540,8 @@ export const userSkillConfigs = sqliteTable(
 
 export type Workspace = typeof workspaces.$inferSelect
 export type NewWorkspace = typeof workspaces.$inferInsert
+export type AppSettingRecord = typeof appSettings.$inferSelect
+export type NewAppSettingRecord = typeof appSettings.$inferInsert
 export type ContentLibrary = typeof contentLibraries.$inferSelect
 export type NewContentLibrary = typeof contentLibraries.$inferInsert
 export type IndexedDocument = typeof documentIndex.$inferSelect
@@ -522,6 +556,7 @@ export type ResearchRunRecord = typeof researchRuns.$inferSelect
 export type ResearchQuestionRecord = typeof researchQuestions.$inferSelect
 export type ResearchSourceRecord = typeof researchSources.$inferSelect
 export type ResearchEvidenceRecord = typeof researchEvidence.$inferSelect
+export type ResearchSourceRecommendationRecord = typeof researchSourceRecommendations.$inferSelect
 export type AgentChangeProposal = typeof agentChangeProposals.$inferSelect
 export type TaskResourceBindingRecord = typeof taskResourceBindings.$inferSelect
 export type ArtifactRecord = typeof artifacts.$inferSelect

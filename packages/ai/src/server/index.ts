@@ -48,6 +48,7 @@ export {
   publicResearchToolOutput,
   researchEvidenceInputSchema,
   researchFinalizeInputSchema,
+  researchRecommendSourcesInputSchema,
   researchReadSourceInputSchema,
 } from "./research-tools"
 export {

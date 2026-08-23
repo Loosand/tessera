@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 隐式执行模式/创作方式的任务快照、可选工作区/当前文档草稿、Artifact、页面或侧栏表面、导航回调、AI 模型与 Electron useChat Transport
- * [OUTPUT]: 主任务与文档侧栏共用的首次发送懒创建、显式文档上下文、Artifact 导航、同源 RunPolicy 预检、流式恢复、Agent Diff 审批和持续保存会话表面
+ * [INPUT]: 隐式执行模式/创作方式的任务快照、可选工作区/当前文档草稿、Artifact、页面或侧栏表面、导航回调、AI 模型与 Electron useChat/运行解释桥
+ * [OUTPUT]: 主任务与文档侧栏共用的首次发送懒创建、显式文档上下文、Artifact 导航、同源 RunPolicy 预检、流式恢复、按需运行解释、Agent Diff 审批和持续保存会话表面
  * [POS]: Tessera 主任务页与文档 AI 侧栏共用的单一对话实现
  * [DOC]: design.md、docs/architecture/unified-creation-agent.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -20,6 +20,7 @@ import {
   type UIMessage,
   hasPendingTaskUserInput,
   hasTaskRunError,
+  isUIMessageToolPart,
   toTaskMessages,
   useElectronChat,
 } from "@tessera/ai/react"
@@ -28,6 +29,7 @@ import {
   REQUEST_USER_INPUT_TOOL_NAME,
   type TaskArtifact,
   type TaskMessage,
+  type TaskResearchSaveSourcesResult,
   type TaskSessionStatus,
 } from "@tessera/contracts"
 import { PanelLeftOpenIcon, Settings01Icon } from "@tessera/design-system/components/icons"
@@ -151,7 +153,7 @@ function shouldOmitRunningAssistantTail(message: UIMessage | undefined) {
   if (message.parts.length === 0) return true
   return message.parts.some((part) => {
     if (part.type === "text" || part.type === "reasoning") return part.state === "streaming"
-    if ((part.type === "dynamic-tool" || part.type.startsWith("tool-")) && "state" in part) {
+    if (isUIMessageToolPart(part)) {
       return part.state === "input-streaming" || part.state === "input-available"
     }
     return false
@@ -230,6 +232,32 @@ export function TaskPage({
     (approvalId: string) => {
       if (!window.tessera) return Promise.reject(new Error("桌面 Agent 服务不可用。"))
       return window.tessera.readAgentChangePreview(task.id, approvalId)
+    },
+    [task.id],
+  )
+  const readResearchNotebook = useCallback(
+    (requestId: string) => {
+      if (!window.tessera) return Promise.reject(new Error("桌面研究服务不可用。"))
+      return window.tessera.readResearchNotebook(task.id, requestId)
+    },
+    [task.id],
+  )
+  const readTaskRun = useCallback(
+    (requestId: string) => {
+      if (!window.tessera) return Promise.reject(new Error("桌面运行日志服务不可用。"))
+      return window.tessera.readTaskRun(task.id, requestId)
+    },
+    [task.id],
+  )
+  const saveResearchRecommendations = useCallback(
+    async (requestId: string, sourceIds: string[]): Promise<TaskResearchSaveSourcesResult> => {
+      if (!window.tessera) return { ok: false, error: "桌面研究服务不可用。" }
+      const result = await window.tessera.saveResearchSources(task.id, requestId, sourceIds)
+      const artifact = result.ok ? result.artifact : null
+      if (artifact) {
+        setArtifacts((current) => [artifact, ...current.filter((candidate) => candidate.id !== artifact.id)])
+      }
+      return result
     },
     [task.id],
   )
@@ -537,6 +565,9 @@ export function TaskPage({
                         loadAgentChangePreview={loadAgentChangePreview}
                         onOpenDocument={onOpenDocument}
                         onRegenerate={() => void chat.regenerate({ messageId: message.id })}
+                        onReadResearchNotebook={readResearchNotebook}
+                        onReadTaskRun={readTaskRun}
+                        onSaveResearchRecommendations={saveResearchRecommendations}
                         onToolApproval={(id, approved) =>
                           chat.addToolApprovalResponse({
                             id,

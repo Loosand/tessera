@@ -10,7 +10,12 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import type { UIMessage } from "@tessera/ai/react"
+import {
+  type UIMessagePart,
+  type UIMessageToolPart,
+  isUIMessageToolPart,
+  uiMessageToolName,
+} from "@tessera/ai/react"
 import {
   PUBLISH_RESEARCH_PLAN_TOOL_NAME,
   type TaskResearchPlanInput,
@@ -20,15 +25,10 @@ import { ListChecksIcon } from "@tessera/design-system/components/icons"
 import { Icon } from "@tessera/design-system/components/ui/icon"
 import React from "react"
 
-type MessagePart = UIMessage["parts"][number]
-export type ResearchPlanToolPart = Extract<MessagePart, { type: "dynamic-tool" | `tool-${string}` }>
+export type ResearchPlanToolPart = UIMessageToolPart
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
-}
-
-function toolName(part: ResearchPlanToolPart) {
-  return part.type === "dynamic-tool" ? part.toolName : part.type.slice("tool-".length)
 }
 
 function isResearchQuestion(value: unknown): value is TaskResearchQuestion {
@@ -58,13 +58,8 @@ export function parseResearchPlan(value: unknown): TaskResearchPlanInput | null 
   }
 }
 
-export function isResearchPlanToolPart(part: MessagePart): part is ResearchPlanToolPart {
-  if (!isToolMessagePart(part)) return false
-  return toolName(part) === PUBLISH_RESEARCH_PLAN_TOOL_NAME
-}
-
-function isToolMessagePart(part: MessagePart): part is ResearchPlanToolPart {
-  return part.type === "dynamic-tool" || part.type.startsWith("tool-")
+export function isResearchPlanToolPart(part: UIMessagePart): part is ResearchPlanToolPart {
+  return isUIMessageToolPart(part) && uiMessageToolName(part) === PUBLISH_RESEARCH_PLAN_TOOL_NAME
 }
 
 type ResearchPlanPartProps = {

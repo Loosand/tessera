@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 主进程提供的研究领域服务、当前运行的持久化进度与 AI SDK 工具执行上下文
- * [OUTPUT]: 发布计划、受限网页深读、证据登记、领域完成检查工具，以及不会把网页正文写入公共消息的输出裁剪
+ * [OUTPUT]: 发布计划、受限网页深读、证据登记、来源推荐、领域完成检查工具，以及不会把网页正文写入公共消息的输出裁剪
  * [POS]: 统一 ToolLoopAgent 与主进程可信研究服务之间的窄契约适配层
  * [DOC]: docs/architecture/research-workflow.md
  *
@@ -14,6 +14,7 @@ import {
   FINALIZE_RESEARCH_TOOL_NAME,
   PUBLISH_RESEARCH_PLAN_TOOL_NAME,
   READ_WEB_SOURCE_TOOL_NAME,
+  RECOMMEND_RESEARCH_SOURCES_TOOL_NAME,
   RECORD_RESEARCH_EVIDENCE_TOOL_NAME,
   TASK_RESEARCH_PHASES,
   TASK_RESEARCH_SOURCE_STATUSES,
@@ -24,6 +25,8 @@ import {
   type TaskResearchPlanInput,
   type TaskResearchPlanOutput,
   type TaskResearchProgress,
+  type TaskResearchRecommendSourcesInput,
+  type TaskResearchRecommendSourcesOutput,
   type TaskResearchReadSourceInput,
   type TaskResearchReadSourceOutput,
 } from "@tessera/contracts"
@@ -43,6 +46,7 @@ const researchProgressSchema = z.strictObject({
   }),
   sourceCounts: z.record(z.enum(TASK_RESEARCH_SOURCE_STATUSES), z.number().int().nonnegative()),
   evidenceCount: z.number().int().nonnegative(),
+  recommendationCount: z.number().int().nonnegative(),
 })
 
 export const researchReadSourceInputSchema = z.strictObject({
@@ -51,6 +55,7 @@ export const researchReadSourceInputSchema = z.strictObject({
 })
 
 export const researchReadSourceOutputSchema = z.strictObject({
+  requestId: z.string().min(1),
   sourceId: z.string().min(1),
   status: z.enum(["read", "unusable"]),
   finalUrl: z.url(),
@@ -92,8 +97,37 @@ export const researchEvidenceInputSchema = z.strictObject({
 })
 
 export const researchEvidenceOutputSchema = z.strictObject({
+  requestId: z.string().min(1),
   evidenceId: z.string().min(1),
   status: z.literal("recorded"),
+})
+
+export const researchRecommendSourcesInputSchema = z.strictObject({
+  recommendations: z
+    .array(
+      z.strictObject({
+        sourceId: z.string().min(1).max(200).describe("read-web-source 返回的已读来源 ID"),
+        reason: z.string().min(1).max(1_000).describe("为什么这份材料值得用户长期保存"),
+      }),
+    )
+    .min(1)
+    .max(8),
+})
+
+export const researchRecommendSourcesOutputSchema = z.strictObject({
+  status: z.literal("recommended"),
+  requestId: z.string().min(1),
+  recommendations: z.array(
+    z.strictObject({
+      sourceId: z.string().min(1),
+      finalUrl: z.url(),
+      title: z.string().optional(),
+      author: z.string().optional(),
+      publishedAt: z.string().optional(),
+      reason: z.string().min(1),
+      saved: z.boolean(),
+    }),
+  ),
 })
 
 export const researchFinalizeInputSchema = z.strictObject({
@@ -114,17 +148,29 @@ export const researchFinalizeInputSchema = z.strictObject({
 export const researchFinalizeOutputSchema = z.discriminatedUnion("status", [
   z.strictObject({
     status: z.literal("blocked"),
+    requestId: z.string().min(1),
     issues: z.array(z.string()),
     progress: researchProgressSchema,
   }),
-  z.strictObject({ status: z.literal("completed"), progress: researchProgressSchema }),
-  z.strictObject({ status: z.literal("partial"), progress: researchProgressSchema }),
+  z.strictObject({
+    status: z.literal("completed"),
+    requestId: z.string().min(1),
+    progress: researchProgressSchema,
+  }),
+  z.strictObject({
+    status: z.literal("partial"),
+    requestId: z.string().min(1),
+    progress: researchProgressSchema,
+  }),
 ])
 
 type ResearchToolContext = Readonly<{ signal: AbortSignal; toolCallId: string }>
 
 export type ResearchAgentTools = Readonly<{
-  finalize: (input: TaskResearchFinalizeInput, context: ResearchToolContext) => Promise<TaskResearchFinalizeOutput>
+  finalize: (
+    input: TaskResearchFinalizeInput,
+    context: ResearchToolContext,
+  ) => Promise<TaskResearchFinalizeOutput>
   getProgress: () => TaskResearchProgress
   publishPlan: (input: TaskResearchPlanInput, context: ResearchToolContext) => Promise<TaskResearchPlanOutput>
   readSource: (
@@ -135,6 +181,10 @@ export type ResearchAgentTools = Readonly<{
     input: TaskResearchEvidenceInput,
     context: ResearchToolContext,
   ) => Promise<TaskResearchEvidenceOutput>
+  recommendSources: (
+    input: TaskResearchRecommendSourcesInput,
+    context: ResearchToolContext,
+  ) => Promise<TaskResearchRecommendSourcesOutput>
 }>
 
 export type ResearchWorkflowController = Readonly<{
@@ -191,6 +241,13 @@ export function createResearchToolSet(
           },
           context(options),
         ),
+    }),
+    [RECOMMEND_RESEARCH_SOURCES_TOOL_NAME]: tool({
+      description:
+        "从已经阅读并进入证据链的来源中推荐值得用户长期保存的材料，说明具体价值。推荐不等于保存；用户稍后在界面中选择后才会写入内容库。",
+      inputSchema: researchRecommendSourcesInputSchema,
+      outputSchema: researchRecommendSourcesOutputSchema,
+      execute: (input, options) => service.recommendSources(input, context(options)),
     }),
     [FINALIZE_RESEARCH_TOOL_NAME]: tool({
       description:

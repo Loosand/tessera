@@ -1,6 +1,6 @@
 /**
- * [INPUT]: Electron 生命周期、共享 IPC 契约、AI Chat/Agent/Skill 配置、AI SDK 开发期日志、用户 Skill 扫描安装服务、可信研究服务、混合内容库、Agent 变更服务、模型服务、safeStorage 与 Tessera 核心服务
- * [OUTPUT]: 受限研究/工作区/MCP Agent 工具、托管内容库/Artifact 查询、内置/用户 Skill 校验后的 SQLite 可恢复后台 AI 运行、官方 AI SDK 日志入口、Diff/MCP 审批、持久化研究/AI/MCP/用户 Skill 配置与扫描会话、关闭保存握手和桌面窗口
+ * [INPUT]: Electron 生命周期、共享 IPC 契约、AI Chat/Agent/Skill 配置、AI SDK 开发期日志、用户 Skill 扫描安装服务、研究网络偏好、可信研究服务、混合内容库、Agent 变更服务、模型服务、safeStorage 与 Tessera 核心服务
+ * [OUTPUT]: 可选系统代理/直连的受限研究 Reader、显式研究续跑与来源保存、顺序安全的流增量合并、工作区/MCP Agent 工具、托管内容库/Artifact 查询、内置/用户 Skill 校验后的 SQLite 可恢复后台 AI 运行、版本化公开错误与脱敏运行解释、官方 AI SDK 日志入口、Diff/MCP 审批、持久化研究/AI/MCP/用户 Skill 配置与扫描会话、关闭保存握手和桌面窗口
  * [POS]: Electron 主进程入口与平台安全边界
  * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/ai-observability.md、docs/architecture/database.md、docs/architecture/mcp.md、docs/architecture/research-workflow.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md、docs/architecture/unified-creation-agent.md
  *
@@ -32,6 +32,8 @@ import {
   type DocumentSnapshot,
   type DocumentWriteResult,
   IPC_CHANNELS,
+  type ResearchNetworkMode,
+  type TaskRunErrorDataV1,
   type TaskRunResourceSummary,
   type WorkspaceDirectoryEntry,
   type WorkspaceDocumentEntry,
@@ -43,18 +45,18 @@ import { createAppInfo } from "@tessera/core"
 import {
   type DatabaseClient,
   appendTaskRunEvent,
-  findLatestTaskRun,
   findMostRecentWorkspace,
+  findTaskRun,
   findWorkspaceById,
   finishTaskRun,
   hideRecentWorkspace,
   listRecentWorkspaces,
-  listRunningTaskRuns,
   openDatabase,
+  resumeResearchRun,
   saveTaskResourceBinding,
   saveWorkspace,
-  startTaskRun,
   startResearchRun,
+  startTaskRun,
 } from "@tessera/database"
 import {
   BrowserWindow,
@@ -67,7 +69,9 @@ import {
   safeStorage,
   shell,
 } from "electron"
-import { AgentChangeError, type AgentChangeService, createAgentChangeService } from "./agent-change-service"
+import { type AgentChangeService, createAgentChangeService } from "./agent-change-service"
+import { AiChatChunkCoalescer, coalesceAiChatEvents } from "./ai-chat-chunk-coalescer"
+import { classifyTaskRunError, classifyTaskToolError, taskRunError } from "./ai-chat-error"
 import { parseAiChatStreamEvent } from "./ai-chat-event"
 import { registerAiSdkDevtools, startAiSdkDevtoolsViewer, stopAiSdkDevtoolsViewer } from "./ai-devtools"
 import { type DesktopAiService, createDesktopAiService } from "./ai-service"
@@ -81,10 +85,21 @@ import { handleDesktopInvoke, onDesktopSend } from "./ipc-contract"
 import { McpConfigError, type McpService, createMcpService } from "./mcp-service"
 import { createReadonlyWorkspaceAgentTools } from "./read-only-agent-tools"
 import {
+  DEFAULT_RESEARCH_NETWORK_MODE,
+  readResearchNetworkMode,
+  saveResearchNetworkMode,
+} from "./research-network-settings"
+import {
   type DesktopResearchService,
   createDesktopResearchService,
+  readResearchNotebook,
+  researchContinuationContext,
   researchFinishIssue,
+  researchWritingContext,
 } from "./research-service"
+import { saveResearchSourceSelection } from "./research-source-save-service"
+import { inspectTaskRun } from "./task-run-inspection"
+import { findUnpersistedLatestTaskRun, recoverInterruptedTaskRuns } from "./task-run-recovery"
 import { type DesktopTaskService, createDesktopTaskService } from "./task-service"
 import { UserSkillError, type UserSkillService, createUserSkillService } from "./user-skill-service"
 
@@ -167,6 +182,11 @@ function requireContentLibraryService(): ContentLibraryService {
   return contentLibraryService
 }
 
+function requireDatabaseClient(): DatabaseClient {
+  if (!databaseClient) throw new Error("本地数据库尚未就绪。")
+  return databaseClient
+}
+
 function notifyAiProviderConfigsChanged() {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.webContents.isDestroyed()) window.webContents.send(IPC_CHANNELS.aiProviderConfigsChanged)
@@ -190,6 +210,18 @@ function resolveAiChatInput(input: AiChatStartInput) {
     throw new AiProviderConfigError("对话请求 ID 无效。")
   }
   if (
+    input.resumeResearchRequestId &&
+    (input.resumeResearchRequestId.length > 128 || !/^[\w-]+$/u.test(input.resumeResearchRequestId))
+  ) {
+    throw new AiProviderConfigError("续研请求 ID 无效。")
+  }
+  if (
+    input.regenerateMessageId &&
+    (input.regenerateMessageId.length > 512 || !input.regenerateMessageId.trim())
+  ) {
+    throw new AiProviderConfigError("重新生成消息 ID 无效。")
+  }
+  if (
     input.currentDocumentPath &&
     (input.currentDocumentPath.length > 1_024 ||
       isAbsolute(input.currentDocumentPath) ||
@@ -203,6 +235,8 @@ function resolveAiChatInput(input: AiChatStartInput) {
 function summarizeTaskRunResources(
   input: AiChatStartInput,
   workspace: WorkspaceInfo | null,
+  researchNetworkMode: ResearchNetworkMode | null,
+  resumedResearchRequestId: string | null,
 ): TaskRunResourceSummary {
   return {
     attachmentCount: input.messages.reduce(
@@ -210,6 +244,8 @@ function summarizeTaskRunResources(
       0,
     ),
     currentDocumentPath: workspace ? (input.currentDocumentPath ?? null) : null,
+    researchNetworkMode,
+    resumedResearchRequestId,
     workspaceId: workspace?.id ?? null,
     workspaceName: workspace?.name ?? null,
   }
@@ -296,7 +332,7 @@ async function streamAiTask(
   workspace: WorkspaceInfo | null,
   options: Pick<
     Parameters<typeof streamAiAgent>[1],
-    "abortSignal" | "onChunk" | "onRunMetrics" | "researchTools" | "skill"
+    "abortSignal" | "onChunk" | "onRunMetrics" | "researchContext" | "researchTools" | "skill"
   >,
 ) {
   const workspaceTools = workspace
@@ -358,28 +394,29 @@ async function streamAiTask(
   })
 }
 
-function recoverInterruptedAiRuns(client: DatabaseClient) {
-  for (const run of listRunningTaskRuns(client)) {
-    const sequence = run.lastSequence + 1
-    const event: AiChatStreamEvent = {
-      requestId: run.requestId,
-      taskId: run.taskId,
-      sequence,
-      chunk: {
-        type: "error",
-        errorText: "应用上次运行时意外中断，已恢复中断前的可见进度；磁盘写入不会自动重放，请继续或重试。",
-      },
+function aiChatErrorChunk(failure: TaskRunErrorDataV1): AiChatStreamChunk {
+  return { type: "error", errorText: failure.message, failure }
+}
+
+function normalizeAiChatErrorChunk(chunk: AiChatStreamChunk): AiChatStreamChunk {
+  if (chunk.type !== "error" || chunk.failure) return chunk
+  return aiChatErrorChunk(classifyTaskRunError(chunk.errorText, "stream"))
+}
+
+function normalizeAiChatToolErrorChunk(chunk: AiChatStreamChunk, knownToolName?: string): AiChatStreamChunk {
+  if (chunk.type === "tool-input-error" && !chunk.failure) {
+    return {
+      ...chunk,
+      failure: classifyTaskToolError(chunk.errorText, chunk.toolCallId, chunk.toolName),
     }
-    appendTaskRunEvent(client, {
-      requestId: run.requestId,
-      sequence,
-      payloadJson: JSON.stringify(event),
-    })
-    finishTaskRun(client, run.requestId, "interrupted", {
-      finishReason: "interrupted",
-      durationMs: Math.max(0, Date.now() - run.startedAt.getTime()),
-    })
   }
+  if (chunk.type === "tool-output-error" && !chunk.failure) {
+    return {
+      ...chunk,
+      failure: classifyTaskToolError(chunk.errorText, chunk.toolCallId, knownToolName ?? "unknown-tool"),
+    }
+  }
+  return chunk
 }
 
 function abortAiChatsForWebContents(webContentsId: number) {
@@ -388,16 +425,6 @@ function abortAiChatsForWebContents(webContentsId: number) {
     chat.abortController.abort("窗口已关闭")
     releaseAiChatRun(chat)
   }
-}
-
-function aiChatErrorMessage(error: unknown) {
-  if (
-    error instanceof AiProviderConfigError ||
-    error instanceof AgentChangeError ||
-    error instanceof ContentLibraryError
-  )
-    return error.message
-  return "模型请求失败，请检查供应商配置、模型状态与网络连接。"
 }
 
 function hasErrorCode(error: unknown, code: string) {
@@ -805,6 +832,20 @@ function registerIpcHandlers() {
     }
   })
   handleDesktopInvoke(IPC_CHANNELS.aiProviderListConfigs, () => requireDesktopAiService().listConfigs())
+  handleDesktopInvoke(IPC_CHANNELS.researchNetworkGet, () => readResearchNetworkMode(requireDatabaseClient()))
+  handleDesktopInvoke(IPC_CHANNELS.researchNetworkSet, (_event, mode) =>
+    saveResearchNetworkMode(requireDatabaseClient(), mode),
+  )
+  handleDesktopInvoke(IPC_CHANNELS.researchNotebookRead, (_event, taskId, requestId) =>
+    readResearchNotebook(requireDatabaseClient(), taskId, requestId),
+  )
+  handleDesktopInvoke(IPC_CHANNELS.researchSourcesSave, async (_event, taskId, requestId, sourceIds) => {
+    return saveResearchSourceSelection(requireDatabaseClient(), requireContentLibraryService(), {
+      taskId,
+      requestId,
+      sourceIds,
+    })
+  })
   handleDesktopInvoke(IPC_CHANNELS.aiProviderSaveConfig, (_event, input) => {
     try {
       const config = requireDesktopAiService().saveConfig(input)
@@ -977,6 +1018,15 @@ function registerIpcHandlers() {
       const loadedSkill = await requireUserSkillService().load(runtimeInput.skillId)
       if (!databaseClient) throw new AiProviderConfigError("本地任务数据库尚未就绪。")
       const runDatabase = databaseClient
+      const regeneratedMessageRequestId =
+        runtimeInput.runPolicy.skillId === "research" && input.regenerateMessageId
+          ? requireDesktopTaskService()
+              .readIfExists(input.taskId)
+              ?.messages.find((message) => message.id === input.regenerateMessageId)?.metadata?.requestId
+          : undefined
+      const resumedResearchRequestId = input.resumeResearchRequestId ?? regeneratedMessageRequestId ?? null
+      const researchNetworkMode =
+        runtimeInput.runPolicy.skillId === "research" ? readResearchNetworkMode(runDatabase) : null
       const abortController = new AbortController()
       const runStartedAt = new Date()
       const webContentsId = event.sender.id
@@ -1010,22 +1060,47 @@ function registerIpcHandlers() {
         reasoning: runtimeInput.runPolicy.reasoning,
         webSearch: runtimeInput.runPolicy.webSearch,
         policyJson: JSON.stringify(runtimeInput.runPolicy),
-        resourceSummaryJson: JSON.stringify(summarizeTaskRunResources(input, workspace)),
+        resourceSummaryJson: JSON.stringify(
+          summarizeTaskRunResources(input, workspace, researchNetworkMode, resumedResearchRequestId),
+        ),
         startedAt: runStartedAt,
       })
       taskRunStarted = true
+      requireDesktopTaskService().setRunStatus(input.taskId, "running")
       let researchService: DesktopResearchService | null = null
+      let continuedResearchContext: string | null = null
       if (runtimeInput.runPolicy.skillId === "research") {
         startResearchRun(runDatabase, {
           requestId: input.requestId,
           taskId: input.taskId,
           startedAt: runStartedAt,
         })
+        if (resumedResearchRequestId) {
+          const previousRun = findTaskRun(runDatabase, resumedResearchRequestId)
+          if (
+            !previousRun ||
+            previousRun.taskId !== input.taskId ||
+            previousRun.skillId !== "research" ||
+            previousRun.status === "running"
+          ) {
+            throw new AiProviderConfigError("找不到可续研的上一轮研究运行。")
+          }
+          resumeResearchRun(runDatabase, {
+            fromRequestId: resumedResearchRequestId,
+            taskId: input.taskId,
+            toRequestId: input.requestId,
+          })
+          continuedResearchContext = researchContinuationContext(runDatabase, input.taskId, input.requestId)
+        }
         researchService = createDesktopResearchService(runDatabase, {
           requestId: input.requestId,
-          reader: createElectronResearchReader(),
+          reader: createElectronResearchReader(researchNetworkMode ?? DEFAULT_RESEARCH_NETWORK_MODE),
         })
       }
+      const writingResearchContext =
+        runtimeInput.runPolicy.skillId === "writing"
+          ? researchWritingContext(runDatabase, input.taskId)
+          : null
       recordTaskRunResourceBindings(runDatabase, input, workspace)
 
       const pendingToolInputs = new Map<string, { input: unknown; toolName: string }>()
@@ -1048,9 +1123,15 @@ function registerIpcHandlers() {
                 outcome: researchOutcome,
               })
             : null
-        const chunk: AiChatStreamChunk = researchIssue
-          ? { type: "error", errorText: researchIssue }
-          : incomingChunk
+        const normalizedRunChunk = normalizeAiChatErrorChunk(incomingChunk)
+        const chunk = researchIssue
+          ? aiChatErrorChunk(taskRunError("tool-failed", "stream", researchIssue))
+          : normalizeAiChatToolErrorChunk(
+              normalizedRunChunk,
+              normalizedRunChunk.type === "tool-output-error"
+                ? pendingToolInputs.get(normalizedRunChunk.toolCallId)?.toolName
+                : undefined,
+            )
         if (chunk.type === "tool-input-available") {
           pendingToolInputs.set(chunk.toolCallId, { input: chunk.input, toolName: chunk.toolName })
           if (chunk.toolName.includes("web_search") || chunk.toolName.includes("web-search")) {
@@ -1107,33 +1188,49 @@ function registerIpcHandlers() {
         if (!event.sender.isDestroyed()) event.sender.send(IPC_CHANNELS.aiChatEvent, streamEvent)
       }
 
+      const activeResearchContext = writingResearchContext ?? continuedResearchContext
+      const chunkCoalescer = new AiChatChunkCoalescer(emit)
       void streamAiTask(runtimeInput, workspace, {
         abortSignal: abortController.signal,
-        onChunk: emit,
+        onChunk: (chunk) => chunkCoalescer.push(chunk),
         onRunMetrics: (metrics) => {
           runMetrics = metrics
         },
+        ...(activeResearchContext ? { researchContext: activeResearchContext } : {}),
         ...(researchService ? { researchTools: researchService satisfies ResearchAgentTools } : {}),
         ...(loadedSkill ? { skill: loadedSkill } : {}),
       })
         .catch(async (error) => {
+          await chunkCoalescer.flush()
           const lastType = run.events.at(-1)?.chunk.type
           if (lastType === "finish" || lastType === "abort" || lastType === "error") return
           if (abortController.signal.aborted) {
             await emit({ type: "abort", reason: String(abortController.signal.reason ?? "生成已停止") })
           } else {
-            await emit({ type: "error", errorText: aiChatErrorMessage(error) })
+            await emit(aiChatErrorChunk(classifyTaskRunError(error, "stream")))
           }
         })
         .finally(() => {
           run.active = false
           const lastType = run.events.at(-1)?.chunk.type
+          const awaitingUserInput = [...pendingToolInputs.values()].some(
+            (pending) => pending.toolName === "request-user-input",
+          )
+          const taskStatus =
+            lastType === "finish"
+              ? awaitingUserInput
+                ? "waiting-input"
+                : "completed"
+              : lastType === "abort"
+                ? "cancelled"
+                : "failed"
           finishTaskRun(
             runDatabase,
             input.requestId,
             lastType === "finish" ? "completed" : lastType === "abort" ? "cancelled" : "failed",
             taskRunCompletion(runMetrics, lastType, Math.max(0, Date.now() - runStartedAt.getTime())),
           )
+          requireDesktopTaskService().setRunStatus(input.taskId, taskStatus)
           if (activeAiChats.get(input.requestId) === run) activeAiChats.delete(input.requestId)
           if (aiChatRunsByTask.get(input.taskId) !== run) return
           run.retentionTimer = setTimeout(() => releaseAiChatRun(run), AI_CHAT_RUN_RETENTION_MS)
@@ -1142,10 +1239,24 @@ function registerIpcHandlers() {
       initializingRun = null
       return { ok: true }
     } catch (error) {
+      const failure = classifyTaskRunError(error, "start")
       if (initializingRun) {
         initializingRun.active = false
         if (taskRunStarted && initializingRunDatabase && initializingRunStartedAt) {
           try {
+            const sequence = (initializingRun.events.at(-1)?.sequence ?? 0) + 1
+            const streamEvent: AiChatStreamEvent = {
+              requestId: initializingRun.requestId,
+              taskId: initializingRun.taskId,
+              sequence,
+              chunk: aiChatErrorChunk(failure),
+            }
+            initializingRun.events.push(streamEvent)
+            appendTaskRunEvent(initializingRunDatabase, {
+              requestId: initializingRun.requestId,
+              sequence,
+              payloadJson: JSON.stringify(streamEvent),
+            })
             finishTaskRun(initializingRunDatabase, initializingRun.requestId, "failed", {
               ...taskRunCompletion(
                 null,
@@ -1153,16 +1264,17 @@ function registerIpcHandlers() {
                 Math.max(0, Date.now() - initializingRunStartedAt.getTime()),
               ),
             })
+            requireDesktopTaskService().setRunStatus(initializingRun.taskId, "failed")
           } catch {
             // 原始初始化异常优先返回给调用方；下次启动仍会把未收尾的运行恢复为 interrupted。
           }
         }
         releaseAiChatRun(initializingRun)
       }
-      return { ok: false, error: aiChatErrorMessage(error) }
+      return { ok: false, error: failure }
     }
   })
-  handleDesktopInvoke(IPC_CHANNELS.aiChatResume, (event, taskId) => {
+  handleDesktopInvoke(IPC_CHANNELS.aiChatResume, async (event, taskId) => {
     try {
       const run = aiChatRunsByTask.get(taskId)
       if (run && run.webContentsId === event.sender.id) {
@@ -1180,8 +1292,8 @@ function registerIpcHandlers() {
       }
       const task = requireDesktopTaskService().readIfExists(taskId)
       if (!task) return { ok: true, run: null }
-      if (task.status !== "running" || !databaseClient) return { ok: true, run: null }
-      const persisted = findLatestTaskRun(databaseClient, taskId)
+      if (!databaseClient) return { ok: true, run: null }
+      const persisted = findUnpersistedLatestTaskRun(databaseClient, task)
       if (!persisted) return { ok: true, run: null }
       if (!isAiProviderId(persisted.providerId)) throw new Error("任务使用了不支持的 AI 供应商。")
       return {
@@ -1189,14 +1301,19 @@ function registerIpcHandlers() {
         run: {
           active: persisted.status === "running",
           configId: persisted.configId ?? persisted.providerId,
-          events: persisted.events.map((record) => parseAiChatStreamEvent(record.payloadJson)),
+          events: await coalesceAiChatEvents(
+            persisted.events.map((record) => parseAiChatStreamEvent(record.payloadJson)),
+          ),
           modelId: persisted.modelId,
           providerId: persisted.providerId,
           requestId: persisted.requestId,
         },
       }
-    } catch {
-      return { ok: false, error: "无法恢复这个任务的生成流。" }
+    } catch (error) {
+      return {
+        ok: false,
+        error: classifyTaskRunError(error, "resume", "无法恢复这个任务的生成流。"),
+      }
     }
   })
   handleDesktopInvoke(IPC_CHANNELS.agentChangePreview, (event, taskId, approvalId) => {
@@ -1309,6 +1426,12 @@ function registerIpcHandlers() {
   })
   handleDesktopInvoke(IPC_CHANNELS.taskRead, (_event, taskId) => {
     return requireDesktopTaskService().read(taskId)
+  })
+  handleDesktopInvoke(IPC_CHANNELS.taskRunRead, (_event, taskId, requestId) => {
+    requireDesktopTaskService().read(taskId)
+    const run = findTaskRun(requireDatabaseClient(), requestId)
+    if (!run || run.taskId !== taskId) return null
+    return inspectTaskRun(run)
   })
   handleDesktopInvoke(IPC_CHANNELS.taskSave, (event, input) => {
     const workspace = activeWorkspaces.get(event.sender.id)?.workspace ?? null
@@ -1558,7 +1681,9 @@ app.whenReady().then(async () => {
     onChanged: notifyUserSkillsChanged,
     trashDirectory: (path) => shell.trashItem(path),
   })
-  recoverInterruptedAiRuns(databaseClient)
+  recoverInterruptedTaskRuns(databaseClient, (taskId, status) =>
+    requireDesktopTaskService().setRunStatus(taskId, status),
+  )
   registerIpcHandlers()
   createWindow(restoreMostRecentWorkspace())
 

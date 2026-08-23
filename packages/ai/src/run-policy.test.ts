@@ -46,7 +46,7 @@ describe("统一任务 RunPolicy", () => {
     })
   })
 
-  it("按模型上下文窗口放宽研究循环保险丝，而不设置应用侧输出额度", () => {
+  it("按模型上下文窗口放宽研究循环保险丝，并透传模型原生输出上限", () => {
     expect(
       resolveTaskRunPolicy({
         baseUrl: "https://api.deepseek.com",
@@ -55,7 +55,7 @@ describe("统一任务 RunPolicy", () => {
         providerId: "deepseek",
         skillId: "research",
       }).policy.limits,
-    ).toEqual({ maxOutputTokens: null, maxSteps: 64, timeoutMs: 1_800_000 })
+    ).toEqual({ maxOutputTokens: 393_216, maxSteps: 64, timeoutMs: 1_800_000 })
   })
 
   it("问答模式关闭联网并收窄到工作区只读工具", () => {

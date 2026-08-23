@@ -1,6 +1,6 @@
 /**
  * [INPUT]: SQLite 中持久化的未知 AI 流事件 JSON
- * [OUTPUT]: 通过字段级校验的 AiChatStreamEvent，拒绝损坏或过期的恢复数据
+ * [OUTPUT]: 通过字段级校验且兼容旧文本错误的 AiChatStreamEvent，拒绝损坏、未知运行/工具错误码或过期的恢复数据
  * [POS]: 数据库运行检查点与类型化 Electron 恢复通道之间的运行时边界
  * [DOC]: docs/architecture/database.md、docs/architecture/task-navigation.md
  *
@@ -10,7 +10,12 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import type { AiChatStreamChunk, AiChatStreamEvent } from "@tessera/contracts"
+import {
+  type AiChatStreamChunk,
+  type AiChatStreamEvent,
+  isTaskRunErrorDataV1,
+  isTaskToolErrorDataV1,
+} from "@tessera/contracts"
 
 type UnknownRecord = Record<string, unknown>
 
@@ -78,12 +83,17 @@ export function isAiChatStreamChunk(value: unknown): value is AiChatStreamChunk 
         hasString(value, "toolName") &&
         "input" in value &&
         hasString(value, "errorText") &&
+        (value.failure === undefined || isTaskToolErrorDataV1(value.failure)) &&
         hasOptionalString(value, "title")
       )
     case "tool-output-available":
       return hasString(value, "toolCallId") && "output" in value
     case "tool-output-error":
-      return hasString(value, "toolCallId") && hasString(value, "errorText")
+      return (
+        hasString(value, "toolCallId") &&
+        hasString(value, "errorText") &&
+        (value.failure === undefined || isTaskToolErrorDataV1(value.failure))
+      )
     case "tool-output-denied":
       return hasString(value, "toolCallId")
     case "tool-approval-request":
@@ -107,7 +117,9 @@ export function isAiChatStreamChunk(value: unknown): value is AiChatStreamChunk 
     case "abort":
       return hasOptionalString(value, "reason")
     case "error":
-      return hasString(value, "errorText")
+      return (
+        hasString(value, "errorText") && (value.failure === undefined || isTaskRunErrorDataV1(value.failure))
+      )
     default:
       return false
   }

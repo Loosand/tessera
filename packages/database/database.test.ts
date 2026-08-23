@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 内存/临时磁盘 SQLite 客户端与前向迁移
- * [OUTPUT]: 迁移幂等性、统一内容控制层、研究证据链、工作区最近项、通用任务会话、AI/MCP 加密配置恢复、任务运行观测指标和级联删除的回归验证
+ * [OUTPUT]: 迁移幂等性、统一内容控制层、研究证据链、工作区最近项、通用任务会话、AI/MCP 加密配置恢复、任务运行单调检查点/观测指标和级联删除的回归验证
  * [POS]: 数据库包不依赖磁盘状态的基础集成测试
  * [DOC]: docs/architecture/database.md
  *
@@ -21,6 +21,7 @@ import {
   listAiProviderConfigRecords,
   upsertAiProviderConfigRecord,
 } from "./ai-provider-config-repository"
+import { findAppSetting, upsertAppSetting } from "./app-setting-repository"
 import { openDatabase } from "./client"
 import {
   findActiveContentLibrary,
@@ -48,10 +49,13 @@ import { foundationMigration } from "./migrations/0000-foundation"
 import { taskSessionsMigration } from "./migrations/0002-task-sessions"
 import { researchQuestionPositionMigration } from "./migrations/0015-research-question-position"
 import {
+  findLatestCompletedResearchRun,
   findResearchRun,
   finishResearchRun,
   publishResearchPlan,
+  resumeResearchRun,
   saveResearchEvidence,
+  saveResearchRecommendations,
   saveResearchSource,
   startResearchRun,
 } from "./research-repository"
@@ -92,6 +96,7 @@ describe("本地数据库基建", () => {
       "agent_events",
       "agent_sessions",
       "ai_provider_configs",
+      "app_settings",
       "artifacts",
       "content_libraries",
       "document_index",
@@ -100,6 +105,7 @@ describe("本地数据库基建", () => {
       "research_evidence",
       "research_questions",
       "research_runs",
+      "research_source_recommendations",
       "research_sources",
       "task_messages",
       "task_resource_bindings",
@@ -110,6 +116,28 @@ describe("本地数据库基建", () => {
       "workspace_operations",
       "workspaces",
     ])
+    client.close()
+  })
+
+  test("应用级研究网络偏好可以持久化并幂等更新", () => {
+    const client = openDatabase({ path: ":memory:" })
+    expect(findAppSetting(client, "research-network-mode")).toBeNull()
+
+    upsertAppSetting(client, {
+      key: "research-network-mode",
+      value: "system",
+      updatedAt: new Date(100),
+    })
+    upsertAppSetting(client, {
+      key: "research-network-mode",
+      value: "direct",
+      updatedAt: new Date(200),
+    })
+
+    expect(findAppSetting(client, "research-network-mode")).toMatchObject({
+      value: "direct",
+      updatedAt: new Date(200),
+    })
     client.close()
   })
 
@@ -193,6 +221,19 @@ describe("本地数据库基建", () => {
         locator: "paragraph 8",
       }),
     ).toMatchObject({ sourceId: "source-1", relation: "supports" })
+    expect(
+      saveResearchRecommendations(client, [
+        {
+          id: "recommendation-1",
+          requestId: "run-research",
+          sourceId: "source-1",
+          reason: "一手访谈直接解释现场循环方法，值得作为写作材料长期保留。",
+        },
+      ]),
+    ).toMatchObject({
+      phase: "synthesizing",
+      recommendations: [{ sourceId: "source-1", status: "recommended" }],
+    })
     finishResearchRun(client, {
       requestId: "run-research",
       outcome: "partial",
@@ -214,7 +255,53 @@ describe("本地数据库基建", () => {
       ],
       sources: [{ id: "source-1", status: "read", contentHash: "sha256:content" }],
       evidence: [{ id: "evidence-1", sourceId: "source-1" }],
+      recommendations: [{ sourceId: "source-1", status: "recommended" }],
     })
+    expect(findLatestCompletedResearchRun(client, "task-research")).toMatchObject({
+      requestId: "run-research",
+      outcome: "partial",
+    })
+
+    startTaskRun(client, {
+      requestId: "run-research-resumed",
+      taskId: "task-research",
+      configId: "openai",
+      providerId: "openai",
+      modelId: "gpt-5",
+      mode: "chat",
+      skillId: "research",
+      reasoning: "high",
+      webSearch: true,
+      policyJson: "{}",
+      resourceSummaryJson: '{"resumedResearchRequestId":"run-research"}',
+      startedAt: new Date(200),
+    })
+    startResearchRun(client, {
+      requestId: "run-research-resumed",
+      taskId: "task-research",
+      startedAt: new Date(200),
+    })
+    const resumed = resumeResearchRun(client, {
+      fromRequestId: "run-research",
+      taskId: "task-research",
+      toRequestId: "run-research-resumed",
+    })
+    expect(resumed).toMatchObject({
+      requestId: "run-research-resumed",
+      phase: "completed",
+      outcome: "partial",
+      planVersion: 1,
+      questions: [
+        { questionId: "q1", status: "uncovered" },
+        { questionId: "q2", status: "covered" },
+      ],
+      sources: [{ status: "read", canonicalUrl: "https://example.com/fkj" }],
+      evidence: [{ claim: "FKJ 以现场循环叠加多个乐器声部" }],
+      recommendations: [{ status: "recommended" }],
+    })
+    expect(resumed?.sources[0]?.id).not.toBe("source-1")
+    expect(resumed?.evidence[0]?.sourceId).toBe(resumed?.sources[0]?.id)
+    expect(resumed?.recommendations[0]?.sourceId).toBe(resumed?.sources[0]?.id)
     client.close()
   })
 
@@ -769,6 +856,21 @@ describe("本地数据库基建", () => {
       sequence: 2,
       payloadJson: JSON.stringify({ sequence: 2, chunk: { type: "text-delta", delta: "恢复" } }),
     })
+    appendTaskRunEvent(client, {
+      requestId: "run-request",
+      sequence: 4,
+      payloadJson: JSON.stringify({ sequence: 4, chunk: { type: "text-end" } }),
+    })
+    appendTaskRunEvent(client, {
+      requestId: "run-request",
+      sequence: 4,
+      payloadJson: JSON.stringify({ sequence: 4, chunk: { type: "重复事件不会覆盖" } }),
+    })
+    appendTaskRunEvent(client, {
+      requestId: "run-request",
+      sequence: 3,
+      payloadJson: JSON.stringify({ sequence: 3, chunk: { type: "text-delta", delta: "进度" } }),
+    })
     finishTaskRun(client, "run-request", "completed", {
       sdkCallId: "sdk-call-1",
       finishReason: "stop",
@@ -790,7 +892,7 @@ describe("本地数据库基建", () => {
     expect(findLatestTaskRun(client, "run-task")).toMatchObject({
       requestId: "run-request",
       status: "completed",
-      lastSequence: 2,
+      lastSequence: 4,
       mode: "chat",
       skillId: "research",
       reasoning: "high",
@@ -812,7 +914,7 @@ describe("本地数据库基建", () => {
       modelDurationMs: 1_600,
       toolDurationMs: 300,
       durationMs: 2_100,
-      events: [{ sequence: 1 }, { sequence: 2 }],
+      events: [{ sequence: 1 }, { sequence: 2 }, { sequence: 3 }, { sequence: 4 }],
     })
     client.close()
   })

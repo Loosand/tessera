@@ -10,7 +10,12 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import type { UIMessage } from "@tessera/ai/react"
+import {
+  type UIMessagePart,
+  type UIMessageToolPart,
+  isUIMessageToolPart,
+  uiMessageToolName,
+} from "@tessera/ai/react"
 import {
   REQUEST_USER_INPUT_TOOL_NAME,
   type TaskUserInputAnswer,
@@ -28,8 +33,7 @@ import { Button } from "@tessera/design-system/components/ui/button"
 import { Icon } from "@tessera/design-system/components/ui/icon"
 import React, { useMemo, useState } from "react"
 
-type MessagePart = UIMessage["parts"][number]
-export type UserInputToolPart = Extract<MessagePart, { type: "dynamic-tool" | `tool-${string}` }>
+export type UserInputToolPart = UIMessageToolPart
 
 type DraftAnswer = {
   readonly customText: string
@@ -46,10 +50,6 @@ type UserInputPartProps = {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
-}
-
-function toolName(part: UserInputToolPart) {
-  return part.type === "dynamic-tool" ? part.toolName : part.type.slice("tool-".length)
 }
 
 function isOption(value: unknown): value is TaskUserInputOption {
@@ -121,13 +121,8 @@ function parseTaskUserInputResult(value: unknown): TaskUserInputResult | null {
   return { status: "answered", answers }
 }
 
-export function isUserInputToolPart(part: MessagePart): part is UserInputToolPart {
-  if (!isToolMessagePart(part)) return false
-  return toolName(part) === REQUEST_USER_INPUT_TOOL_NAME
-}
-
-function isToolMessagePart(part: MessagePart): part is UserInputToolPart {
-  return part.type === "dynamic-tool" || part.type.startsWith("tool-")
+export function isUserInputToolPart(part: UIMessagePart): part is UserInputToolPart {
+  return isUIMessageToolPart(part) && uiMessageToolName(part) === REQUEST_USER_INPUT_TOOL_NAME
 }
 
 function emptyDraft(): DraftAnswer {

@@ -86,7 +86,7 @@
 - [ ] 在主进程增加统一的模型解析器，根据配置创建 AI SDK `LanguageModel`。
 - [ ] 对请求日志、IPC 错误和诊断信息做密钥、Authorization Header 与敏感查询参数脱敏。
 - [x] 开发环境使用 AI SDK 官方 Telemetry / DevTools 记录 Agent run、step、tool、usage 与 timing，并通过设置页窄 IPC 按需打开本地 Viewer；生产脱敏日志仍独立规划。
-- [ ] 为缺少密钥、Base URL 非法、模型不存在、供应商超时和限流提供完整的统一错误码；搜索额度耗尽和已知 Web Search 协议校验失败已提供可操作文案。
+- [x] 模型启动、流式与恢复失败使用版本化公开错误，区分配置、认证、限流、超时、不可用、网络与中断，并为未知供应商异常使用脱敏回退；搜索额度耗尽和已知 Web Search 协议校验失败继续提供可操作文案。工具与 IPC 的完整统一仍归入横向任务。
 
 ### 验收门槛
 
@@ -101,10 +101,10 @@
 
 ### 流式协议
 
-- [ ] 在 `packages/contracts` 定义开始、文本增量、完成、失败和取消事件，包含稳定的会话 ID、消息 ID、请求 ID 和递增序号。
+- [x] 在 `packages/contracts` 定义开始、文本增量、完成、失败和取消事件，包含稳定的会话 ID、消息 ID、请求 ID 和递增序号。
 - [ ] 在主进程使用 AI SDK `streamText` 发起生成，并用 `AbortController` 实现停止生成和窗口关闭清理。
 - [x] 为 React `useChat` 实现 Electron `ChatTransport`；渲染层不使用会直接请求外网的 transport。
-- [ ] 处理重复事件、乱序事件、订阅释放、渲染进程刷新和中途取消，避免消息重复或请求悬挂。
+- [x] 处理重复事件、乱序事件、恢复缺口、订阅释放、渲染进程刷新和幂等中途取消，避免消息重复、静默关闭或请求悬挂。
 - [x] 使用合成 `start → text-start → text-delta → text-end → finish` 序列验证 AI SDK React 消费者逐段收到正文，结束后 Part 进入完成状态。
 - [x] 透传供应商明确返回的 `reasoning-start → reasoning-delta → reasoning-end`，按原始 Part 顺序用可折叠、紧凑 Markdown 过程块展示，不合成伪思维链。
 - [x] 供应商只有 reasoning start/end 而没有 delta 时隐藏完成态空块，不用占位文案冒充可展示摘要。
@@ -119,7 +119,7 @@
 - [ ] 明确显示当前供应商与模型；切换模型只影响下一次生成，并记录到对应消息。
 - [x] 确定通用任务会话模型：普通对话允许没有工作区，Agent 会话必须绑定工作区；通过前向迁移落地，不重写已有迁移。
 - [x] 持久化消息内容、reasoning/来源/工具等消息 Part 以及供应商和模型；应用重启后可恢复会话。
-- [x] 将流运行失败写成类型化 `data-task-error` 消息 Part，保留已经收到的助手正文、真实错误与消息内重试入口；
+- [x] 将流运行失败写成带稳定 code、phase 与 retryable 的版本化 `data-task-error` 消息 Part，保留已经收到的助手正文、公开错误与消息内重试入口；
   输入框不再重复显示同一运行错误，重启后失败状态仍可从消息恢复。
 - [x] 使用无服务端副作用的 `request-user-input` 客户端工具只处理核心语义歧义，单次只问一个问题、每个用户请求最多询问一次；持久化等待态，并在回答、跳过或关闭后通过类型化工具输出自动续跑。
 - [x] 研究 Skill 可调用 `publish-research-plan` 发布结构化目标、范围、交付物和问题列表，使用专用组件呈现且不扩大工具权限。
@@ -201,7 +201,7 @@
 - [x] 允许自动/研究/写作/问答在每轮发送前切换；同一任务可以从普通问答进入研究和写作，旧 run 不被回写。
 - [x] 通过 `prepareCall` 返回 `activeTools`、reasoning、instructions、`stopWhen` 和输出上限，实现逐轮工具/预算收窄；后续只有确需 step 内继续缩小时才增加 `prepareStep`，任何 step 不能扩大 RunPolicy。
 - [x] 通过 AI SDK 工具 `needsApproval` 表达 Markdown 写入与 MCP 暂停；Tessera 只持久化审批、Diff 和审计，不自建平行工具状态机。更细的逐轮审批矩阵后续可由 `prepareCall` 返回 `toolApproval`。
-- [ ] 从 Agent 定义导出 `InferAgentUIMessage`，复用 `convertToModelMessages`、标准 Tool Part 与 `useChat`；应用元数据通过受控 schema 扩展，不复制消息协议。
+- [x] Agent 运行时使用 `InferAgentUIMessage<typeof agent>` 推导工具消息，历史交给 `createAgentUIStream` 内部标准 `validateUIMessages` / `convertToModelMessages`；React 继续复用 `useChat`，工具呈现统一走 AI SDK `isToolUIPart` / `getToolName`，应用 metadata/data 仅通过受控 schema 扩展。
 - [x] 使用 AI SDK 生命周期回调记录 step、工具耗时、usage 和 finish reason，并按 request ID 关联现有 `task_run_events`；SQLite 保存无正文汇总，开发期细节由官方 DevTools 查看，不从 UI chunk 反推。
 - [x] 使用同一薄 `AgentRuntime`、消息 Part、暂停/续跑、审批、取消和运行恢复协议，停止为 Chat 和 Agent 维护两条产品运行链路。
 - [x] Electron transport 只实现标准 `ChatTransport` 的 IPC/重连差异；`DirectChatTransport` 不进入生产链路，也没有另写 React chat 状态机。
@@ -233,15 +233,15 @@
 ### 验收门槛
 
 - [ ] 同一任务完成“普通问答 → 联网研究 → 写作 Skill → 创建文档 → 建立项目 → 移动文档”，全程没有 Chat/Agent 选择。
-- [x] 当前混合适配器已自动化覆盖较窄的“普通对话 → 写作 Skill → 创建文档 → 建立项目 → 移动文档 → 结构检查 → 重启恢复”；
-  完整联网研究与证据链仍由上面的未完成验收约束。
-- [ ] 每个 run 可以恢复并解释实际模型、Skill、资源和工具；切换创作方式不改变旧消息的权限语义。
+- [x] 当前混合适配器已自动化覆盖“普通问答 → 研究计划/搜索/页面读取协议事件 → 写作 Skill → 创建文档 → 建立项目 → 移动文档 → 重启恢复/中断收口”；完整联网研究的来源质量与证据链仍由研究工作流验收约束。
+- [x] 每个完成消息保存本轮 `requestId`；归属校验后的只读 IPC 与按需 popover 可解释实际模型、Skill、资源、工具及结束/失败原因，切换创作方式不改变旧 run 的权限语义。
 - [ ] 当前混合实验退出 Tessera 后仍能直接打开全部 Markdown；删除 SQLite 索引不会删除或覆盖正文。
 - [ ] 最终存储评审可以替换适配器而不改写核心对话、领域工具和活动 UI 契约。
 
 ## 横向任务
 
-- [ ] 为模型调用、工具调用和 IPC 事件建立统一错误码，界面文案不暴露密钥或内部堆栈。
+- [x] 为 AI Chat 模型运行、工具输入/执行和恢复 IPC 建立版本化公开错误码；运行失败使用 `data-task-error`，工具失败保留标准 Tool Part 并并行写入 `data-tool-error`，界面文案不暴露密钥或内部堆栈。其余非 Agent IPC 仍按各领域契约处理。
+- [x] 启动后失败也先写入同一运行事件；重复/乱序/缺口事件、幂等停止、页面重连与应用重启中断统一收口，恢复不重放已经执行的磁盘副作用。
 - [ ] 首输出延迟、总耗时、token 用量和工具次数已按 run 本地保存；取消率与统一失败原因聚合查询仍待实现。
 - [x] 为路径攻击、审批批准/拒绝、版本冲突、完整工具历史和运行事件持久化建立自动化回归；普通问答与写作质量评测仍需扩充。
 - [ ] 为写作质量建立人工评测集，分别评价事实保持、语气、结构、修改幅度和引用可靠性；不只比较单次演示效果。

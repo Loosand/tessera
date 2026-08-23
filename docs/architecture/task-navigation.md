@@ -2,6 +2,7 @@
 
 > 代码源头：`packages/contracts/src/index.ts`、`packages/database/schema.ts`、
 > `packages/database/task-session-repository.ts`、`apps/desktop/src/main/task-service.ts`、
+> `apps/desktop/src/main/ai-chat-error.ts`、
 > `apps/desktop/src/main/read-only-agent-tools.ts`、`apps/desktop/src/main/mcp-service.ts`、`packages/skills/src/index.ts`、`packages/ai/src/server/agent-runtime.ts`、
 > `packages/ai/src/server/task-interaction-tools.ts`、`packages/ai/src/react/use-electron-chat.ts`、`apps/desktop/src/main/index.ts`、
 > `apps/desktop/src/renderer/src/hooks/use-tasks.ts`、`apps/desktop/src/renderer/src/components/app-shell.tsx`、
@@ -10,7 +11,7 @@
 > `apps/desktop/src/renderer/src/components/task-capability-picker.tsx`、
 > `apps/desktop/src/renderer/src/components/chat-parts/`
 >
-> 状态：部分实现。无工作区与工作区任务均使用同一 AI SDK `ToolLoopAgent` 和类型化 call options / `prepareCall`；逐轮 Skill、保守自动意图、受信任 RunPolicy、动态资源、Artifact、内容项目工具、问题暂停/续跑、研究计划、Markdown Diff、MCP 审批、运行恢复和消息历史已实现。Shell、真正跨进程续跑与多窗口接管尚未实现。
+> 状态：部分实现。无工作区与工作区任务均使用同一 AI SDK `ToolLoopAgent` 和类型化 call options / `prepareCall`；逐轮 Skill、保守自动意图、受信任 RunPolicy、动态资源、Artifact、内容项目工具、问题暂停/续跑、研究计划、研究状态续跑、Markdown Diff、MCP 审批、运行恢复和消息历史已实现。Shell、通用步骤级 durable replay 与多窗口接管尚未实现。
 
 ## 地位
 
@@ -45,7 +46,7 @@
 ## 持久化
 
 `task_sessions` 保存兼容 mode、下一轮可选 `skill_id` 默认值、可选工作区、标题、状态、等待输入标记与时间；`task_messages` 按序保存应用自有的版本化消息 JSON。由于已发布迁移中的旧状态列带固定 `CHECK`，`waiting-input` 在物理层兼容编码为 `status = running` 加 `waiting_for_input = 1`，仓储读写时统一映射为公开状态；后续迁移不重写用户已有表。
-消息契约保留正文、reasoning、来源、附件、工具状态、审批状态以及助手消息使用的供应商和模型。当前 Markdown 草稿以 `text/markdown` Data URL 作为可见用户附件持久化，单份限制 256 KiB；服务端在模型转换前解码并包入明确的“材料而非系统指令”边界，避免依赖供应商对文本文件的兼容性。图片继续保留原文件 Part。
+消息契约保留正文、reasoning、来源、附件、工具状态、审批状态以及助手消息使用的供应商、模型和本轮 `requestId`。完成消息可通过轻量图标按需读取归属校验后的脱敏运行解释；模型、Skill、资源、工具和结束/失败原因不会以常驻诊断文字挤占对话正文。当前 Markdown 草稿以 `text/markdown` Data URL 作为可见用户附件持久化，单份限制 256 KiB；服务端在模型转换前解码并包入明确的“材料而非系统指令”边界，避免依赖供应商对文本文件的兼容性。图片继续保留原文件 Part。
 模型运行输入使用经主进程校验的完整 `UIMessage` 历史，再由 AI SDK `convertToModelMessages` 转换；工具结果与审批响应可以进入下一轮，应用元数据仍不会自动变成模型正文。
 主进程校验 IPC 请求中的本轮 Skill，但不再要求它等于会话默认值；当前 Skill 正文通过 AI SDK call options 注入 `instructions`，不伪装为用户消息，也不把未选中 Skill 放入模型上下文。renderer 不再发送联网/推理开关，主进程按持久化模型事实生成实际 RunPolicy；`0009-task-run-policy` 保留可查询兼容列，`0010-task-run-context` 保存完整策略与不含正文/绝对路径的资源摘要，旧 run 的新增字段保持未知而不伪造历史。
 
@@ -137,7 +138,7 @@
 
 生成运行归主进程所有，不归 `TaskPage`、React 路由或某次 `ReadableStream` 订阅所有。renderer 离开任务页、组件卸载或 AI SDK 关闭本地响应流时，只移除当前事件订阅；用户点击停止时，Transport 先调用独立的取消 IPC，再停止 AI SDK 本地状态机。任务删除、窗口销毁和应用退出也会中止对应运行。
 
-每个主进程事件都携带 `taskId`、`requestId` 与单调递增的 `sequence`，并追加到该运行的内存事件日志。只有已持久化任务挂载时启用 AI SDK `resume`：返回页面先建立实时订阅，再请求 `resumeAiChat(taskId)` 快照，按序重放快照和请求期间收到的实时事件，并用 sequence 去重，最后继续消费实时增量。尚未首次发送的内存草稿不请求恢复；主进程遇到不存在的任务或没有活动流时正常返回空结果，不进入错误状态。
+每个主进程事件都携带 `taskId`、`requestId` 与单调递增的 `sequence`，并幂等追加到运行日志；SQLite 的 `lastSequence` 只前进、不因迟到或重复事件倒退。正文、推理和工具参数的同类连续 delta 在编号与持久化之前按稳定阈值合并，遇到不同 ID/类型、工具结果、错误或结束事件先刷新，因此减少事件数量但不改变恢复顺序。只有已持久化任务挂载时启用 AI SDK `resume`：返回页面先建立实时订阅，再请求 `resumeAiChat(taskId)` 快照，按连续序号合并快照和请求期间收到的实时事件；重复事件忽略，乱序事件暂存到缺失序号到达后再交给 AI SDK。已结束快照存在序号缺口或缺少终止事件时写入可见 `resume-failed`，不静默关闭。尚未首次发送的内存草稿不请求恢复；主进程遇到不存在的任务或没有活动流时正常返回空结果，不进入错误状态。
 
 ```text
 页面 A 开始生成
@@ -149,7 +150,13 @@
   -> 恢复到实时流，完成后持久化完整消息
 ```
 
-运行元数据和每个有序事件同时写入 SQLite。页面切换优先从主进程内存续接；应用意外退出后，启动恢复会把未结束运行标记为 `interrupted`，追加可见错误事件并重放中断前进度。模型供应商的原始网络流和内存 `ToolLoopAgent` 不能跨进程继续，因此恢复不会自动重放写工具；用户从已恢复消息继续或重试。真正从模型步骤检查点自动续跑仍需桌面适配的 durable runtime，多窗口接管也尚未实现。
+运行元数据和每个有序事件同时写入 SQLite。页面切换优先从主进程内存续接；应用意外退出后，启动恢复会把未结束运行标记为 `interrupted`，追加带稳定 code、phase 与 retryable 的可见错误事件并重放中断前进度，同时把非等待中的 task session 收口到对应终态。若最新运行已经结束、但 renderer 尚未来得及把对应 `requestId` 写入助手消息，恢复接口仍会重放这次终态运行；renderer 保存完整助手消息后，同一运行不再被识别为待恢复，避免重复注入。读取历史事件时只在返回快照中临时合并连续 delta 并重新生成连续序号，SQLite 原始审计序列不改写。启动、流式和恢复阶段的异常都先在主进程分类，未知供应商载荷使用脱敏公开文案；初始化在 `task_run` 建立后失败时也先持久化同一失败事件。renderer 把版本化失败写入 `data-task-error`，同时兼容旧消息的无版本错误。工具输入或执行失败继续使用 AI SDK 标准 Tool Part 状态，并额外写入可恢复的 `data-tool-error`（稳定 code、retryable、`toolCallId`、`toolName`）；消息 UI 不重复渲染第二张失败卡，诊断与审计仍可读取结构化 Part。
+
+模型供应商的原始网络流和内存 `ToolLoopAgent` 不能跨进程继续，因此恢复不会自动重放写工具。研究方式提供一条更窄的
+语义续跑：用户对失败的研究消息重新生成时，Transport 提交 `regenerateMessageId`；主进程优先从该消息持久化 metadata
+解析旧 `requestId`，显式参数只作为同一边界的后备，并把 `resumedResearchRequestId` 写入新 run 资源摘要。随后在新
+request 中克隆研究计划、来源元数据、证据、推荐和覆盖状态，注入续跑上下文；已执行副作用不重放，网页正文也不复制。
+这不是通用步骤级 durable runtime，普通写作/文件操作仍由用户从已恢复消息继续，自动步骤检查点和多窗口接管尚未实现。
 
 ## 工作区 Agent 运行时
 
@@ -157,9 +164,9 @@
 - 工具只遍历可见的 `.md` / `.markdown`，忽略隐藏目录、`.git`、`.tessera`、`node_modules` 和遍历时遇到的符号链接。
 - 每次直接读取都会重新执行相对路径、真实路径与扩展名校验；`../`、绝对路径、隐藏路径和指向工作区外部的符号链接均不可用。当前文档只作为相对路径提示传入，读取时执行相同校验。
 - 单文件读取上限为 256 KiB；文件列表最多返回 500 项、最多扫描 2,000 项；搜索最多扫描 8 MiB 并返回 100 个匹配，触顶时返回结构化 `truncated`、上限和跳过文件信息。
-- 普通问答/写作继续使用短运行护栏；显式研究不设置累计 Token 或应用侧单步输出额度，按模型上下文窗口使用
-  32/48/64 步的异常循环保险丝并允许最长 30 分钟。保险丝只防止失控，不替代证据完成检查；渲染层停止操作复用
-  现有中止信号。
+- 普通问答/写作继续使用短运行护栏；显式研究不设置累计 Token 预算，并显式采用模型档案声明的原生最大输出，
+  防止兼容 SDK 回落到 4096。研究按模型上下文窗口使用 32/48/64 步的异常循环保险丝并允许最长 30 分钟。保险丝只
+  防止失控，不替代证据完成检查；渲染层停止操作复用现有中止信号。
 - 工具输入、资源相对路径、完成或失败状态通过版本化消息 Part 展示并持久化，不把冗长工具结果直接展开成消息正文。
 - 回答中的相对 Markdown 链接可跳转到文档和源码行；路径仍由主进程在真正读取时复核。
 - provider 的 reasoning ID 只保证步骤内有效，渲染层按消息内 Part 位置生成唯一 React key，避免多步骤流式追加时复用或复制旧思考节点。
@@ -175,5 +182,5 @@
 - 以托管内容库 Inbox 作为当前实验实现 Artifact、项目创建和跨工作区文档移动，同时保持领域协议可替换，以便评估数据库与完全外部工作区方案。
 - 记录完成原因、token 用量和每轮耗时。
 - 为长会话增加上下文裁剪或摘要，但不改写持久化的用户原文。
-- 为中断的 Agent 增加桌面 durable 步骤检查点，在不重放已执行副作用的前提下自动续跑。
+- 在已实现研究语义续跑之外，为通用 Agent 增加桌面 durable 步骤检查点，在不重放已执行副作用的前提下自动续跑。
 - 把 MCP Resources / Prompts / OAuth、按任务绑定与运行策略快照接入现有权限网关；建设 Shell 独立审批面，默认保持关闭。

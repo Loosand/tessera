@@ -1,8 +1,8 @@
 /**
  * [INPUT]: 共享桌面 API 契约与 Electron IPC 渲染器
- * [OUTPUT]: 暴露在 window.tessera 上的冻结窄接口、开发期 AI 日志入口、MCP/用户 Skill 安全配置与扫描安装、可恢复 AI 流、Agent 变更预览、托管内容库/Artifact、受限工作区/任务操作和关闭保存握手
+ * [OUTPUT]: 暴露在 window.tessera 上的冻结窄接口、研究网络偏好、开发期 AI 日志入口、MCP/用户 Skill 安全配置与扫描安装、可恢复 AI 流、脱敏运行解释、Agent 变更预览、托管内容库/Artifact、受限工作区/任务操作和关闭保存握手
  * [POS]: 主进程与沙箱渲染层之间的安全桥
- * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/ai-observability.md、docs/architecture/mcp.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md、docs/architecture/unified-creation-agent.md
+ * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/ai-observability.md、docs/architecture/mcp.md、docs/architecture/research-workflow.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md、docs/architecture/unified-creation-agent.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -22,6 +22,12 @@ const api = Object.freeze({
   listAiProviderConfigs: () => invokeDesktop(IPC_CHANNELS.aiProviderListConfigs),
   listAiProviderModels: (input) => invokeDesktop(IPC_CHANNELS.aiProviderListModels, input),
   saveAiProviderConfig: (input) => invokeDesktop(IPC_CHANNELS.aiProviderSaveConfig, input),
+  getResearchNetworkMode: () => invokeDesktop(IPC_CHANNELS.researchNetworkGet),
+  setResearchNetworkMode: (mode) => invokeDesktop(IPC_CHANNELS.researchNetworkSet, mode),
+  readResearchNotebook: (taskId, requestId) =>
+    invokeDesktop(IPC_CHANNELS.researchNotebookRead, taskId, requestId),
+  saveResearchSources: (taskId, requestId, sourceIds) =>
+    invokeDesktop(IPC_CHANNELS.researchSourcesSave, taskId, requestId, sourceIds),
   listMcpServers: () => invokeDesktop(IPC_CHANNELS.mcpServerList),
   saveMcpServer: (input) => invokeDesktop(IPC_CHANNELS.mcpServerSave, input),
   deleteMcpServer: (serverId) => invokeDesktop(IPC_CHANNELS.mcpServerDelete, serverId),
@@ -37,6 +43,7 @@ const api = Object.freeze({
   startAiChat: (input) => invokeDesktop(IPC_CHANNELS.aiChatStart, input),
   resumeAiChat: (taskId) => invokeDesktop(IPC_CHANNELS.aiChatResume, taskId),
   cancelAiChat: (requestId) => sendDesktop(IPC_CHANNELS.aiChatCancel, requestId),
+  readTaskRun: (taskId, requestId) => invokeDesktop(IPC_CHANNELS.taskRunRead, taskId, requestId),
   readAgentChangePreview: (taskId, approvalId) =>
     invokeDesktop(IPC_CHANNELS.agentChangePreview, taskId, approvalId),
   listRecentTasks: () => invokeDesktop(IPC_CHANNELS.taskListRecent),

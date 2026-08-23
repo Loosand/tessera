@@ -10,15 +10,20 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import type { UIMessage } from "@tessera/ai/react"
+import {
+  type UIMessagePart,
+  type UIMessageToolPart,
+  isUIMessageToolPart,
+  uiMessageToolName,
+} from "@tessera/ai/react"
 import { ActivityTrace, type ActivityTraceStatus } from "@tessera/design-system/components/activity-trace"
 import { AiWebBrowsingIcon, Link01Icon, Search01Icon } from "@tessera/design-system/components/icons"
 import { Button } from "@tessera/design-system/components/ui/button"
 import { Icon } from "@tessera/design-system/components/ui/icon"
 import React, { useMemo, useState } from "react"
 
-type MessagePart = UIMessage["parts"][number]
-type ToolMessagePart = Extract<MessagePart, { type: "dynamic-tool" | `tool-${string}` }>
+type MessagePart = UIMessagePart
+type ToolMessagePart = UIMessageToolPart
 
 type WebSearchPartProps = {
   readonly parts: readonly MessagePart[]
@@ -42,7 +47,7 @@ export type WebSearchTraceData = {
 const COLLAPSED_RESULT_COUNT = 5
 
 export function isWebSearchToolPart(part: MessagePart): part is ToolMessagePart {
-  return part.type === "dynamic-tool" ? part.toolName === "web_search" : part.type === "tool-web_search"
+  return isUIMessageToolPart(part) && uiMessageToolName(part) === "web_search"
 }
 
 function isUnknownRecord(value: unknown): value is Record<string, unknown> {

@@ -1,7 +1,7 @@
 /**
- * [INPUT]: Electron 系统代理 Session、公开 http(s) URL 与可取消信号
- * [OUTPUT]: 先经代理感知静态请求、必要时经隐藏沙箱浏览器渲染的受限网页 Reader
- * [POS]: 可信研究服务的桌面网络适配层，负责 SPA/反爬页面回退而不持有研究领域状态
+ * [INPUT]: 每次研究运行冻结的 system/direct 网络模式、Electron Session、公开 http(s) URL 与可取消信号
+ * [OUTPUT]: 按所选网络模式先静态请求、必要时经同模式隐藏沙箱浏览器渲染的受限网页 Reader
+ * [POS]: 可信研究服务的桌面网络适配层，负责系统代理/直连隔离与 SPA/反爬页面回退而不持有研究领域状态
  * [DOC]: docs/architecture/research-workflow.md
  *
  * [PROTOCOL]:
@@ -11,6 +11,7 @@
  */
 
 import { BrowserWindow, type Session, session } from "electron"
+import type { ResearchNetworkMode } from "@tessera/contracts"
 import {
   ResearchReadError,
   type RestrictedWebRead,
@@ -21,7 +22,7 @@ import {
   validateReadableWebSource,
 } from "./research-service"
 
-const RESEARCH_PARTITION = "tessera-research-reader"
+const RESEARCH_PARTITION_PREFIX = "tessera-research-reader"
 const MAX_REDIRECTS = 5
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 const STATIC_TIMEOUT_MS = 25_000
@@ -29,36 +30,49 @@ const BROWSER_TIMEOUT_MS = 35_000
 const ALLOWED_CONTENT_TYPES = new Set(["text/html", "application/xhtml+xml", "text/plain"])
 const BLOCKED_RESOURCE_TYPES = new Set(["cspReport", "font", "image", "media", "object", "ping", "webSocket"])
 
-let configuredSession: Session | null = null
+const configuredSessions = new Map<ResearchNetworkMode, Promise<Session>>()
 
-function researchSession() {
-  if (configuredSession) return configuredSession
-  const value = session.fromPartition(RESEARCH_PARTITION, { cache: false })
+function researchPartition(mode: ResearchNetworkMode) {
+  return `${RESEARCH_PARTITION_PREFIX}-${mode}`
+}
+
+async function configureResearchSession(mode: ResearchNetworkMode) {
+  const value = session.fromPartition(researchPartition(mode), { cache: false })
+  await value.setProxy({ mode })
   value.setPermissionCheckHandler(() => false)
   value.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
   value.on("will-download", (event) => event.preventDefault())
-  value.webRequest.onBeforeRequest(
-    { urls: ["http://*/*", "https://*/*"] },
-    (details, callback) => {
-      if (BLOCKED_RESOURCE_TYPES.has(details.resourceType)) {
-        callback({ cancel: true })
-        return
-      }
-      void assertPublicWebUrl(details.url).then(
-        () => callback({ cancel: false }),
-        () => callback({ cancel: true }),
-      )
-    },
-  )
-  configuredSession = value
+  value.webRequest.onBeforeRequest({ urls: ["http://*/*", "https://*/*"] }, (details, callback) => {
+    if (BLOCKED_RESOURCE_TYPES.has(details.resourceType)) {
+      callback({ cancel: true })
+      return
+    }
+    void assertPublicWebUrl(details.url).then(
+      () => callback({ cancel: false }),
+      () => callback({ cancel: true }),
+    )
+  })
   return value
+}
+
+function researchSession(mode: ResearchNetworkMode) {
+  const configured = configuredSessions.get(mode)
+  if (configured) return configured
+  const pending = configureResearchSession(mode)
+  configuredSessions.set(mode, pending)
+  void pending.catch(() => configuredSessions.delete(mode))
+  return pending
 }
 
 function abortAfter(signal: AbortSignal, timeoutMs: number, timeoutMessage: string) {
   const controller = new AbortController()
   const onAbort = () => controller.abort(signal.reason)
   signal.addEventListener("abort", onAbort, { once: true })
-  const timer = setTimeout(() => controller.abort(new ResearchReadError(timeoutMessage, "network-timeout")), timeoutMs)
+  if (signal.aborted) controller.abort(signal.reason)
+  const timer = setTimeout(
+    () => controller.abort(new ResearchReadError(timeoutMessage, "network-timeout")),
+    timeoutMs,
+  )
   return {
     signal: controller.signal,
     dispose: () => {
@@ -96,12 +110,16 @@ async function responseBody(response: Response) {
   return new TextDecoder().decode(body)
 }
 
-async function readWithSessionFetch(value: string, signal: AbortSignal): Promise<RestrictedWebRead> {
+async function readWithSessionFetch(
+  value: string,
+  signal: AbortSignal,
+  networkMode: ResearchNetworkMode,
+): Promise<RestrictedWebRead> {
   let url = await assertPublicWebUrl(value)
   for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount += 1) {
     const bounded = abortAfter(signal, STATIC_TIMEOUT_MS, "网页静态读取超时。")
     try {
-      const response = await researchSession().fetch(url.toString(), {
+      const response = await (await researchSession(networkMode)).fetch(url.toString(), {
         redirect: "manual",
         signal: bounded.signal,
         headers: {
@@ -146,16 +164,21 @@ function browserFallbackAllowed(error: unknown) {
   )
 }
 
-async function readWithSandboxBrowser(value: string, signal: AbortSignal): Promise<RestrictedWebRead> {
+async function readWithSandboxBrowser(
+  value: string,
+  signal: AbortSignal,
+  networkMode: ResearchNetworkMode,
+): Promise<RestrictedWebRead> {
   await assertPublicWebUrl(value)
   signal.throwIfAborted()
+  await researchSession(networkMode)
   const window = new BrowserWindow({
     show: false,
     webPreferences: {
       backgroundThrottling: false,
       contextIsolation: true,
       nodeIntegration: false,
-      partition: RESEARCH_PARTITION,
+      partition: researchPartition(networkMode),
       sandbox: true,
       spellcheck: false,
     },
@@ -172,7 +195,8 @@ async function readWithSandboxBrowser(value: string, signal: AbortSignal): Promi
       new Promise<never>((_resolve, reject) => {
         bounded.signal.addEventListener(
           "abort",
-          () => reject(bounded.signal.reason ?? new ResearchReadError("浏览器渲染网页超时。", "browser-failed")),
+          () =>
+            reject(bounded.signal.reason ?? new ResearchReadError("浏览器渲染网页超时。", "browser-failed")),
           { once: true },
         )
       }),
@@ -217,13 +241,15 @@ async function readWithSandboxBrowser(value: string, signal: AbortSignal): Promi
   }
 }
 
-export function createElectronResearchReader(): RestrictedWebSourceReader {
+export function createElectronResearchReader(
+  networkMode: ResearchNetworkMode = "system",
+): RestrictedWebSourceReader {
   return async (url, signal) => {
     try {
-      return await readWithSessionFetch(url, signal)
+      return await readWithSessionFetch(url, signal, networkMode)
     } catch (error) {
       if (signal.aborted || !browserFallbackAllowed(error)) throw error
-      return readWithSandboxBrowser(url, signal)
+      return readWithSandboxBrowser(url, signal, networkMode)
     }
   }
 }

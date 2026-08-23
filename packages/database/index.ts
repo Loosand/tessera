@@ -11,6 +11,7 @@
  */
 
 export * from "./client"
+export * from "./app-setting-repository"
 export * from "./content-domain-repository"
 export * from "./agent-change-repository"
 export * from "./ai-provider-config-repository"
