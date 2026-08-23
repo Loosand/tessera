@@ -34,6 +34,7 @@ describe("AI chat public error protocol", () => {
     })
     expect(classifyTaskRunError({ statusCode: 429 }, "stream")).toMatchObject({
       code: "provider-rate-limit",
+      httpStatus: 429,
       retryable: true,
     })
   })

@@ -1,0 +1,112 @@
+name: 发布 macOS Alpha
+
+on:
+  push:
+    tags:
+      - "v*-alpha.*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish-macos-arm64:
+    name: 构建、签名、公证并发布
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    steps:
+      - name: 检出发行 Tag
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 安装 Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+
+      - name: 安装锁定依赖
+        run: bun install --frozen-lockfile
+
+      - name: 执行仓库完成检查
+        run: bun run check
+
+      - name: 写入临时 App Store Connect 私钥
+        env:
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+        run: |
+          python3 <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+
+          encoded = os.environ.get("APPLE_API_KEY_BASE64", "").strip()
+          if not encoded:
+              raise SystemExit("缺少 GitHub Secret：APPLE_API_KEY_BASE64")
+
+          try:
+              decoded = base64.b64decode(encoded, validate=True)
+          except ValueError as error:
+              raise SystemExit("APPLE_API_KEY_BASE64 不是有效的 Base64") from error
+
+          if b"-----BEGIN PRIVATE KEY-----" not in decoded:
+              raise SystemExit("APPLE_API_KEY_BASE64 不是 App Store Connect API 私钥")
+
+          key_path = Path(os.environ["RUNNER_TEMP"]) / "AuthKey_Tessera.p8"
+          key_path.write_bytes(decoded)
+          key_path.chmod(0o600)
+          PY
+
+      - name: 构建正式发行包
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ runner.temp }}/AuthKey_Tessera.p8
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+        run: bun run dist:mac:release
+
+      - name: 验证签名与公证票据
+        run: |
+          app_path="$(find apps/desktop/dist -type d -name 'Tessera.app' -print -quit)"
+          if [[ -z "$app_path" ]]; then
+            echo "没有找到 Tessera.app" >&2
+            exit 1
+          fi
+
+          codesign --verify --deep --strict --verbose=2 "$app_path"
+          spctl --assess --type execute --verbose=2 "$app_path"
+          xcrun stapler validate "$app_path"
+
+      - name: 生成发行校验和
+        shell: bash
+        run: |
+          cd apps/desktop/dist
+          shopt -s nullglob
+          artifacts=(Tessera-*.dmg Tessera-*.zip)
+          if (( ${#artifacts[@]} < 2 )); then
+            echo "DMG 或 ZIP 发行产物缺失" >&2
+            exit 1
+          fi
+          shasum -a 256 "${artifacts[@]}" > SHA256SUMS.txt
+
+      - name: 创建 GitHub Pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes=$'> [!WARNING]\n> 这是早期 Alpha 版本，可能存在数据兼容性和功能缺失，请先备份重要工作区。\n\n当前仅支持 Apple Silicon Mac；模型调用产生的费用由对应供应商收取。'
+          gh release create "$GITHUB_REF_NAME" \
+            apps/desktop/dist/Tessera-*.dmg \
+            apps/desktop/dist/Tessera-*.zip \
+            apps/desktop/dist/SHA256SUMS.txt \
+            --fail-on-no-commits \
+            --generate-notes \
+            --latest=false \
+            --notes "$notes" \
+            --prerelease \
+            --title "Tessera $GITHUB_REF_NAME" \
+            --verify-tag

@@ -89,14 +89,19 @@ bun run check
 `bun run benchmark:editor:parser`、`bun run benchmark:editor:parser:cpu`。CodeMirror 源码模式的真实 renderer 基准
 仍在下一轮编辑器工作中。
 
-在 Apple Silicon macOS 上生成用于内部验证的 ad-hoc 签名 DMG 和 ZIP：
+在 Apple Silicon macOS 上生成仅用于本机内部验证的 ad-hoc 签名 DMG 和 ZIP：
 
 ```bash
 bun run dist:mac
 ```
 
-产物写入 `apps/desktop/dist/`。ad-hoc 签名构建仅用于本地或内部验证；公开分发需要 Developer ID 签名与 Apple 公证。
-发行脚本会拒绝未打包的工作区 TypeScript 运行时依赖，并只携带 Electron、编译产物和 SQLite 原生模块；macOS 发行包只保留中英语言资源，DMG 使用 UDBZ 压缩。
+产物写入 `apps/desktop/dist/`。正式 Alpha 使用 `bun run dist:mac:release`，它只接受与桌面版本一致的
+`v0.1.0-alpha.n` Tag，并强制 Developer ID 签名与 Apple 公证；签名凭据不完整时不会降级发布。GitHub Actions
+随后验证签名和公证票据、生成 SHA-256 校验和，并创建 GitHub Pre-release。完整契约见
+[macOS Alpha 发行](docs/architecture/release.md)。
+
+发行脚本会拒绝未打包的工作区 TypeScript 运行时依赖，并只携带 Electron、编译产物和 SQLite 原生模块；macOS
+发行包只保留中英语言资源，DMG 使用 UDBZ 压缩。
 
 如果当前网络无法下载 Electron 预构建文件，可以在安装时临时指定镜像：
 
@@ -126,6 +131,7 @@ packages/design-system  共享组件与视觉系统
 - [AI 供应商与模型发现](docs/architecture/ai-providers.md)
 - [本地数据库](docs/architecture/database.md)
 - [本地版本历史与 Git 工作区支持](docs/architecture/local-version-history-and-git-workspaces.md)
+- [macOS Alpha 发行](docs/architecture/release.md)
 - [协作约定](AGENTS.md)
 
 ## 开源与费用

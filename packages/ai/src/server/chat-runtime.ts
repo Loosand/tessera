@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 已解析的供应商连接、受信任 RunPolicy、含图片/显式 Markdown 上下文的任务消息与 AI SDK UIMessageChunk
- * [OUTPUT]: 统一 Agent 复用的附件边界、输入校验、错误归类脱敏、搜索额度和含引申问题的公开增量裁剪
+ * [OUTPUT]: 统一 Agent 复用的附件边界、输入校验、嵌套供应商错误分类/状态码脱敏、搜索额度和含引申问题的公开增量裁剪
  * [POS]: Electron 主进程与统一 ToolLoopAgent 之间的共享流协议辅助层，不提供独立 Chat 运行时
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/ai-observability.md、docs/architecture/ai-providers.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -15,8 +15,10 @@ import type {
   AiChatStreamChunk,
   AiModelEndpointType,
   AiProviderConnectionInput,
-  TaskMessageData,
   TaskMessage,
+  TaskMessageData,
+  TaskRunErrorCode,
+  TaskRunErrorDataV1,
   TaskRunPolicy,
 } from "@tessera/contracts"
 import { type UIMessage, type UIMessageChunk, validateUIMessages } from "ai"
@@ -28,6 +30,140 @@ const MAX_MARKDOWN_CONTEXT_BYTES = 256 * 1024
 const MAX_ERROR_MESSAGE_LENGTH = 320
 const DEFAULT_WEB_SEARCH_MAX_USES = 5
 const RESEARCH_WEB_SEARCH_MAX_USES = 15
+
+type UnknownRecord = Record<string, unknown>
+
+function unknownRecord(value: unknown): UnknownRecord | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as UnknownRecord) : null
+}
+
+function providerErrorSignals(error: unknown, apiKey: string) {
+  const queue = [error]
+  const visited = new Set<unknown>()
+  const searchable: string[] = []
+  let httpStatus: number | undefined
+
+  while (queue.length > 0 && visited.size < 24) {
+    const current = queue.shift()
+    if (current === undefined || current === null || visited.has(current)) continue
+    visited.add(current)
+    const record = unknownRecord(current)
+    const message =
+      current instanceof Error
+        ? current.message
+        : typeof current === "string"
+          ? current
+          : typeof record?.message === "string"
+            ? record.message
+            : ""
+    const name = current instanceof Error ? current.name : typeof record?.name === "string" ? record.name : ""
+    const code = typeof record?.code === "string" ? record.code : ""
+    const safeText = [name, message, code]
+      .filter(Boolean)
+      .join(" ")
+      .split(apiKey || "\0")
+      .join("[已隐藏]")
+    if (safeText) searchable.push(safeText)
+    for (const key of ["statusCode", "status"]) {
+      const value = record?.[key]
+      if (
+        httpStatus === undefined &&
+        typeof value === "number" &&
+        Number.isSafeInteger(value) &&
+        value >= 100 &&
+        value <= 599
+      ) {
+        httpStatus = value
+      }
+    }
+    for (const key of ["cause", "error", "lastError"]) {
+      if (record?.[key] !== undefined) queue.push(record[key])
+    }
+    if (Array.isArray(record?.errors)) queue.push(...record.errors)
+  }
+
+  return { httpStatus, searchable: searchable.join(" ").toLowerCase() }
+}
+
+const RETRYABLE_STREAM_ERRORS = new Set<TaskRunErrorCode>([
+  "network",
+  "provider-rate-limit",
+  "provider-response",
+  "provider-timeout",
+  "provider-unavailable",
+  "runtime",
+])
+
+function errorMessageWithStatus(message: string, httpStatus: number | undefined) {
+  return httpStatus ? `${message}（HTTP ${httpStatus}）` : message
+}
+
+/** 在 AI SDK 把 unknown error 压成字符串前，提取可公开的类别与 HTTP 状态。 */
+export function classifyProviderStreamError(error: unknown, apiKey: string): TaskRunErrorDataV1 {
+  const { httpStatus, searchable } = providerErrorSignals(error, apiKey)
+  let code: TaskRunErrorCode
+  let message: string
+
+  if (searchable.includes("max_uses_exceeded")) {
+    code = "runtime"
+    message = "联网搜索已达到本轮次数上限，已有结果已保留。可继续整理答案或缩小范围后重试。"
+  } else if (searchable.includes("type validation failed") && searchable.includes("web_search_tool_result")) {
+    code = "provider-response"
+    message = "联网搜索服务返回了不兼容的结果格式，请稍后重试，或改用问答模式直接回答。"
+  } else if (
+    httpStatus === 401 ||
+    httpStatus === 403 ||
+    /\b(unauthorized|forbidden|invalid api key)\b/u.test(searchable)
+  ) {
+    code = "provider-auth"
+    message = errorMessageWithStatus("供应商认证失败，请检查 API Key 与账号权限。", httpStatus)
+  } else if (httpStatus === 429 || /\b(rate.?limit|too many requests)\b/u.test(searchable)) {
+    code = "provider-rate-limit"
+    message = errorMessageWithStatus("供应商当前请求过多或额度暂不可用，请稍后继续。", httpStatus)
+  } else if (
+    httpStatus === 408 ||
+    searchable.includes("timeout") ||
+    searchable.includes("timed out") ||
+    searchable.includes("etimedout")
+  ) {
+    code = "provider-timeout"
+    message = errorMessageWithStatus("供应商响应超时；已完成的工具结果会保留，可直接继续。", httpStatus)
+  } else if (httpStatus === 404 || searchable.includes("model not found")) {
+    code = "provider-unavailable"
+    message = errorMessageWithStatus("当前模型或供应商端点不可用，请检查模型配置。", httpStatus)
+  } else if (httpStatus !== undefined && httpStatus >= 500) {
+    code = "provider-unavailable"
+    message = errorMessageWithStatus("供应商服务暂时不可用；已完成的工具结果会保留，可稍后继续。", httpStatus)
+  } else if (
+    /\b(econnreset|econnrefused|enotfound|network|socket|fetch failed|connection)\b/u.test(searchable)
+  ) {
+    code = "network"
+    message = "与供应商的网络连接中断；已完成的工具结果会保留，可直接继续。"
+  } else if (
+    searchable.includes("type validation failed") ||
+    searchable.includes("response format") ||
+    searchable.includes("invalid response") ||
+    searchable.includes("no response")
+  ) {
+    code = "provider-response"
+    message = errorMessageWithStatus("供应商返回了无法解析或不完整的响应，请稍后继续。", httpStatus)
+  } else if (httpStatus === 400 || httpStatus === 409 || httpStatus === 422) {
+    code = "invalid-request"
+    message = errorMessageWithStatus("供应商拒绝了当前请求，请检查模型与请求配置。", httpStatus)
+  } else {
+    code = "provider-unavailable"
+    message = errorMessageWithStatus("模型请求失败，请检查供应商配置、模型状态与网络连接。", httpStatus)
+  }
+
+  return {
+    code,
+    ...(httpStatus ? { httpStatus } : {}),
+    message,
+    phase: "stream",
+    retryable: RETRYABLE_STREAM_ERRORS.has(code),
+    version: 1,
+  }
+}
 
 export type AiChatRuntimeInput = AiChatStartInput &
   AiProviderConnectionInput & {
@@ -41,24 +177,7 @@ export type UiMessageValidationOptions<Message extends UIMessage> = Omit<
 >
 
 export function safeErrorMessage(error: unknown, apiKey: string): string {
-  const fallback = "模型请求失败，请检查供应商配置、模型状态与网络连接。"
-  const message = error instanceof Error ? error.message : typeof error === "string" ? error : fallback
-  const searchableMessage = message.toLowerCase()
-  if (searchableMessage.includes("max_uses_exceeded")) {
-    return "联网搜索已达到本轮次数上限，已有结果已保留。可继续整理答案或缩小范围后重试。"
-  }
-  if (
-    searchableMessage.includes("type validation failed") &&
-    searchableMessage.includes("web_search_tool_result")
-  ) {
-    return "联网搜索服务返回了不兼容的结果格式，请稍后重试，或改用问答模式直接回答。"
-  }
-  const withoutKey = apiKey ? message.split(apiKey).join("[已隐藏]") : message
-  const withoutAuthorization = withoutKey.replace(
-    /(authorization|api[-_ ]?key)\s*[:=]\s*\S+/giu,
-    "$1: [已隐藏]",
-  )
-  return withoutAuthorization.slice(0, MAX_ERROR_MESSAGE_LENGTH) || fallback
+  return classifyProviderStreamError(error, apiKey).message.slice(0, MAX_ERROR_MESSAGE_LENGTH)
 }
 
 export function webSearchMaxUsesForSkill(skillId: AiChatStartInput["skillId"]) {

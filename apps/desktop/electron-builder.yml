@@ -22,13 +22,14 @@ asarUnpack:
 npmRebuild: false
 
 mac:
+  icon: build/icon.icns
   category: public.app-category.productivity
   electronLanguages:
     - en
     - zh_CN
     - zh_TW
-  identity: '-'
   hardenedRuntime: true
+  notarize: true
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
   target:

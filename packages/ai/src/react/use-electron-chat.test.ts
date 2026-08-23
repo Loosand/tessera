@@ -18,6 +18,7 @@ import {
   type ElectronChatBridge,
   ElectronChatTransport,
   type UIMessage,
+  completedToolContinuationMessage,
   hasPendingTaskUserInput,
   shouldAutomaticallyContinueTask,
   toAiChatMessages,
@@ -66,6 +67,90 @@ function assistantError(messages: readonly UIMessage[]) {
 }
 
 describe("ElectronChatTransport", () => {
+  it("重新生成前保留已完成工具结果，并从工具结果之后继续", async () => {
+    let request: AiChatStartInput | undefined
+    const bridge: ElectronChatBridge = {
+      cancelAiChat: vi.fn(),
+      onAiChatEvent: () => () => {},
+      resumeAiChat: async () => ({ ok: true, run: null }),
+      startAiChat: async (input) => {
+        request = input
+        return { ok: true }
+      },
+    }
+    const failedMessage = {
+      id: "assistant-tools-complete",
+      role: "assistant" as const,
+      metadata: { requestId: "request-tools-complete" },
+      parts: [
+        { type: "text" as const, text: "尚未完成的草稿" },
+        { type: "step-start" as const },
+        {
+          type: "tool-web_search" as const,
+          toolCallId: "search-1",
+          state: "output-available" as const,
+          input: { query: "FKJ" },
+          output: { results: [{ title: "Official" }] },
+          providerExecuted: true,
+        },
+        {
+          type: "data-task-error" as const,
+          data: {
+            code: "provider-timeout" as const,
+            message: "供应商响应超时。",
+            phase: "stream" as const,
+            retryable: true,
+            version: 1 as const,
+          },
+        },
+      ],
+    }
+    expect(completedToolContinuationMessage(failedMessage)?.parts).toEqual([
+      { type: "step-start" },
+      expect.objectContaining({
+        type: "tool-web_search",
+        state: "output-available",
+        providerExecuted: true,
+      }),
+      expect.objectContaining({ type: "data-task-error" }),
+    ])
+
+    const transport = new ElectronChatTransport(() => ({
+      bridge,
+      chatId: "chat-tool-continuation",
+      configId: "deepseek",
+      mode: "agent",
+      skillId: null,
+      providerId: "deepseek",
+      modelId: "deepseek-v4-flash",
+    }))
+    transport.stageRegenerationMessage(failedMessage)
+    const stream = await transport.sendMessages({
+      chatId: "chat-tool-continuation",
+      messageId: failedMessage.id,
+      messages: [{ id: "user-1", role: "user", parts: [{ type: "text", text: "研究 FKJ" }] }],
+      trigger: "regenerate-message",
+      abortSignal: undefined,
+    })
+
+    await vi.waitFor(() => expect(request).toBeDefined())
+    expect(request).toMatchObject({
+      continueFromMessageId: failedMessage.id,
+      regenerateMessageId: failedMessage.id,
+      messages: [
+        { id: "user-1", role: "user" },
+        {
+          id: failedMessage.id,
+          role: "assistant",
+          parts: expect.arrayContaining([
+            expect.objectContaining({ type: "tool-web_search", providerExecuted: true }),
+          ]),
+        },
+      ],
+    })
+    await stream.cancel()
+  })
+
   it("重新生成研究答复时把上一轮 requestId 作为断点续研来源", async () => {
     let request: AiChatStartInput | undefined
     const bridge: ElectronChatBridge = {

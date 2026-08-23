@@ -11,7 +11,13 @@
  */
 
 import { describe, expect, it } from "vitest"
-import { publicChunk, safeErrorMessage, toUiMessages, webSearchMaxUsesForSkill } from "./chat-runtime"
+import {
+  classifyProviderStreamError,
+  publicChunk,
+  safeErrorMessage,
+  toUiMessages,
+  webSearchMaxUsesForSkill,
+} from "./chat-runtime"
 
 describe("Agent 工具公开增量", () => {
   it("保留工具名、相对路径输入与结构化输出", () => {
@@ -115,7 +121,29 @@ describe("Chat 运行时边界", () => {
     )
     expect(message).not.toContain("secret-key")
     expect(message).not.toContain("Bearer-token")
-    expect(message).toContain("Authorization: [已隐藏]")
+    expect(message).toBe("模型请求失败，请检查供应商配置、模型状态与网络连接。")
+  })
+
+  it("在字符串化前从 RetryError 的嵌套异常保留类别与 HTTP 状态", () => {
+    expect(
+      classifyProviderStreamError(
+        {
+          name: "AI_RetryError",
+          errors: [
+            new Error("temporary failure"),
+            { statusCode: 429, message: "rate limit: api-key=secret-key" },
+          ],
+        },
+        "secret-key",
+      ),
+    ).toEqual({
+      code: "provider-rate-limit",
+      httpStatus: 429,
+      message: "供应商当前请求过多或额度暂不可用，请稍后继续。（HTTP 429）",
+      phase: "stream",
+      retryable: true,
+      version: 1,
+    })
   })
 
   it("仅为研究 Skill 提升有界搜索额度", () => {

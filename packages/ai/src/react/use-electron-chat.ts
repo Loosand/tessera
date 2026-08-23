@@ -1,6 +1,6 @@
 /**
  * [INPUT]: Electron 窄桥、任务是否已持久化、内部任务执行作用域/创作方式、显式当前文档、模型选择、版本化历史消息与 AI SDK React 状态机
- * [OUTPUT]: 不传递能力开关、只为已持久化任务恢复且支持断开重连的 ElectronChatTransport、显式重新生成到研究续跑 provenance 的映射、重复过滤/乱序缓冲/缺口失败、取消流安全收口、带 requestId 的版本化消息内引申问题/运行失败、基于 AI SDK 标准 Tool Part 守卫的等待输入识别、完整 UIMessage 往返、问答/审批后自动续轮与类型化 IPC 增量消费
+ * [OUTPUT]: 不传递能力开关、只为已持久化任务恢复且支持断开重连的 ElectronChatTransport、显式重新生成到研究续跑 provenance 与已完成工具结果续跑的映射、重复过滤/乱序缓冲/缺口失败、取消流安全收口、带 requestId 的版本化消息内引申问题/运行失败、基于 AI SDK 标准 Tool Part 守卫的等待输入识别、完整 UIMessage 往返、问答/审批后自动续轮与类型化 IPC 增量消费
  * [POS]: @tessera/ai/react 中连接桌面渲染层与主进程 Chat/Agent 运行时的 Transport
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -137,6 +137,7 @@ function toTaskToolPart(part: UIMessageToolPart): TaskToolMessagePart {
     ...(part.state === "output-available" && part.preliminary !== undefined
       ? { preliminary: part.preliminary }
       : {}),
+    ...(part.providerExecuted !== undefined ? { providerExecuted: part.providerExecuted } : {}),
     ...(part.state === "output-error" ? { errorText: part.errorText } : {}),
     ...(part.approval ? { approval: part.approval } : {}),
   }
@@ -229,6 +230,30 @@ export function toUiMessages(messages: readonly TaskMessage[]): UIMessage[] {
   })) as UIMessage[]
 }
 
+function isCompletedTaskToolPart(part: TaskMessage["parts"][number]): part is TaskToolMessagePart {
+  if (part.type !== "dynamic-tool" && !part.type.startsWith("tool-")) return false
+  const toolPart = part as TaskToolMessagePart
+  return toolPart.state === "output-available" && toolPart.preliminary !== true
+}
+
+/** 只保留失败回复中已经完成的工具调用，供下一次模型调用从工具结果之后继续。 */
+export function completedToolContinuationMessage(message: TaskMessage | undefined): TaskMessage | null {
+  if (!message || message.role !== "assistant") return null
+  const failure = message.parts.find((part) => part.type === "data-task-error")
+  if (failure?.type !== "data-task-error" || !failure.data.retryable) return null
+  const parts = message.parts.filter(
+    (part): part is TaskMessage["parts"][number] =>
+      part.type === "step-start" || part.type === "data-task-error" || isCompletedTaskToolPart(part),
+  )
+  if (!parts.some(isCompletedTaskToolPart)) return null
+  return {
+    id: message.id,
+    role: "assistant",
+    parts,
+    ...(message.metadata ? { metadata: message.metadata } : {}),
+  }
+}
+
 function localTaskRunFailure(
   message: string,
   phase: TaskRunErrorPhase,
@@ -290,8 +315,13 @@ class OrderedAiChatEventBuffer {
 export class ElectronChatTransport implements ChatTransport<UIMessage> {
   private readonly activeRequestIds = new Map<string, string>()
   private readonly messageRequestIds = new Map<string, string>()
+  private readonly stagedRegenerationMessages = new Map<string, TaskMessage>()
 
   constructor(private readonly options: () => UseElectronChatOptions) {}
+
+  stageRegenerationMessage(message: TaskMessage) {
+    this.stagedRegenerationMessages.set(message.id, message)
+  }
 
   private runErrorChunks(
     requestId: string,
@@ -336,11 +366,18 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
     const options = this.options()
     const bridge = options.bridge
     const activeRequestId = requestId()
+    const regeneratedMessage =
+      trigger === "regenerate-message" && messageId
+        ? (this.stagedRegenerationMessages.get(messageId) ??
+          options.initialMessages?.find(
+            (message) => message.id === messageId && message.role === "assistant",
+          ))
+        : undefined
+    if (messageId) this.stagedRegenerationMessages.delete(messageId)
+    const continuationMessage = completedToolContinuationMessage(regeneratedMessage)
     const resumeResearchRequestId =
       trigger === "regenerate-message" && options.skillId === "research" && messageId
-        ? (this.messageRequestIds.get(messageId) ??
-          options.initialMessages?.find((message) => message.id === messageId && message.role === "assistant")
-            ?.metadata?.requestId)
+        ? (this.messageRequestIds.get(messageId) ?? regeneratedMessage?.metadata?.requestId)
         : undefined
     const metadata = {
       configId: options.configId,
@@ -432,7 +469,8 @@ export class ElectronChatTransport implements ChatTransport<UIMessage> {
             skillId: options.skillId,
             providerId: options.providerId,
             modelId: options.modelId,
-            messages: toAiChatMessages(messages),
+            messages: [...toAiChatMessages(messages), ...(continuationMessage ? [continuationMessage] : [])],
+            ...(continuationMessage ? { continueFromMessageId: continuationMessage.id } : {}),
             ...(trigger === "regenerate-message" && messageId ? { regenerateMessageId: messageId } : {}),
             ...(resumeResearchRequestId ? { resumeResearchRequestId } : {}),
           })
@@ -649,5 +687,19 @@ export function useElectronChat(options: UseElectronChatOptions) {
     await chat.stop()
   }, [chat, transport])
 
-  return { ...chat, stop }
+  const regenerate = useCallback(
+    async (requestOptions: Parameters<typeof chat.regenerate>[0] = {}) => {
+      const target = requestOptions.messageId
+        ? chat.messages.find((message) => message.id === requestOptions.messageId)
+        : [...chat.messages].reverse().find((message) => message.role === "assistant")
+      if (target?.role === "assistant") {
+        const snapshot = toTaskMessages([target])[0]
+        if (snapshot) transport.stageRegenerationMessage(snapshot)
+      }
+      await chat.regenerate(requestOptions)
+    },
+    [chat, transport],
+  )
+
+  return { ...chat, regenerate, stop }
 }

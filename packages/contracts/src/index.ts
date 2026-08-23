@@ -426,6 +426,7 @@ export function isTaskRunPolicy(value: unknown): value is TaskRunPolicy {
 
 export type TaskRunResourceSummary = {
   attachmentCount: number
+  continuedFromMessageId?: string | null
   currentDocumentPath: string | null
   researchNetworkMode: ResearchNetworkMode | null
   resumedResearchRequestId?: string | null
@@ -440,6 +441,9 @@ export function isTaskRunResourceSummary(value: unknown): value is TaskRunResour
     typeof summary.attachmentCount === "number" &&
     Number.isSafeInteger(summary.attachmentCount) &&
     summary.attachmentCount >= 0 &&
+    (summary.continuedFromMessageId === undefined ||
+      summary.continuedFromMessageId === null ||
+      typeof summary.continuedFromMessageId === "string") &&
     (summary.currentDocumentPath === null || typeof summary.currentDocumentPath === "string") &&
     (summary.researchNetworkMode === null || isResearchNetworkMode(summary.researchNetworkMode)) &&
     (summary.resumedResearchRequestId === undefined ||
@@ -758,6 +762,7 @@ export type TaskRunErrorPhase = (typeof TASK_RUN_ERROR_PHASES)[number]
 /** 新运行写入 UIMessage 的版本化、可持久化公开错误。 */
 export type TaskRunErrorDataV1 = {
   code: TaskRunErrorCode
+  httpStatus?: number
   message: string
   phase: TaskRunErrorPhase
   retryable: boolean
@@ -790,6 +795,11 @@ export function isTaskRunErrorDataV1(value: unknown): value is TaskRunErrorDataV
     data.version === 1 &&
     isTaskRunErrorCode(data.code) &&
     isTaskRunErrorPhase(data.phase) &&
+    (data.httpStatus === undefined ||
+      (typeof data.httpStatus === "number" &&
+        Number.isSafeInteger(data.httpStatus) &&
+        data.httpStatus >= 100 &&
+        data.httpStatus <= 599)) &&
     typeof data.message === "string" &&
     typeof data.retryable === "boolean"
   )
@@ -882,6 +892,7 @@ export type TaskToolMessagePart = {
   input?: unknown
   output?: unknown
   preliminary?: boolean
+  providerExecuted?: boolean
   state: TaskToolState
   title?: string
   toolCallId: string
@@ -942,6 +953,7 @@ export type TaskSessionSaveInput = {
 
 export type AiChatStartInput = {
   configId: string
+  continueFromMessageId?: string
   currentDocumentPath?: string
   regenerateMessageId?: string
   messages: TaskMessage[]

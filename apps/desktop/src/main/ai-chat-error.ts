@@ -140,7 +140,11 @@ export function classifyTaskRunError(
   explicitMessage?: string,
 ): TaskRunErrorDataV1 {
   const code = inferErrorCode(error, phase)
-  return taskRunError(code, phase, publicErrorMessage(error, explicitMessage))
+  const status = errorStatus(error)
+  return {
+    ...taskRunError(code, phase, publicErrorMessage(error, explicitMessage)),
+    ...(status !== null && status >= 100 && status <= 599 ? { httpStatus: status } : {}),
+  }
 }
 
 function inferToolErrorCode(message: string): TaskToolErrorCode {

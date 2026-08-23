@@ -90,6 +90,13 @@
 - 研究消息重新生成会创建新的 request，而不是修改旧运行。Transport 提交目标助手消息，主进程从其持久化
   `requestId` 解析 `resumedResearchRequestId`，把计划、问题覆盖、来源元数据、证据、推荐与结果克隆到新 run，并把
   provenance 写入资源摘要。续跑上下文携带当前稳定来源 ID；网页全文仍不入库，若要从继承来源提取新片段必须重新阅读。
+- 供应商在搜索/读取工具完成后、最终正文生成前失败时，Transport 会在 AI SDK 删除失败助手消息之前提取所有非
+  preliminary 的 `output-available` Tool Part；新 request 把这些 Part 作为已完成历史补回，并以
+  `continuedFromMessageId` 写入运行资源摘要。模型从工具结果之后继续综合，不重复同一搜索或读取；这条请求级续跑与
+  研究领域 provenance 可以叠加，但不会重放写入、审批或未完成工具。
+- 工作区工具按当前请求相关性开放，而不是因任务碰巧绑定工作区就自动开放。显式当前文档、Markdown 附件、对工作区/
+  本地文件的明确请求，或确实承接上一轮工作区工具结果时才组合 Markdown 读写工具；纯公开网页研究不会再“顺便看看
+  工作区有没有记录”。
 - `research_runs`、`research_questions`、`research_sources`、`research_evidence` 与
   `research_source_recommendations` 保存领域控制状态；消息中的研究进度卡只聚合真实 Tool Part 输入输出，不读取模型旁白。
 - 主进程直接收口 task session 的运行、等待输入、完成、取消与失败状态；`research-run-audit` 再核对事件连续性、
@@ -240,6 +247,9 @@ ResearchRun
 失败后重新生成不是从空白 Prompt 重做：新 run 复制可审计控制状态并继承证据，旧 run 保持不可变；`reading` 状态会
 重置为 `discovered`。因为网页正文没有长期保存，继承证据仍可用于综合，但新增声明或摘录必须再次调用 Reader。
 这种续跑解决“预算已耗尽、网络中断或工具 JSON 截断后从头研究”的浪费，同时没有承诺通用的任意步骤 durable replay。
+若失败发生在工具已经返回之后，重试还会复用消息中可公开持久化的 Tool Part；供应商原生工具的
+`providerExecuted` 标记随消息保存，避免把服务端搜索误还原成需要本地重新执行的工具。嵌套 RetryError 在进入公开
+字符串前提取稳定类别与可安全公开的 HTTP 状态，原始响应体、Header 和凭据仍不进入消息。
 
 ## 网页读取层级
 

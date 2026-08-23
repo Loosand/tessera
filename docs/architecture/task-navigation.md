@@ -150,17 +150,19 @@
   -> 恢复到实时流，完成后持久化完整消息
 ```
 
-运行元数据和每个有序事件同时写入 SQLite。页面切换优先从主进程内存续接；应用意外退出后，启动恢复会把未结束运行标记为 `interrupted`，追加带稳定 code、phase 与 retryable 的可见错误事件并重放中断前进度，同时把非等待中的 task session 收口到对应终态。若最新运行已经结束、但 renderer 尚未来得及把对应 `requestId` 写入助手消息，恢复接口仍会重放这次终态运行；renderer 保存完整助手消息后，同一运行不再被识别为待恢复，避免重复注入。读取历史事件时只在返回快照中临时合并连续 delta 并重新生成连续序号，SQLite 原始审计序列不改写。启动、流式和恢复阶段的异常都先在主进程分类，未知供应商载荷使用脱敏公开文案；初始化在 `task_run` 建立后失败时也先持久化同一失败事件。renderer 把版本化失败写入 `data-task-error`，同时兼容旧消息的无版本错误。工具输入或执行失败继续使用 AI SDK 标准 Tool Part 状态，并额外写入可恢复的 `data-tool-error`（稳定 code、retryable、`toolCallId`、`toolName`）；消息 UI 不重复渲染第二张失败卡，诊断与审计仍可读取结构化 Part。
+运行元数据和每个有序事件同时写入 SQLite。页面切换优先从主进程内存续接；应用意外退出后，启动恢复会把未结束运行标记为 `interrupted`，追加带稳定 code、phase 与 retryable 的可见错误事件并重放中断前进度，同时把非等待中的 task session 收口到对应终态。若最新运行已经结束、但 renderer 尚未来得及把对应 `requestId` 写入助手消息，恢复接口仍会重放这次终态运行；renderer 保存完整助手消息后，同一运行不再被识别为待恢复，避免重复注入。读取历史事件时只在返回快照中临时合并连续 delta 并重新生成连续序号，SQLite 原始审计序列不改写。启动、流式和恢复阶段的异常都先在 AI SDK 字符串化前分类，嵌套 RetryError 的稳定类别与安全 HTTP 状态进入 `data-task-error`，未知供应商载荷使用脱敏公开文案；初始化在 `task_run` 建立后失败时也先持久化同一失败事件。工具输入或执行失败继续使用 AI SDK 标准 Tool Part 状态，并额外写入可恢复的 `data-tool-error`（稳定 code、retryable、`toolCallId`、`toolName`）；消息 UI 不重复渲染第二张失败卡，诊断与审计仍可读取结构化 Part。
 
-模型供应商的原始网络流和内存 `ToolLoopAgent` 不能跨进程继续，因此恢复不会自动重放写工具。研究方式提供一条更窄的
-语义续跑：用户对失败的研究消息重新生成时，Transport 提交 `regenerateMessageId`；主进程优先从该消息持久化 metadata
-解析旧 `requestId`，显式参数只作为同一边界的后备，并把 `resumedResearchRequestId` 写入新 run 资源摘要。随后在新
-request 中克隆研究计划、来源元数据、证据、推荐和覆盖状态，注入续跑上下文；已执行副作用不重放，网页正文也不复制。
-这不是通用步骤级 durable runtime，普通写作/文件操作仍由用户从已恢复消息继续，自动步骤检查点和多窗口接管尚未实现。
+模型供应商的原始网络流和内存 `ToolLoopAgent` 不能跨进程继续，因此恢复不会自动重放写工具。消息级续跑先覆盖最常见
+断点：用户重试失败助手消息时，Transport 在 AI SDK 删除该消息前暂存非 preliminary 的成功 Tool Part；新 request 把
+它们补到输入末尾，主进程复核消息 ID、可重试失败和成功结果，再把 `continuedFromMessageId` 写入资源摘要。模型因此从
+已完成工具结果之后继续，未完成工具、写入和审批不会重放。研究方式在此基础上再提交 `regenerateMessageId`，主进程从
+持久化 metadata 解析旧 `requestId`，把 `resumedResearchRequestId` 写入资源摘要，并克隆计划、来源元数据、证据、推荐
+和覆盖状态；网页正文仍不复制。这仍不是自动步骤级 durable runtime，多窗口接管和无用户动作的后台 checkpoint 续跑
+尚未实现。
 
 ## 工作区 Agent 运行时
 
-- AI SDK `ToolLoopAgent` 通过 `@tessera/agent-runtime` 的泛型 `AgentRuntime` 端口运行；主 Agent 获得共享客户端问题工具，以及四个只读 Markdown 工具、一个需要审批的写工具、一个只读研究子 Agent 工具和主进程按当前配置注入的 MCP 动态工具；研究 Skill 额外获得无副作用的计划展示工具。根路径和 MCP 秘密不进入 IPC、renderer 或模型提示词，结构化交互工具也不扩大文件或网络权限。
+- AI SDK `ToolLoopAgent` 通过 `@tessera/agent-runtime` 的泛型 `AgentRuntime` 端口运行；主 Agent 获得共享客户端问题工具；只有当前请求明确涉及工作区/文档、显式携带 Markdown 材料，或确实承接上一轮工作区工具结果时，才组合四个只读 Markdown 工具、一个需要审批的写工具和一个只读研究子 Agent 工具。MCP 动态工具仍由主进程按配置注入，研究 Skill 额外获得无副作用的计划展示工具。根路径和 MCP 秘密不进入 IPC、renderer 或模型提示词，结构化交互工具也不扩大文件或网络权限。
 - 工具只遍历可见的 `.md` / `.markdown`，忽略隐藏目录、`.git`、`.tessera`、`node_modules` 和遍历时遇到的符号链接。
 - 每次直接读取都会重新执行相对路径、真实路径与扩展名校验；`../`、绝对路径、隐藏路径和指向工作区外部的符号链接均不可用。当前文档只作为相对路径提示传入，读取时执行相同校验。
 - 单文件读取上限为 256 KiB；文件列表最多返回 500 项、最多扫描 2,000 项；搜索最多扫描 8 MiB 并返回 100 个匹配，触顶时返回结构化 `truncated`、上限和跳过文件信息。
@@ -182,5 +184,5 @@ request 中克隆研究计划、来源元数据、证据、推荐和覆盖状态
 - 以托管内容库 Inbox 作为当前实验实现 Artifact、项目创建和跨工作区文档移动，同时保持领域协议可替换，以便评估数据库与完全外部工作区方案。
 - 记录完成原因、token 用量和每轮耗时。
 - 为长会话增加上下文裁剪或摘要，但不改写持久化的用户原文。
-- 在已实现研究语义续跑之外，为通用 Agent 增加桌面 durable 步骤检查点，在不重放已执行副作用的前提下自动续跑。
+- 在已实现消息级工具结果续跑与研究语义续跑之外，为通用 Agent 增加桌面 durable 步骤检查点，在不重放已执行副作用的前提下自动后台续跑。
 - 把 MCP Resources / Prompts / OAuth、按任务绑定与运行策略快照接入现有权限网关；建设 Shell 独立审批面，默认保持关闭。

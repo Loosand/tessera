@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 工作区文档写入输入 Schema、外部 MCP 工具、研究阶段文本与 AI SDK Schema/审批适配
- * [OUTPUT]: DeepSeek 等供应商可接受的根对象 Schema、create/update 条件校验、研究草稿隐藏和 MCP 强制审批回归
+ * [INPUT]: 工作区文档写入输入 Schema、请求相关性、外部 MCP 工具、研究阶段文本与 AI SDK Schema/审批适配
+ * [OUTPUT]: DeepSeek 等供应商可接受的根对象 Schema、工作区能力相关性、create/update 条件校验、研究草稿隐藏和 MCP 强制审批回归
  * [POS]: @tessera/ai/server 工作区 Agent 工具协议单元测试
  * [DOC]: docs/architecture/mcp.md、docs/architecture/task-navigation.md
  *
@@ -15,10 +15,76 @@ import { describe, expect, it } from "vitest"
 import {
   createExternalAgentToolSet,
   shouldHideResearchDraftText,
+  workspaceAccessRelevant,
   workspaceDocumentChangeInputSchema,
 } from "./agent-runtime"
 
 const validBaseContentHash = "a".repeat(64)
+
+describe("工作区工具相关性", () => {
+  it("公开网页问题不因为任务绑定工作区就暴露本地工具", () => {
+    expect(
+      workspaceAccessRelevant([
+        {
+          id: "user-public",
+          role: "user",
+          parts: [{ type: "text", text: "《贵族生活》有哪些歌，双方分别负责什么？" }],
+        },
+      ]),
+    ).toBe(false)
+  })
+
+  it("明确工作区请求、Markdown 附件和承接本地工具结果时保持授权", () => {
+    expect(
+      workspaceAccessRelevant([
+        {
+          id: "user-workspace",
+          role: "user",
+          parts: [{ type: "text", text: "请检查工作区里的研究文档" }],
+        },
+      ]),
+    ).toBe(true)
+    expect(
+      workspaceAccessRelevant(
+        [
+          {
+            id: "user-follow-up",
+            role: "user",
+            parts: [{ type: "text", text: "继续说明第二点" }],
+          },
+        ],
+        "notes/research.md",
+      ),
+    ).toBe(true)
+    expect(
+      workspaceAccessRelevant([
+        {
+          id: "user-first",
+          role: "user",
+          parts: [{ type: "text", text: "检查本地材料" }],
+        },
+        {
+          id: "assistant-read",
+          role: "assistant",
+          parts: [
+            {
+              type: "tool-read-workspace-file",
+              toolCallId: "read-1",
+              state: "output-available",
+              input: { path: "notes/research.md" },
+              output: { content: "证据" },
+            },
+          ],
+        },
+        {
+          id: "user-follow-up",
+          role: "user",
+          parts: [{ type: "text", text: "那第二点呢？" }],
+        },
+      ]),
+    ).toBe(true)
+  })
+})
 
 describe("工作区 Agent 写入工具 Schema", () => {
   it("向供应商发送顶层 type 为 object 的 JSON Schema", async () => {

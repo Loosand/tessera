@@ -163,6 +163,7 @@ function validateTaskPart(part: unknown): part is TaskMessagePart {
     !validateOptionalString(part.title) ||
     (part.type === "dynamic-tool" && typeof part.toolName !== "string") ||
     (part.preliminary !== undefined && typeof part.preliminary !== "boolean") ||
+    (part.providerExecuted !== undefined && typeof part.providerExecuted !== "boolean") ||
     !validateOptionalString(part.errorText)
   ) {
     return false

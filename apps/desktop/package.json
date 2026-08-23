@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
   "name": "@tessera/desktop",
-  "version": "0.0.1",
+  "version": "0.1.0-alpha.1",
   "description": "免费、开源、本地优先的 AI 研究与写作 Agent。",
   "author": "Tessera Contributors",
   "private": true,
@@ -15,7 +15,8 @@
   "scripts": {
     "dev": "electron-vite dev --watch",
     "build": "electron-vite build",
-    "dist:mac": "bun run build && bun scripts/release-preflight.ts && electron-builder --config electron-builder.yml --mac --arm64 --publish never",
+    "dist:mac": "bun run build && bun scripts/release-preflight.ts && electron-builder --config electron-builder.yml --mac --arm64 --publish never -c.mac.identity=- -c.mac.notarize=false",
+    "dist:mac:release": "bun run build && bun scripts/release-preflight.ts --release && electron-builder --config electron-builder.yml --mac --arm64 --publish never",
     "benchmark:editor": "bun run build && electron scripts",
     "benchmark:editor:check": "bun run build && electron scripts --check",
     "benchmark:editor:parser": "bun scripts/editor-parser-profile.ts",

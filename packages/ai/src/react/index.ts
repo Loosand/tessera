@@ -23,6 +23,7 @@ export {
 } from "./task-ui-message"
 export {
   type UseElectronChatOptions,
+  completedToolContinuationMessage,
   hasPendingTaskUserInput,
   hasTaskRunError,
   shouldAutomaticallyContinueTask,
