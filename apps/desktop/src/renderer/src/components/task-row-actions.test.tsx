@@ -11,6 +11,7 @@
  */
 
 import type { TaskSessionSummary } from "@tessera/contracts"
+import React from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
 import { TaskRowActions } from "./task-row-actions"
@@ -41,11 +42,7 @@ describe("TaskRowActions", () => {
 
   it("归档对话只提供恢复按钮", () => {
     const markup = renderToStaticMarkup(
-      <TaskRowActions
-        task={{ ...TASK, archivedAt: 3 }}
-        onSetArchived={vi.fn()}
-        onSetPinned={vi.fn()}
-      />,
+      <TaskRowActions task={{ ...TASK, archivedAt: 3 }} onSetArchived={vi.fn()} onSetPinned={vi.fn()} />,
     )
 
     expect(markup).toContain('aria-label="恢复“测试对话”"')

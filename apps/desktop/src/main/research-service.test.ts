@@ -160,6 +160,28 @@ describe("研究领域完成门槛", () => {
       researchFinishIssue({ awaitingUserInput: false, finalTextCharacters: 0, outcome: null }),
     ).toContain("证据与覆盖检查前结束")
     expect(
+      researchFinishIssue({
+        awaitingUserInput: false,
+        finalTextCharacters: 0,
+        outcome: null,
+        progress: {
+          evidenceCount: 0,
+          sourceCounts: { discovered: 4, shortlisted: 0, reading: 0, read: 1, unusable: 3 },
+        },
+      }),
+    ).toContain("证据登记没有完成")
+    expect(
+      researchFinishIssue({
+        awaitingUserInput: false,
+        finalTextCharacters: 0,
+        outcome: null,
+        progress: {
+          evidenceCount: 0,
+          sourceCounts: { discovered: 4, shortlisted: 0, reading: 0, read: 0, unusable: 3 },
+        },
+      }),
+    ).toContain("来源均不可用")
+    expect(
       researchFinishIssue({ awaitingUserInput: false, finalTextCharacters: 12, outcome: "complete" }),
     ).toContain("没有交付最终报告")
     expect(

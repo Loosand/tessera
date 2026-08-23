@@ -11,15 +11,11 @@
  */
 
 import type { TaskSessionSummary } from "@tessera/contracts"
-import {
-  Archive02Icon,
-  ArchiveRestoreIcon,
-  PinIcon,
-} from "@tessera/design-system/components/icons"
+import { Archive02Icon, ArchiveRestoreIcon, PinIcon } from "@tessera/design-system/components/icons"
 import { Button } from "@tessera/design-system/components/ui/button"
 import { Icon } from "@tessera/design-system/components/ui/icon"
 import { cn } from "@tessera/design-system/lib/utils"
-import { type MouseEvent, useState } from "react"
+import React, { type MouseEvent, useState } from "react"
 
 type TaskRowActionsProps = Readonly<{
   className?: string
@@ -28,12 +24,7 @@ type TaskRowActionsProps = Readonly<{
   onSetPinned: (taskId: string, pinned: boolean) => Promise<boolean>
 }>
 
-export function TaskRowActions({
-  className,
-  task,
-  onSetArchived,
-  onSetPinned,
-}: TaskRowActionsProps) {
+export function TaskRowActions({ className, task, onSetArchived, onSetPinned }: TaskRowActionsProps) {
   const [pending, setPending] = useState<"archive" | "pin" | null>(null)
   const archived = task.archivedAt !== null
   const pinned = task.pinnedAt !== null
@@ -85,9 +76,7 @@ export function TaskRowActions({
         aria-label={archived ? `恢复“${task.title}”` : `归档“${task.title}”`}
         title={archived ? "移出归档" : "归档"}
         disabled={pending !== null}
-        onClick={(event) =>
-          void runAction(event, "archive", () => onSetArchived(task.id, !archived))
-        }
+        onClick={(event) => void runAction(event, "archive", () => onSetArchived(task.id, !archived))}
       >
         {pending === "archive" ? (
           <span

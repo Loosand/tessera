@@ -143,19 +143,19 @@ export async function createDocument(rootPath: string, parentRelativePath = ""):
 
   while (true) {
     try {
-      await stat(absolutePath)
+      await writeFile(absolutePath, "# 未命名文档\n\n从这里开始记录。\n", {
+        encoding: "utf8",
+        flag: "wx",
+      })
+      break
+    } catch (error) {
+      if (!hasErrorCode(error, "EEXIST")) throw error
       sequence += 1
       fileName = `未命名文档 ${sequence + 1}.md`
       absolutePath = join(directoryPath, fileName)
-    } catch {
-      break
     }
   }
 
-  await writeFile(absolutePath, "# 未命名文档\n\n从这里开始记录。\n", {
-    encoding: "utf8",
-    flag: "wx",
-  })
   return readDocument(rootPath, relativeWorkspacePath(rootPath, absolutePath))
 }
 
@@ -188,16 +188,16 @@ export async function createDirectory(
 
   while (true) {
     try {
-      await stat(absolutePath)
+      await mkdir(absolutePath)
+      break
+    } catch (error) {
+      if (!hasErrorCode(error, "EEXIST")) throw error
       sequence += 1
       name = `新建文件夹 ${sequence + 1}`
       absolutePath = join(parentPath, name)
-    } catch {
-      break
     }
   }
 
-  await mkdir(absolutePath)
   return { name, relativePath: relativeWorkspacePath(rootPath, absolutePath) }
 }
 

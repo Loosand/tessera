@@ -149,7 +149,27 @@ describe("统一 Task Agent 动态配置", () => {
     ).toEqual({ activeTools: [], mode: "final-answer", toolChoice: "none" })
   })
 
-  it("深读后先强制登记证据，并为完成检查后的最终答复保留一步", () => {
+  it("深读后优先登记证据，同时保留重新深读和部分完成的逃生路径", () => {
+    expect(
+      researchStepPolicy({
+        activeTools: ["web_search", "read-web-source", "record-research-evidence", "finalize-research"],
+        maxSteps: 8,
+        progress: {
+          phase: "reading",
+          planPublished: true,
+          outcome: null,
+          questionCounts: { pending: 4, covered: 0, partial: 0, uncovered: 0 },
+          sourceCounts: { discovered: 4, shortlisted: 0, reading: 0, read: 2, unusable: 1 },
+          evidenceCount: 0,
+          recommendationCount: 0,
+        },
+        stepNumber: 3,
+      }),
+    ).toEqual({
+      activeTools: ["read-web-source", "record-research-evidence", "finalize-research"],
+      mode: "evidence",
+      toolChoice: "required",
+    })
     expect(
       researchStepPolicy({
         activeTools: ["web_search", "read-web-source", "record-research-evidence", "finalize-research"],
@@ -166,8 +186,8 @@ describe("统一 Task Agent 动态配置", () => {
         stepNumber: 6,
       }),
     ).toEqual({
-      activeTools: ["record-research-evidence"],
-      mode: "evidence",
+      activeTools: ["finalize-research"],
+      mode: "finalize-partial",
       toolChoice: "required",
     })
     expect(researchRunShouldStopAfterStep({ finalAnswerStarted: false, maxSteps: 8, stepCount: 8 })).toBe(

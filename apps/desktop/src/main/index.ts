@@ -930,6 +930,7 @@ function registerIpcHandlers() {
                 awaitingUserInput,
                 finalTextCharacters: researchFinalTextCharacters,
                 outcome: researchOutcome,
+                progress: researchService.getProgress(),
               })
             : null
         const normalizedRunChunk = normalizeAiChatErrorChunk(incomingChunk)

@@ -13,6 +13,7 @@
 import {
   FINALIZE_RESEARCH_TOOL_NAME,
   PUBLISH_RESEARCH_PLAN_TOOL_NAME,
+  READ_WEB_SOURCE_TOOL_NAME,
   RECOMMEND_RESEARCH_SOURCES_TOOL_NAME,
   RECORD_RESEARCH_EVIDENCE_TOOL_NAME,
   REQUEST_USER_INPUT_TOOL_NAME,
@@ -28,8 +29,8 @@ import {
   type JSONValue,
   type LanguageModel,
   NoSuchToolError,
-  ToolLoopAgent,
   type ToolCallRepairFunction,
+  ToolLoopAgent,
   type ToolSet,
   generateText,
   isStepCount,
@@ -202,20 +203,25 @@ export function researchStepPolicy(
       toolChoice: "required",
     }
   }
-  const evidenceTools = input.activeTools.filter((name) => name === RECORD_RESEARCH_EVIDENCE_TOOL_NAME)
-  if (
-    input.progress.sourceCounts.read > 0 &&
-    input.progress.evidenceCount === 0 &&
-    evidenceTools.length > 0
-  ) {
-    return { activeTools: evidenceTools, mode: "evidence", toolChoice: "required" }
-  }
   if (input.stepNumber >= Math.max(1, input.maxSteps - 2)) {
     return {
       activeTools: input.activeTools.filter((name) => name === FINALIZE_RESEARCH_TOOL_NAME),
       mode: "finalize-partial",
       toolChoice: "required",
     }
+  }
+  const evidenceTools = input.activeTools.filter(
+    (name) =>
+      name === READ_WEB_SOURCE_TOOL_NAME ||
+      name === RECORD_RESEARCH_EVIDENCE_TOOL_NAME ||
+      name === FINALIZE_RESEARCH_TOOL_NAME,
+  )
+  if (
+    input.progress.sourceCounts.read > 0 &&
+    input.progress.evidenceCount === 0 &&
+    evidenceTools.length > 0
+  ) {
+    return { activeTools: evidenceTools, mode: "evidence", toolChoice: "required" }
   }
   return {
     activeTools: input.activeTools.filter((name) => name !== REQUEST_USER_INPUT_TOOL_NAME),
@@ -357,7 +363,7 @@ export function createTaskAgent<TOOLS extends ToolSet>({
                   policy.mode === "plan"
                     ? "运行时要求：这是显式研究。必须先调用 publish-research-plan；只有核心语义确实歧义时才可改为 request-user-input。工具会按阶段动态开放，不要分析当前不可见的后续工具。"
                     : policy.mode === "evidence"
-                      ? "运行时要求：已经深读来源但尚未登记证据。现在只调用 record-research-evidence；每次最多并行登记 4 条短原文证据，下一步会继续核对覆盖，不要继续搜索、阅读或输出最终答复。"
+                      ? "运行时要求：已经尝试深读来源但尚未登记证据。优先调用 record-research-evidence，每次最多并行登记 4 条短原文证据；如果当前运行没有该来源正文或正文不足，可以调用 read-web-source 重新深读已发现来源；合理重读后仍无可核查材料时，调用 finalize-research 以 partial 如实保留限制。不要继续盲目搜索或直接输出最终答复。"
                       : policy.mode === "curation"
                         ? "运行时要求：证据与覆盖检查已经满足，但还没有形成可供用户选择保存的来源推荐。现在只调用 recommend-research-sources，推荐少量真正值得长期保留的已读材料并说明价值；推荐不等于保存。"
                         : policy.mode === "finalize"

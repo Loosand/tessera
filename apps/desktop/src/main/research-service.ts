@@ -113,10 +113,21 @@ export function researchFinishIssue(
     awaitingUserInput: boolean
     finalTextCharacters: number
     outcome: "complete" | "partial" | null
+    progress?: Pick<TaskResearchProgress, "evidenceCount" | "sourceCounts">
   }>,
 ) {
   if (input.awaitingUserInput) return null
   if (!input.outcome) {
+    if (input.progress && input.progress.sourceCounts.read > 0 && input.progress.evidenceCount === 0) {
+      return "已经读取来源，但证据登记没有完成。已保留来源进度；重试后会重新读取缺少正文的来源并继续核验。"
+    }
+    if (
+      input.progress &&
+      input.progress.sourceCounts.read === 0 &&
+      input.progress.sourceCounts.unusable > 0
+    ) {
+      return "本轮尝试读取的来源均不可用，无法形成可核查证据。已保留搜索与失败记录，请重试或缩小研究范围。"
+    }
     return "研究运行在通过证据与覆盖检查前结束，已保留当前计划和来源进度，请重试继续。"
   }
   if (input.finalTextCharacters < 40) {

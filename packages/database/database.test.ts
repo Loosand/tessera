@@ -310,6 +310,95 @@ describe("本地数据库基建", () => {
     client.close()
   })
 
+  test("续研会重新读取没有持久化证据支撑的已读来源", () => {
+    const client = openDatabase({ path: ":memory:" })
+    const now = new Date(100)
+    saveTaskSession(client, {
+      id: "task-resume-reading",
+      mode: "chat",
+      workspaceId: null,
+      title: "续研正文恢复",
+      status: "running",
+      updatedAt: now,
+      messagePayloads: [],
+    })
+    startTaskRun(client, {
+      requestId: "run-before-resume",
+      taskId: "task-resume-reading",
+      configId: "openai",
+      providerId: "openai",
+      modelId: "gpt-5",
+      mode: "chat",
+      skillId: "research",
+      reasoning: "high",
+      webSearch: true,
+      policyJson: "{}",
+      resourceSummaryJson: "{}",
+      startedAt: now,
+    })
+    startResearchRun(client, {
+      requestId: "run-before-resume",
+      taskId: "task-resume-reading",
+      startedAt: now,
+    })
+    publishResearchPlan(client, {
+      requestId: "run-before-resume",
+      objective: "核实一项公开事实",
+      scope: "公开网页",
+      deliverable: "研究摘要",
+      questions: [{ id: "q1", title: "事实是什么？" }],
+    })
+    saveResearchSource(client, {
+      id: "source-without-evidence",
+      requestId: "run-before-resume",
+      url: "https://example.com/source",
+      canonicalUrl: "https://example.com/source",
+      finalUrl: "https://example.com/source",
+      title: "Example source",
+      author: null,
+      publishedAt: null,
+      discoveredByQuery: "example source",
+      questionIds: ["q1"],
+      status: "read",
+      contentType: "text/html",
+      contentHash: "sha256:ephemeral-body",
+      charCount: 1_200,
+      truncated: false,
+      errorMessage: null,
+    })
+    startTaskRun(client, {
+      requestId: "run-after-resume",
+      taskId: "task-resume-reading",
+      configId: "openai",
+      providerId: "openai",
+      modelId: "gpt-5",
+      mode: "chat",
+      skillId: "research",
+      reasoning: "high",
+      webSearch: true,
+      policyJson: "{}",
+      resourceSummaryJson: '{"resumedResearchRequestId":"run-before-resume"}',
+      startedAt: new Date(200),
+    })
+    startResearchRun(client, {
+      requestId: "run-after-resume",
+      taskId: "task-resume-reading",
+      startedAt: new Date(200),
+    })
+
+    const resumed = resumeResearchRun(client, {
+      fromRequestId: "run-before-resume",
+      taskId: "task-resume-reading",
+      toRequestId: "run-after-resume",
+    })
+
+    expect(resumed).toMatchObject({
+      requestId: "run-after-resume",
+      sources: [{ canonicalUrl: "https://example.com/source", status: "discovered" }],
+    })
+    client.close()
+  })
+
   test("内容库、Artifact、动态资源与项目操作只保存控制关系", () => {
     const client = openDatabase({ path: ":memory:" })
     const now = new Date(100)
@@ -828,10 +917,7 @@ describe("本地数据库基建", () => {
 
     expect(setTaskSessionPinned(client, "older-task", true)?.pinnedAt).not.toBeNull()
     expect(setTaskSessionArchived(client, "middle-task", true)?.archivedAt).not.toBeNull()
-    expect(listDefaultTaskSessions(client).map((task) => task.id)).toEqual([
-      "older-task",
-      "newer-task",
-    ])
+    expect(listDefaultTaskSessions(client).map((task) => task.id)).toEqual(["older-task", "newer-task"])
     expect(
       listDefaultTaskSessionsPage(client, { archived: true, limit: 10, offset: 0 }).items.map(
         (task) => task.id,

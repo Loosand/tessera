@@ -133,7 +133,9 @@ export function AllTasksPage({
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground tabular-nums">{taskPage.result.total} 个任务</span>
+              <span className="text-xs text-muted-foreground tabular-nums">
+                {taskPage.result.total} 个任务
+              </span>
               <Button
                 type="button"
                 variant="ghost"
@@ -217,7 +219,9 @@ export function AllTasksPage({
                   {showArchived ? "这个 Space 没有已归档任务" : "这个 Space 还没有任务"}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {showArchived ? "归档的对话会显示在这里，并可随时恢复。" : "从“新任务”开始一次对话后，会显示在这里。"}
+                  {showArchived
+                    ? "归档的对话会显示在这里，并可随时恢复。"
+                    : "从“新任务”开始一次对话后，会显示在这里。"}
                 </p>
               </div>
             ) : null}

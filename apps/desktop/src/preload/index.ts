@@ -55,8 +55,7 @@ const api = Object.freeze({
   saveTask: (input) => invokeDesktop(IPC_CHANNELS.taskSave, input),
   renameTask: (taskId, title) => invokeDesktop(IPC_CHANNELS.taskRename, taskId, title),
   setTaskPinned: (taskId, pinned) => invokeDesktop(IPC_CHANNELS.taskSetPinned, taskId, pinned),
-  setTaskArchived: (taskId, archived) =>
-    invokeDesktop(IPC_CHANNELS.taskSetArchived, taskId, archived),
+  setTaskArchived: (taskId, archived) => invokeDesktop(IPC_CHANNELS.taskSetArchived, taskId, archived),
   deleteTask: (taskId) => invokeDesktop(IPC_CHANNELS.taskDelete, taskId),
   cancelClose: () => sendDesktop(IPC_CHANNELS.appCancelClose),
   confirmClose: () => sendDesktop(IPC_CHANNELS.appConfirmClose),

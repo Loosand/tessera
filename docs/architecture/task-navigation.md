@@ -3,7 +3,8 @@
 > 代码源头：`packages/contracts/src/index.ts`、`packages/database/schema.ts`、
 > `packages/database/task-session-repository.ts`、`apps/desktop/src/main/task-service.ts`、
 > `apps/desktop/src/main/ai-chat-error.ts`、
-> `apps/desktop/src/main/read-only-agent-tools.ts`、`apps/desktop/src/main/mcp-service.ts`、`packages/skills/src/index.ts`、`packages/ai/src/server/agent-runtime.ts`、
+> `apps/desktop/src/main/read-only-agent-tools.ts`、`apps/desktop/src/main/workspace-file-service.ts`、
+> `apps/desktop/src/main/mcp-service.ts`、`packages/skills/src/index.ts`、`packages/ai/src/server/agent-runtime.ts`、
 > `packages/ai/src/server/task-interaction-tools.ts`、`packages/ai/src/react/use-electron-chat.ts`、`apps/desktop/src/main/index.ts`、
 > `apps/desktop/src/renderer/src/hooks/use-tasks.ts`、`apps/desktop/src/renderer/src/components/app-shell.tsx`、
 > `apps/desktop/src/renderer/src/components/task-page.tsx`、

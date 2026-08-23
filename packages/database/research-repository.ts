@@ -164,6 +164,11 @@ export function resumeResearchRun(
       .where(eq(researchSourceRecommendations.requestId, input.fromRequestId))
       .orderBy(asc(researchSourceRecommendations.createdAt))
       .all()
+    const evidenceSourceIds = new Set(evidence.map((item) => item.sourceId))
+    const resumedSourceStatus = (source: ResearchSourceRecord) =>
+      source.status === "reading" || (source.status === "read" && !evidenceSourceIds.has(source.id))
+        ? ("discovered" as const)
+        : source.status
     const sourceIds = new Map(
       sources.map((source) => [source.id, resumedSourceId(input.toRequestId, source.canonicalUrl)]),
     )
@@ -224,7 +229,7 @@ export function resumeResearchRun(
             ...source,
             id: sourceIds.get(source.id) ?? resumedSourceId(input.toRequestId, source.canonicalUrl),
             requestId: input.toRequestId,
-            status: source.status === "reading" ? ("discovered" as const) : source.status,
+            status: resumedSourceStatus(source),
             updatedAt: resumedAt,
           })),
         )

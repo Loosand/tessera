@@ -105,9 +105,7 @@ export function listWorkspaceTaskSessionsPage(
   const items = selectTaskSummaries(client)
     .where(and(eq(taskSessions.workspaceId, workspaceId), scope))
     .orderBy(
-      archived
-        ? desc(taskSessions.archivedAt)
-        : sql`${taskSessions.pinnedAt} IS NOT NULL DESC`,
+      archived ? desc(taskSessions.archivedAt) : sql`${taskSessions.pinnedAt} IS NOT NULL DESC`,
       desc(taskSessions.pinnedAt),
       desc(taskSessions.updatedAt),
       desc(taskSessions.createdAt),
@@ -130,9 +128,7 @@ export function listDefaultTaskSessionsPage(client: DatabaseClient, query: TaskS
   const items = selectTaskSummaries(client)
     .where(and(isNull(taskSessions.workspaceId), scope))
     .orderBy(
-      archived
-        ? desc(taskSessions.archivedAt)
-        : sql`${taskSessions.pinnedAt} IS NOT NULL DESC`,
+      archived ? desc(taskSessions.archivedAt) : sql`${taskSessions.pinnedAt} IS NOT NULL DESC`,
       desc(taskSessions.pinnedAt),
       desc(taskSessions.updatedAt),
       desc(taskSessions.createdAt),

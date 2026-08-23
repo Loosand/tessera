@@ -382,6 +382,20 @@ describe("DesktopTaskService", () => {
       total: 1,
       items: [{ id: "placement-a" }],
     })
+    const archived = service.read("placement-a")
+    expect(
+      service.save(
+        {
+          ...archived,
+          messages: [
+            ...archived.messages,
+            { id: "placement-a-continued", role: "user", parts: [{ type: "text", text: "继续" }] },
+          ],
+        },
+        null,
+      ).archivedAt,
+    ).toBeNull()
+    service.setArchived("placement-a", true)
     expect(service.setArchived("placement-a", false).archivedAt).toBeNull()
     expect(service.listDefault().map((task) => task.id)).toContain("placement-a")
     client.close()
