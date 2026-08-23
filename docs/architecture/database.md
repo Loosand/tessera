@@ -38,8 +38,8 @@ Markdown 文件是已批准正文的内容事实源。SQLite 保存工作区登�
 - **已实现**：`app_settings` 保存由主进程验证的非敏感应用偏好；研究网络只允许 `system` / `direct`，默认值由领域
   服务提供，当前值在研究启动时复制进该 run 的脱敏资源摘要。代理地址和凭据不写入此表。
 - **已实现**：通用任务仓储保存兼容 `chat` / `agent` mode、下一轮内置/用户 Skill 或 `question-answering` 标记、可选初始工作区、可恢复等待状态和版本化消息；助手消息 metadata 可保存仅限本机的 `positive` / `negative` 反馈与更新时间，并继续关联同一 `requestId`。mode 与初始归属创建后不可变，但不再决定当前轮权限，工作区工具只来自眼下打开且已授权的工作区。
-- **已实现**：默认空间与文件工作区任务通过 SQLite `limit` / `offset` 返回稳定分页和独立总数；排序使用 `updated_at`、`created_at` 与 `id` 作为确定性键，渲染层可以访问旧 100 条列表上限之外的全部会话。
-- **已实现**：任务可重命名或删除；删除 `task_sessions` 时由外键级联清理对应 `task_messages`。
+- **已实现**：默认空间与文件工作区任务通过 SQLite `limit` / `offset` 返回活动/归档分区的稳定分页和独立总数；活动列表先按 `pinned_at` 置顶，再使用 `updated_at`、`created_at` 与 `id` 作为确定性键，渲染层可以访问旧 100 条列表上限之外的全部会话。
+- **已实现**：任务可重命名、置顶、归档、恢复或删除；归档保留消息但从活动和最近列表移出，删除 `task_sessions` 时由外键级联清理对应 `task_messages`。
 - **已实现**：`task_runs` / `task_run_events` 在模型调用前创建运行 ID，固化本轮完整 RunPolicy、兼容查询列与资源摘要，并按 task/request/sequence 保存公开流事件；结束时从 AI SDK `onStepEnd` / `onEnd` 写入 SDK call、完成原因、Token/缓存和性能汇总，启动时把未结束运行标记为中断供任务页重放。
 - **已实现**：连续正文、推理和工具参数增量在分配 sequence 前顺序安全合并，SQLite 仍保存完整语义边界与终止事件，
   不把逐 token 粒度当作恢复事实。
@@ -53,6 +53,7 @@ Markdown 文件是已批准正文的内容事实源。SQLite 保存工作区登�
 - **已实现**：`0016-app-settings` 增加应用级键值表，首个消费者是研究网页的系统代理/直连模式。
 - **已实现**：`0017-research-source-recommendations` 把证据链来源推荐、用户保存状态与材料文档稳定 ID 分开保存；
   推荐本身不创建正文，用户明确选择后才关联内容库中的 Markdown Artifact。
+- **已实现**：`0018-task-placement` 为任务追加 `pinned_at` / `archived_at` 与作用域索引；置顶和归档不改写真实对话 `updated_at`，继续已归档对话时正常保存会清除归档状态。
 - **已实现**：研究重新生成创建新 task run，并在 `resource_summary_json.resumedResearchRequestId` 保存 provenance；仓储把
   计划、问题、来源元数据、证据、推荐和完成状态克隆到新 request，重新映射稳定 ID。网页正文不克隆，继承来源如需
   新证据必须重新读取；旧 run 保持不可变。
@@ -63,7 +64,7 @@ Markdown 文件是已批准正文的内容事实源。SQLite 保存工作区登�
 
 以下控制层能力已随混合原型实现，最终正文方案仍按[统一创作 Agent 与内容存储探索](unified-creation-agent.md)评审：
 
-- `task_sessions` 只承担会话身份、标题、状态和时间；已发布的 mode、`skill_id` 与单一 `workspace_id` 保留为旧任务兼容字段，不继续作为新任务的完整权限事实。
+- `task_sessions` 只承担会话身份、标题、状态、置顶/归档位置和时间；已发布的 mode、`skill_id` 与单一 `workspace_id` 保留为旧任务兼容字段，不继续作为新任务的完整权限事实。
 - `task_runs` 已保存本轮实际内部 mode、显式 Skill、联网/思考兼容查询列、完整 `policy_json`、包含可选研究续跑来源的 `resource_summary_json`，以及完成原因、输入/输出/推理与缓存读写 Token、步骤/工具计数、首输出/模型/工具/总耗时；后续增加规范化资源关系。同一会话不同 run 可以使用不同策略。
 - `task_resource_bindings` 记录 Task/Run 与 Workspace、Document、Attachment 的动态关系和角色；恢复历史时以 run 快照解释模型当时可见的资源。
 - `artifacts` 为 Agent 创建或修改的 Markdown 建立稳定逻辑 ID、当前工作区/相对路径、创建 run 和状态。移动文件改变路径关系，不改变会话或 Artifact 身份。
@@ -96,7 +97,7 @@ schema 变化必须追加迁移，并同步结构测试。`0015-research-questio
 | `agent_sessions` | Agent 会话状态与标题 | 否 |
 | `agent_events` | 会话的有序事件流 | 否 |
 | `permission_decisions` | 工具动作、资源和权限结果审计 | 否 |
-| `task_sessions` | Chat/Agent 共用的内部 mode、创作方式/可选内置或用户 Skill、工作区绑定、标题、运行状态和等待输入标记 | 否 |
+| `task_sessions` | Chat/Agent 共用的内部 mode、创作方式/可选内置或用户 Skill、工作区绑定、标题、运行状态、等待输入、置顶和归档标记 | 否 |
 | `task_messages` | 按序保存的版本化消息 Part、模型/运行元数据与本地回答反馈 | 否 |
 | `task_runs` | 每次模型运行的供应商、模型、完整 RunPolicy、资源摘要、兼容策略列、状态、事件游标和无正文运行汇总 | 否 |
 | `task_run_events` | 按 request/sequence 保存的公开 AI SDK 流事件检查点 | 否 |

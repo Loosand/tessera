@@ -115,6 +115,8 @@ export function AppShell({ appInfo }: AppShellProps) {
     persistActiveTask,
     renameTask,
     deleteTask,
+    setTaskArchived,
+    setTaskPinned,
     setActiveTaskSkill,
     startNewTask,
   } = useTasks(workspace?.id)
@@ -407,6 +409,8 @@ export function AppShell({ appInfo }: AppShellProps) {
                 onRenameDirectory={(relativePath) => void renameDirectory(relativePath)}
                 onRenameDocument={(relativePath) => void renameDocument(relativePath)}
                 onRenameTask={renameTask}
+                onSetTaskArchived={setTaskArchived}
+                onSetTaskPinned={setTaskPinned}
                 onRevealWorkspace={(workspaceId) => void revealWorkspace(workspaceId)}
                 onRevealWorkspaceEntry={(relativePath) => void revealWorkspaceEntry(relativePath)}
                 onSelectWorkspace={() => void chooseWorkspace()}
@@ -439,6 +443,8 @@ export function AppShell({ appInfo }: AppShellProps) {
               onOpenSettings={openSettings}
               onOpenTask={(task) => void openTaskSummary(task)}
               onRenameTask={renameTask}
+              onSetTaskArchived={setTaskArchived}
+              onSetTaskPinned={setTaskPinned}
               onToggleSidebar={() => setSidebarOpen((current) => !current)}
             />
           </div>

@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 当前 Space、服务端分页任务读取、作用域任务实时快照、文件索引、最近文件工作区与任务/文件/Skill/Space 操作
- * [OUTPUT]: Eigent 风格内嵌一级侧栏，顶部切换 Space，以每批二十条加载更多呈现当前 Space 最近任务；文件 Space 中限制任务区高度并保持文件区独立可见
+ * [INPUT]: 当前 Space、服务端分页任务读取、作用域任务实时快照、文件索引、最近文件工作区与任务置顶/归档/文件/Skill/Space 操作
+ * [OUTPUT]: Eigent 风格内嵌一级侧栏，顶部切换 Space，以每批二十条加载更多呈现置顶优先的当前 Space 最近任务，并在菜单项右侧管理置顶与归档；文件 Space 中限制任务区高度并保持文件区独立可见
  * [POS]: Tessera Space 壳层的主导航侧栏
  * [DOC]: design.md、docs/architecture/editor.md、docs/architecture/task-navigation.md
  *
@@ -33,6 +33,7 @@ import { SpaceFilesSection } from "./space-files-section"
 import { SpaceSwitcher } from "./space-switcher"
 import { TaskContextMenu } from "./task-context-menu"
 import { TaskNavigationRow } from "./task-navigation-row"
+import { TaskRowActions } from "./task-row-actions"
 
 const TASK_LOADING_PLACEHOLDERS = ["first", "second", "third"] as const
 const TASK_FEED_PAGE_SIZE = 20
@@ -66,6 +67,8 @@ type HomeSidebarProps = Readonly<{
   onRenameDirectory: (relativePath: string) => void
   onRenameDocument: (relativePath: string) => void
   onRenameTask: (taskId: string, title: string) => Promise<boolean>
+  onSetTaskArchived: (taskId: string, archived: boolean) => Promise<boolean>
+  onSetTaskPinned: (taskId: string, pinned: boolean) => Promise<boolean>
   onRevealWorkspace: (workspaceId: string) => void
   onRevealWorkspaceEntry: (relativePath: string) => void
   onSelectWorkspace: () => void
@@ -126,6 +129,8 @@ export function HomeSidebar({
   onRenameDirectory,
   onRenameDocument,
   onRenameTask,
+  onSetTaskArchived,
+  onSetTaskPinned,
   onRevealWorkspace,
   onRevealWorkspaceEntry,
   onSelectWorkspace,
@@ -205,13 +210,29 @@ export function HomeSidebar({
                     key={task.id}
                     task={task}
                     trigger={
-                      <TaskNavigationRow
-                        active={task.id === activeTaskId}
-                        status={task.status}
-                        taskTitle={task.title}
-                        tooltip={task.title}
-                        onClick={() => onOpenTask(task)}
-                      />
+                      <div
+                        className="group/task flex min-w-0 max-w-full items-center rounded-md transition-colors hover:bg-sidebar-accent/55 data-[active=true]:bg-sidebar-accent"
+                        data-active={task.id === activeTaskId || undefined}
+                      >
+                        <TaskNavigationRow
+                          active={task.id === activeTaskId}
+                          className="min-w-0 flex-1 !bg-transparent pr-0"
+                          status={task.status}
+                          taskTitle={task.title}
+                          tooltip={task.title}
+                          onClick={() => onOpenTask(task)}
+                        />
+                        <TaskRowActions
+                          className={`pr-1 transition-opacity ${
+                            task.pinnedAt === null
+                              ? "opacity-0 group-hover/task:opacity-100 group-focus-within/task:opacity-100"
+                              : "opacity-100"
+                          }`}
+                          task={task}
+                          onSetArchived={onSetTaskArchived}
+                          onSetPinned={onSetTaskPinned}
+                        />
+                      </div>
                     }
                     onOpen={onOpenTask}
                     onRename={onRenameTask}

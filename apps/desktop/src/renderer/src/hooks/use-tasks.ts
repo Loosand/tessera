@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 当前可空 Space 工作区 ID 与预加载层的任务会话 API
- * [OUTPUT]: 默认空间与文件工作区的作用域任务、服务端分页读取、统一草稿、跨资源保活的当前任务、可逐轮切换的创作方式、历史恢复、重命名、删除和幂等保存操作
+ * [OUTPUT]: 默认空间与文件工作区的活动任务、活动/归档服务端分页读取、统一草稿、跨资源保活的当前任务、可逐轮切换的创作方式、历史恢复、重命名、置顶、归档、删除和幂等保存操作
  * [POS]: 渲染层中工作区任务导航与对话持久化的单一状态入口
  * [DOC]: docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -23,9 +23,11 @@ import type {
 import { useCallback, useEffect, useRef, useState } from "react"
 
 export type ActiveTask = {
+  readonly archivedAt: number | null
   readonly id: string
   readonly messages: TaskMessage[]
   readonly mode: TaskMode
+  readonly pinnedAt: number | null
   readonly persisted: boolean
   readonly skillId: TaskSkillId
   readonly status: TaskSessionStatus
@@ -39,9 +41,11 @@ function createTaskDraft(
   mode: TaskMode = workspaceId ? "agent" : "chat",
 ): ActiveTask {
   return {
+    archivedAt: null,
     id: globalThis.crypto.randomUUID(),
     messages: [],
     mode,
+    pinnedAt: null,
     persisted: false,
     skillId,
     status: "idle",
@@ -55,9 +59,14 @@ function errorMessage(error: unknown) {
 }
 
 function upsertSummary(items: TaskSessionSummary[], summary: TaskSessionSummary) {
-  return [summary, ...items.filter((item) => item.id !== summary.id)].sort(
-    (left, right) => right.updatedAt - left.updatedAt,
-  )
+  return [summary, ...items.filter((item) => item.id !== summary.id)].sort((left, right) => {
+    if (left.pinnedAt !== null || right.pinnedAt !== null) {
+      if (left.pinnedAt === null) return 1
+      if (right.pinnedAt === null) return -1
+      if (left.pinnedAt !== right.pinnedAt) return right.pinnedAt - left.pinnedAt
+    }
+    return right.updatedAt - left.updatedAt
+  })
 }
 
 export function useTasks(workspaceId: string | undefined) {
@@ -162,9 +171,11 @@ export function useTasks(workspaceId: string | undefined) {
       const snapshot = await desktopApi.readTask(taskId)
       if (requestId !== requestIdRef.current) return null
       const task = {
+        archivedAt: snapshot.archivedAt,
         id: snapshot.id,
         messages: snapshot.messages,
         mode: snapshot.mode,
+        pinnedAt: snapshot.pinnedAt,
         persisted: true,
         skillId: snapshot.skillId,
         status: snapshot.status,
@@ -187,6 +198,8 @@ export function useTasks(workspaceId: string | undefined) {
     if (!desktopApi) return null
     try {
       const firstPersistence = activeTaskRef.current.id === input.id && !activeTaskRef.current.persisted
+      const restoringArchivedTask =
+        activeTaskRef.current.id === input.id && activeTaskRef.current.archivedAt !== null
       const snapshot = await desktopApi.saveTask(input)
       const summary: TaskSessionSummary = snapshot
       setTasks((current) => upsertSummary(current, summary))
@@ -196,8 +209,10 @@ export function useTasks(workspaceId: string | undefined) {
           if (current.id !== snapshot.id) return current
           const next = {
             ...current,
+            archivedAt: snapshot.archivedAt,
             messages: input.messages,
             mode: snapshot.mode,
+            pinnedAt: snapshot.pinnedAt,
             persisted: true,
             skillId: snapshot.skillId,
             status: snapshot.status,
@@ -208,7 +223,7 @@ export function useTasks(workspaceId: string | undefined) {
           return next
         })
       }
-      if (firstPersistence) setTaskListRevision((current) => current + 1)
+      if (firstPersistence || restoringArchivedTask) setTaskListRevision((current) => current + 1)
       setError(null)
       return snapshot
     } catch (cause) {
@@ -240,8 +255,16 @@ export function useTasks(workspaceId: string | undefined) {
     if (!desktopApi) return false
     try {
       const summary = await desktopApi.renameTask(taskId, title)
-      setTasks((current) => upsertSummary(current, summary))
-      setRecentTasks((current) => upsertSummary(current, summary).slice(0, 12))
+      setTasks((current) =>
+        summary.archivedAt === null
+          ? upsertSummary(current, summary)
+          : current.filter((task) => task.id !== taskId),
+      )
+      setRecentTasks((current) =>
+        summary.archivedAt === null
+          ? upsertSummary(current, summary).slice(0, 12)
+          : current.filter((task) => task.id !== taskId),
+      )
       if (activeTaskRef.current.id === taskId) {
         setActiveTask((current) => {
           if (current.id !== taskId) return current
@@ -272,6 +295,66 @@ export function useTasks(workspaceId: string | undefined) {
         const draft = createTaskDraft(activeTaskRef.current.workspaceId)
         activeTaskRef.current = draft
         setActiveTask(draft)
+      }
+      setTaskListRevision((current) => current + 1)
+      setError(null)
+      return true
+    } catch (cause) {
+      setError(errorMessage(cause))
+      return false
+    }
+  }, [])
+
+  const setTaskPinned = useCallback(async (taskId: string, pinned: boolean) => {
+    const desktopApi = window.tessera
+    if (!desktopApi) return false
+    try {
+      const summary = await desktopApi.setTaskPinned(taskId, pinned)
+      setTasks((current) => upsertSummary(current, summary))
+      setRecentTasks((current) => upsertSummary(current, summary).slice(0, 12))
+      if (activeTaskRef.current.id === taskId) {
+        setActiveTask((current) => {
+          if (current.id !== taskId) return current
+          const next = { ...current, pinnedAt: summary.pinnedAt }
+          activeTaskRef.current = next
+          return next
+        })
+      }
+      setTaskListRevision((current) => current + 1)
+      setError(null)
+      return true
+    } catch (cause) {
+      setError(errorMessage(cause))
+      return false
+    }
+  }, [])
+
+  const setTaskArchived = useCallback(async (taskId: string, archived: boolean) => {
+    const desktopApi = window.tessera
+    if (!desktopApi) return false
+    try {
+      const summary = await desktopApi.setTaskArchived(taskId, archived)
+      setTasks((current) =>
+        summary.archivedAt === null
+          ? upsertSummary(current, summary)
+          : current.filter((task) => task.id !== taskId),
+      )
+      setRecentTasks((current) =>
+        summary.archivedAt === null
+          ? upsertSummary(current, summary).slice(0, 12)
+          : current.filter((task) => task.id !== taskId),
+      )
+      if (activeTaskRef.current.id === taskId) {
+        setActiveTask((current) => {
+          if (current.id !== taskId) return current
+          const next = {
+            ...current,
+            archivedAt: summary.archivedAt,
+            pinnedAt: summary.pinnedAt,
+          }
+          activeTaskRef.current = next
+          return next
+        })
       }
       setTaskListRevision((current) => current + 1)
       setError(null)
@@ -322,6 +405,8 @@ export function useTasks(workspaceId: string | undefined) {
     refreshRecentTasks,
     refreshWorkspaceTasks,
     renameTask,
+    setTaskArchived,
+    setTaskPinned,
     setActiveTaskSkill,
     startNewTask,
   }

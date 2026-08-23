@@ -16,9 +16,11 @@ import { mergeTaskFeedPage } from "./use-task-feed"
 
 function task(id: string): TaskSessionSummary {
   return {
+    archivedAt: null,
     createdAt: 1,
     id,
     mode: "chat",
+    pinnedAt: null,
     skillId: null,
     status: "completed",
     title: id,

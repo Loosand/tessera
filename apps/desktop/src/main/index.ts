@@ -1,5 +1,5 @@
 /**
- * [INPUT]: Electron 生命周期、共享 IPC 契约、AI Chat/Agent/Skill 配置、AI SDK 开发期日志、用户 Skill 扫描安装服务、研究网络偏好、可信研究服务、混合内容库、Agent 变更服务、模型服务、safeStorage 与 Tessera 核心服务
+ * [INPUT]: Electron 生命周期、共享 IPC 契约、主进程工作区文件服务、AI Chat/Agent/Skill 配置、AI SDK 开发期日志、用户 Skill 扫描安装服务、研究网络偏好、可信研究服务、混合内容库、Agent 变更服务、模型服务、safeStorage 与 Tessera 核心服务
  * [OUTPUT]: 可选系统代理/直连的受限研究 Reader、显式研究续跑/已完成工具结果续跑与来源保存、顺序安全的流增量合并、默认空间/工作区恢复与任务分页、工作区/MCP Agent 工具、托管内容库/Artifact 查询、内置/用户 Skill 校验后的 SQLite 可恢复后台 AI 运行、版本化公开错误与脱敏运行解释、官方 AI SDK 日志入口、Diff/MCP 审批、持久化研究/AI/MCP/用户 Skill 配置与扫描会话、关闭保存握手和满高桌面窗口
  * [POS]: Electron 主进程入口与平台安全边界
  * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/ai-observability.md、docs/architecture/database.md、docs/architecture/mcp.md、docs/architecture/research-workflow.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md、docs/architecture/unified-creation-agent.md
@@ -10,10 +10,10 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import { createHash, randomUUID } from "node:crypto"
+import { createHash } from "node:crypto"
 import { type FSWatcher, realpathSync, statSync, watch } from "node:fs"
-import { mkdir, readFile, readdir, realpath, rename, stat, unlink, writeFile } from "node:fs/promises"
-import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path"
+import { realpath, stat } from "node:fs/promises"
+import { basename, dirname, isAbsolute, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import {
   AiProviderConfigError,
@@ -29,15 +29,11 @@ import {
   type AiChatStreamChunk,
   type AiChatStreamEvent,
   type AiProviderId,
-  type DocumentSnapshot,
-  type DocumentWriteResult,
   IPC_CHANNELS,
   type ResearchNetworkMode,
   type TaskRunErrorDataV1,
   type TaskRunResourceSummary,
   type TaskToolMessagePart,
-  type WorkspaceDirectoryEntry,
-  type WorkspaceDocumentEntry,
   type WorkspaceEntryKind,
   type WorkspaceInfo,
   isAiProviderId,
@@ -105,11 +101,22 @@ import { inspectTaskRun } from "./task-run-inspection"
 import { findUnpersistedLatestTaskRun, recoverInterruptedTaskRuns } from "./task-run-recovery"
 import { type DesktopTaskService, createDesktopTaskService } from "./task-service"
 import { UserSkillError, type UserSkillService, createUserSkillService } from "./user-skill-service"
+import {
+  createDirectory,
+  createDocument,
+  isIgnoredWorkspaceEntryName,
+  isMarkdownPath,
+  listMarkdownDocuments,
+  listWorkspaceDirectories,
+  readDocument,
+  renameDirectory,
+  renameDocument,
+  resolveWorkspacePath,
+  writeDocument,
+} from "./workspace-file-service"
 
 const APP_USER_MODEL_ID = "com.tessera.desktop"
 const MAIN_DIRECTORY = dirname(fileURLToPath(import.meta.url))
-const MARKDOWN_EXTENSIONS = new Set([".md", ".markdown"])
-const IGNORED_DIRECTORIES = new Set([".git", ".tessera", "node_modules"])
 const WORKSPACE_CHANGE_DEBOUNCE_MS = 120
 const LAST_ACTIVE_SPACE_SETTING_KEY = "workspace.last-active-space.v1"
 const DEFAULT_SPACE_SETTING_VALUE = "default"
@@ -458,10 +465,6 @@ function abortAiChatsForWebContents(webContentsId: number) {
   }
 }
 
-function hasErrorCode(error: unknown, code: string) {
-  return error instanceof Error && "code" in error && error.code === code
-}
-
 function isSafeExternalUrl(value: string) {
   try {
     const protocol = new URL(value).protocol
@@ -503,9 +506,7 @@ function requestWindowClose(window: BrowserWindow) {
 }
 
 function shouldReportWorkspacePath(relativePath: string) {
-  return !relativePath
-    .split("/")
-    .some((part) => !part || part.startsWith(".") || IGNORED_DIRECTORIES.has(part))
+  return !relativePath.split("/").some((part) => !part || isIgnoredWorkspaceEntryName(part))
 }
 
 function installWorkspaceSession(webContents: WebContents, workspace: WorkspaceInfo) {
@@ -586,222 +587,6 @@ function restoreLastActiveWorkspace(): WorkspaceInfo | null {
   return workspace
 }
 
-async function resolveWorkspacePath(rootPath: string, relativePath: string) {
-  if (!relativePath || isAbsolute(relativePath)) throw new Error("文档路径无效。")
-
-  const targetPath = resolve(rootPath, relativePath)
-  const relation = relative(rootPath, targetPath)
-  if (!relation || relation.startsWith("..") || isAbsolute(relation)) {
-    throw new Error("文档必须位于当前工作区内。")
-  }
-
-  const [canonicalRoot, canonicalTarget] = await Promise.all([realpath(rootPath), realpath(targetPath)])
-  const canonicalRelation = relative(canonicalRoot, canonicalTarget)
-  if (!canonicalRelation || canonicalRelation.startsWith("..") || isAbsolute(canonicalRelation)) {
-    throw new Error("文档不能通过链接指向工作区外部。")
-  }
-  return canonicalTarget
-}
-
-function isMarkdownPath(path: string) {
-  return MARKDOWN_EXTENSIONS.has(extname(path).toLowerCase())
-}
-
-async function listMarkdownDocuments(rootPath: string) {
-  const documents: WorkspaceDocumentEntry[] = []
-
-  async function visit(directoryPath: string) {
-    const entries = await readdir(directoryPath, { withFileTypes: true })
-    await Promise.all(
-      entries.map(async (entry) => {
-        if (entry.name.startsWith(".") || IGNORED_DIRECTORIES.has(entry.name)) return
-
-        const absolutePath = join(directoryPath, entry.name)
-        if (entry.isDirectory()) {
-          await visit(absolutePath)
-          return
-        }
-        if (!entry.isFile() || !isMarkdownPath(entry.name)) return
-
-        const metadata = await stat(absolutePath)
-        documents.push({
-          name: entry.name,
-          relativePath: relative(rootPath, absolutePath).split("\\").join("/"),
-          modifiedAt: metadata.mtimeMs,
-          size: metadata.size,
-        })
-      }),
-    )
-  }
-
-  await visit(rootPath)
-  return documents.sort((left, right) => left.relativePath.localeCompare(right.relativePath, "zh-CN"))
-}
-
-async function listWorkspaceDirectories(rootPath: string) {
-  const directories: WorkspaceDirectoryEntry[] = []
-
-  async function visit(directoryPath: string) {
-    const entries = await readdir(directoryPath, { withFileTypes: true })
-    await Promise.all(
-      entries.map(async (entry) => {
-        if (entry.name.startsWith(".") || IGNORED_DIRECTORIES.has(entry.name) || !entry.isDirectory()) return
-
-        const absolutePath = join(directoryPath, entry.name)
-        directories.push({
-          name: entry.name,
-          relativePath: relative(rootPath, absolutePath).split("\\").join("/"),
-        })
-        await visit(absolutePath)
-      }),
-    )
-  }
-
-  await visit(rootPath)
-  return directories.sort((left, right) => left.relativePath.localeCompare(right.relativePath, "zh-CN"))
-}
-
-async function readDocument(rootPath: string, relativePath: string): Promise<DocumentSnapshot> {
-  const absolutePath = await resolveWorkspacePath(rootPath, relativePath)
-  if (!isMarkdownPath(absolutePath)) throw new Error("当前仅支持 Markdown 文档。")
-
-  const [content, metadata] = await Promise.all([readFile(absolutePath, "utf8"), stat(absolutePath)])
-  if (!metadata.isFile()) throw new Error("目标不是可读取的文档。")
-
-  return {
-    name: basename(absolutePath),
-    relativePath: relative(rootPath, absolutePath).split("\\").join("/"),
-    modifiedAt: metadata.mtimeMs,
-    size: metadata.size,
-    content,
-  }
-}
-
-async function resolveWorkspaceDirectory(rootPath: string, relativePath = "") {
-  const absolutePath = relativePath
-    ? await resolveWorkspacePath(rootPath, relativePath)
-    : await realpath(rootPath)
-  const metadata = await stat(absolutePath)
-  if (!metadata.isDirectory()) throw new Error("目标不是工作区文件夹。")
-  return absolutePath
-}
-
-async function createDocument(rootPath: string, parentRelativePath = ""): Promise<DocumentSnapshot> {
-  const directoryPath = await resolveWorkspaceDirectory(rootPath, parentRelativePath)
-  let sequence = 0
-  let fileName = "未命名文档.md"
-  let absolutePath = join(directoryPath, fileName)
-
-  while (true) {
-    try {
-      await stat(absolutePath)
-      sequence += 1
-      fileName = `未命名文档 ${sequence + 1}.md`
-      absolutePath = join(directoryPath, fileName)
-    } catch {
-      break
-    }
-  }
-
-  await writeFile(absolutePath, "# 未命名文档\n\n从这里开始记录。\n", { encoding: "utf8", flag: "wx" })
-  return readDocument(rootPath, relative(rootPath, absolutePath).split("\\").join("/"))
-}
-
-function validateWorkspaceEntryName(value: string) {
-  const fileName = value.trim()
-  if (!fileName || fileName === "." || fileName === ".." || basename(fileName) !== fileName) {
-    throw new Error("请输入有效的文件名。")
-  }
-  const hasControlCharacter = [...fileName].some((character) => character.charCodeAt(0) < 32)
-  if (fileName.startsWith(".") || /[<>:"/\\|?*]/u.test(fileName) || hasControlCharacter) {
-    throw new Error("文件名包含不支持的字符。")
-  }
-  return fileName
-}
-
-function validateDocumentName(value: string) {
-  const fileName = validateWorkspaceEntryName(value)
-  if (!isMarkdownPath(fileName)) throw new Error("文件名需要以 .md 或 .markdown 结尾。")
-  return fileName
-}
-
-async function createDirectory(rootPath: string, parentRelativePath = ""): Promise<WorkspaceDirectoryEntry> {
-  const parentPath = await resolveWorkspaceDirectory(rootPath, parentRelativePath)
-  let sequence = 0
-  let name = "新建文件夹"
-  let absolutePath = join(parentPath, name)
-
-  while (true) {
-    try {
-      await stat(absolutePath)
-      sequence += 1
-      name = `新建文件夹 ${sequence + 1}`
-      absolutePath = join(parentPath, name)
-    } catch {
-      break
-    }
-  }
-
-  await mkdir(absolutePath)
-  return { name, relativePath: relative(rootPath, absolutePath).split("\\").join("/") }
-}
-
-async function renameDocument(
-  rootPath: string,
-  relativePath: string,
-  selectedPath: string,
-): Promise<DocumentSnapshot> {
-  const sourcePath = await resolveWorkspacePath(rootPath, relativePath)
-  const fileName = validateDocumentName(basename(selectedPath))
-  const destinationDirectory = await realpath(dirname(resolve(selectedPath)))
-  const canonicalRoot = await realpath(rootPath)
-  const destinationRelation = relative(canonicalRoot, destinationDirectory)
-  if (destinationRelation.startsWith("..") || isAbsolute(destinationRelation)) {
-    throw new Error("文档必须保留在当前工作区内。")
-  }
-
-  const destinationPath = join(destinationDirectory, fileName)
-  if (sourcePath === destinationPath) return readDocument(rootPath, relativePath)
-
-  try {
-    await stat(destinationPath)
-    throw new Error("同一位置已存在同名文档。")
-  } catch (error) {
-    if (!hasErrorCode(error, "ENOENT")) throw error
-  }
-
-  await rename(sourcePath, destinationPath)
-  const nextRelativePath = relative(rootPath, destinationPath).split("\\").join("/")
-  return readDocument(rootPath, nextRelativePath)
-}
-
-async function renameDirectory(
-  rootPath: string,
-  relativePath: string,
-  selectedPath: string,
-): Promise<WorkspaceDirectoryEntry> {
-  const sourcePath = await resolveWorkspacePath(rootPath, relativePath)
-  const metadata = await stat(sourcePath)
-  if (!metadata.isDirectory()) throw new Error("目标不是可重命名的文件夹。")
-
-  const name = validateWorkspaceEntryName(basename(selectedPath))
-  const destinationPath = join(dirname(sourcePath), name)
-  if (sourcePath === destinationPath) return { name, relativePath }
-
-  try {
-    await stat(destinationPath)
-    throw new Error("同一位置已存在同名文件夹。")
-  } catch (error) {
-    if (!hasErrorCode(error, "ENOENT")) throw error
-  }
-
-  await rename(sourcePath, destinationPath)
-  return {
-    name,
-    relativePath: relative(rootPath, destinationPath).split("\\").join("/"),
-  }
-}
-
 async function deleteWorkspaceEntry(
   window: BrowserWindow | null,
   rootPath: string,
@@ -832,31 +617,6 @@ async function deleteWorkspaceEntry(
 
   await shell.trashItem(absolutePath)
   return true
-}
-
-async function writeDocument(
-  rootPath: string,
-  relativePath: string,
-  content: string,
-  expectedModifiedAt: number,
-): Promise<DocumentWriteResult> {
-  const currentDocument = await readDocument(rootPath, relativePath)
-  if (currentDocument.modifiedAt !== expectedModifiedAt) {
-    return { status: "conflict", document: currentDocument }
-  }
-
-  const absolutePath = await resolveWorkspacePath(rootPath, relativePath)
-  const metadata = await stat(absolutePath)
-  const temporaryPath = join(dirname(absolutePath), `.${basename(absolutePath)}.${randomUUID()}.tmp`)
-  try {
-    await writeFile(temporaryPath, content, { encoding: "utf8", mode: metadata.mode, flag: "wx" })
-    await rename(temporaryPath, absolutePath)
-  } catch (error) {
-    await unlink(temporaryPath).catch(() => {})
-    throw error
-  }
-
-  return { status: "saved", document: await readDocument(rootPath, relativePath) }
 }
 
 function registerIpcHandlers() {

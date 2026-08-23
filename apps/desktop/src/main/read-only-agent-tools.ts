@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 主进程持有的工作区根路径、可选当前文档路径与 Agent 工具输入
+ * [INPUT]: 主进程持有的工作区根路径、共享 Markdown/忽略目录策略、可选当前文档路径与 Agent 工具输入
  * [OUTPUT]: 仅限 Markdown 的列表、读取、全文检索、当前文档读取，以及可写 Agent 复用的路径/版本/原子写安全原语
  * [POS]: Electron 主进程中 Agent 工作区文件访问的底层安全边界
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
@@ -12,16 +12,15 @@
 
 import { createHash, randomUUID } from "node:crypto"
 import { link, readFile, readdir, realpath, rename, stat, unlink, writeFile } from "node:fs/promises"
-import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path"
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path"
 import type {
   ListWorkspaceFilesInput,
   ReadWorkspaceFileInput,
   ReadonlyWorkspaceAgentTools,
   SearchWorkspaceTextInput,
 } from "@tessera/ai/server"
+import { isIgnoredWorkspaceEntryName, isMarkdownPath } from "./workspace-file-service"
 
-const MARKDOWN_EXTENSIONS = new Set([".md", ".markdown"])
-const IGNORED_DIRECTORIES = new Set([".git", ".tessera", "node_modules"])
 const MAX_FILE_BYTES = 256 * 1024
 const MAX_LISTED_FILES = 500
 const MAX_SCANNED_FILES = 2_000
@@ -37,7 +36,7 @@ function throwIfAborted(signal: AbortSignal) {
 }
 
 export function isAgentMarkdownPath(path: string) {
-  return MARKDOWN_EXTENSIONS.has(extname(path).toLowerCase())
+  return isMarkdownPath(path)
 }
 
 export function agentContentHash(content: string) {
@@ -47,10 +46,7 @@ export function agentContentHash(content: string) {
 function hasIgnoredSegment(relativePath: string) {
   return relativePath
     .split("/")
-    .some(
-      (part) =>
-        !part || part === "." || part === ".." || part.startsWith(".") || IGNORED_DIRECTORIES.has(part),
-    )
+    .some((part) => !part || part === "." || part === ".." || isIgnoredWorkspaceEntryName(part))
 }
 
 function normalizedRelativePath(value: string, allowRoot: boolean) {
@@ -129,8 +125,7 @@ async function collectMarkdownFiles(
     entries.sort((left, right) => left.name.localeCompare(right.name, "zh-CN"))
     for (const entry of entries) {
       throwIfAborted(signal)
-      if (entry.name.startsWith(".") || IGNORED_DIRECTORIES.has(entry.name) || entry.isSymbolicLink())
-        continue
+      if (isIgnoredWorkspaceEntryName(entry.name) || entry.isSymbolicLink()) continue
       const absolutePath = resolve(directoryPath, entry.name)
       if (entry.isDirectory()) {
         await visit(absolutePath)

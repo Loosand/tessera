@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 内存 SQLite、通用任务会话输入与模拟工作区
- * [OUTPUT]: 默认空间任务分页、相同快照不刷新活动时间、版本化引申问题/运行/工具失败/本地反馈、可选读取、内置/用户 Skill 标记、兼容工作区创建约束、动态逐轮资源、任务 mode 不可变、创作模式逐轮切换和重命名/删除的回归验证
+ * [OUTPUT]: 默认空间活动/归档任务分页、置顶排序、相同快照不刷新活动时间、版本化引申问题/运行/工具失败/本地反馈、可选读取、内置/用户 Skill 标记、兼容工作区创建约束、动态逐轮资源、任务 mode 不可变、创作模式逐轮切换和重命名/删除的回归验证
  * [POS]: task-service 主进程权限边界的单元测试
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -346,6 +346,44 @@ describe("DesktopTaskService", () => {
     expect(service.delete("managed-chat")).toBe(true)
     expect(service.readIfExists("managed-chat")).toBeNull()
     expect(() => service.read("managed-chat")).toThrow("找不到这个任务")
+    client.close()
+  })
+
+  test("可以置顶、归档、分页读取并恢复对话", () => {
+    const client = openDatabase({ path: ":memory:" })
+    const service = createDesktopTaskService(client)
+    for (const [id, title] of [
+      ["placement-a", "对话 A"],
+      ["placement-b", "对话 B"],
+    ] as const) {
+      service.save(
+        {
+          id,
+          mode: "chat",
+          skillId: null,
+          status: "completed",
+          title,
+          workspaceId: null,
+          messages: [{ id: `${id}-message`, role: "user", parts: [{ type: "text", text: title }] }],
+        },
+        null,
+      )
+    }
+
+    expect(service.setPinned("placement-a", true).pinnedAt).not.toBeNull()
+    expect(service.listDefault()[0]?.id).toBe("placement-a")
+    expect(service.setArchived("placement-a", true)).toMatchObject({
+      archivedAt: expect.any(Number),
+      pinnedAt: null,
+    })
+    expect(service.listDefault().map((task) => task.id)).toEqual(["placement-b"])
+    expect(service.listPage(null, { archived: true, page: 1, pageSize: 10 })).toMatchObject({
+      archived: true,
+      total: 1,
+      items: [{ id: "placement-a" }],
+    })
+    expect(service.setArchived("placement-a", false).archivedAt).toBeNull()
+    expect(service.listDefault().map((task) => task.id)).toContain("placement-a")
     client.close()
   })
 

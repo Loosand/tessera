@@ -17,6 +17,8 @@ export { default as ArrowDown01Icon } from "@hugeicons/core-free-icons/ArrowDown
 export { default as ArrowLeft01Icon } from "@hugeicons/core-free-icons/ArrowLeft01Icon"
 export { default as ArrowRight01Icon } from "@hugeicons/core-free-icons/ArrowRight01Icon"
 export { default as ArrowUp01Icon } from "@hugeicons/core-free-icons/ArrowUp01Icon"
+export { default as Archive02Icon } from "@hugeicons/core-free-icons/Archive02Icon"
+export { default as ArchiveRestoreIcon } from "@hugeicons/core-free-icons/ArchiveRestoreIcon"
 export { default as Attachment01Icon } from "@hugeicons/core-free-icons/Attachment01Icon"
 export { default as BookOpen01Icon } from "@hugeicons/core-free-icons/BookOpen01Icon"
 export { default as BrainCircuitIcon } from "@hugeicons/core-free-icons/BrainCircuitIcon"

@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 内存/临时磁盘 SQLite 客户端与前向迁移
- * [OUTPUT]: 迁移幂等性、统一内容控制层、研究证据链、工作区最近项、通用任务会话与全量分页、AI/MCP 加密配置恢复、任务运行单调检查点/观测指标和级联删除的回归验证
+ * [OUTPUT]: 迁移幂等性、统一内容控制层、研究证据链、工作区最近项、通用任务会话、置顶/归档与全量分页、AI/MCP 加密配置恢复、任务运行单调检查点/观测指标和级联删除的回归验证
  * [POS]: 数据库包不依赖磁盘状态的基础集成测试
  * [DOC]: docs/architecture/database.md
  *
@@ -70,6 +70,8 @@ import {
   listWorkspaceTaskSessionsPage,
   renameTaskSession,
   saveTaskSession,
+  setTaskSessionArchived,
+  setTaskSessionPinned,
 } from "./task-session-repository"
 import {
   deleteUserSkillConfigRecord,
@@ -803,6 +805,45 @@ describe("本地数据库基建", () => {
         .prepare("SELECT count(*) AS count FROM task_messages WHERE task_id = ?")
         .get("mutable-task"),
     ).toEqual({ count: 0 })
+    client.close()
+  })
+
+  test("活动对话置顶优先排序，归档后从活动列表移出并可恢复", () => {
+    const client = openDatabase({ path: ":memory:" })
+    for (const [id, updatedAt] of [
+      ["older-task", 100],
+      ["middle-task", 200],
+      ["newer-task", 300],
+    ] as const) {
+      saveTaskSession(client, {
+        id,
+        mode: "chat",
+        workspaceId: null,
+        title: id,
+        status: "completed",
+        updatedAt: new Date(updatedAt),
+        messagePayloads: [],
+      })
+    }
+
+    expect(setTaskSessionPinned(client, "older-task", true)?.pinnedAt).not.toBeNull()
+    expect(setTaskSessionArchived(client, "middle-task", true)?.archivedAt).not.toBeNull()
+    expect(listDefaultTaskSessions(client).map((task) => task.id)).toEqual([
+      "older-task",
+      "newer-task",
+    ])
+    expect(
+      listDefaultTaskSessionsPage(client, { archived: true, limit: 10, offset: 0 }).items.map(
+        (task) => task.id,
+      ),
+    ).toEqual(["middle-task"])
+
+    expect(setTaskSessionArchived(client, "middle-task", false)?.archivedAt).toBeNull()
+    expect(listDefaultTaskSessions(client).map((task) => task.id)).toEqual([
+      "older-task",
+      "newer-task",
+      "middle-task",
+    ])
     client.close()
   })
 

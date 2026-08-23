@@ -41,6 +41,7 @@ import type {
   TaskRunErrorDataV1,
   TaskRunInspection,
   TaskRunPolicy,
+  TaskRunResourceSummary,
   TaskSessionPage,
   TaskSessionPageRequest,
   TaskSessionSummary,
@@ -48,6 +49,10 @@ import type {
   TaskToolErrorDataV1,
   UserTaskSkillId,
 } from "./index"
+import type {
+  TaskRunPolicy as TaskRunPolicyModule,
+  TaskRunResourceSummary as TaskRunResourceSummaryModule,
+} from "./task-run-policy"
 
 type Equal<Left, Right> = (<Value>() => Value extends Left ? 1 : 2) extends <Value>() => Value extends Right
   ? 1
@@ -80,6 +85,9 @@ export type DesktopApiContractTypeTests = [
   Expect<Equal<TaskMessageData["follow-up-questions"], TaskFollowUpQuestionsDataV1>>,
   Expect<Equal<TaskMessageMetadata["feedback"], TaskMessageFeedback | undefined>>,
   Expect<Equal<TaskRunPolicy["toolScope"], "conversation" | "workspace-read" | "workspace-write">>,
+  Expect<Equal<TaskRunPolicy, TaskRunPolicyModule>>,
+  Expect<Equal<TaskRunResourceSummary, TaskRunResourceSummaryModule>>,
+  Expect<Equal<TaskRunResourceSummaryModule["researchNetworkMode"], ResearchNetworkMode | null>>,
   Expect<Equal<ArtifactRef["relation"], "created" | "imported" | "updated">>,
   Expect<Equal<ResourceBinding["role"], "context" | "output" | "scope">>,
   Expect<Equal<DesktopApiReturn<"getCurrentContentLibrary">, Promise<ContentLibraryResult>>>,
@@ -88,6 +96,9 @@ export type DesktopApiContractTypeTests = [
   Expect<Equal<DesktopApiReturn<"listDefaultTasks">, Promise<TaskSessionSummary[]>>>,
   Expect<Equal<DesktopApiArguments<"listTasksPage">, [request: TaskSessionPageRequest]>>,
   Expect<Equal<DesktopApiReturn<"listTasksPage">, Promise<TaskSessionPage>>>,
+  Expect<Equal<DesktopApiArguments<"setTaskPinned">, [taskId: string, pinned: boolean]>>,
+  Expect<Equal<DesktopApiArguments<"setTaskArchived">, [taskId: string, archived: boolean]>>,
+  Expect<Equal<DesktopApiReturn<"setTaskArchived">, Promise<TaskSessionSummary>>>,
   Expect<Equal<DesktopApiReturn<"readTaskRun">, Promise<TaskRunInspection | null>>>,
   Expect<Equal<DesktopApiArguments<"readTaskRun">, [taskId: string, requestId: string]>>,
   Expect<Equal<DesktopApiReturn<"getResearchNetworkMode">, Promise<ResearchNetworkMode>>>,

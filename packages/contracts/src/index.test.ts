@@ -1,8 +1,8 @@
 /**
- * [INPUT]: 跨进程运行时守卫与合法、畸形 RunPolicy 样例
- * [OUTPUT]: 共享契约在运行时拒绝非正安全整数资源限制的回归验证
- * [POS]: contracts 包的运行时数据边界单元测试
- * [DOC]: docs/architecture/unified-creation-agent.md
+ * [INPUT]: 根入口重新导出的运行时守卫与合法、畸形 RunPolicy/资源摘要样例
+ * [OUTPUT]: 领域拆分后共享契约仍拒绝非法资源限制、Skill ID 与研究网络模式的回归验证
+ * [POS]: @tessera/contracts 根入口与 task-run-policy 领域文件之间的运行时回归测试
+ * [DOC]: docs/architecture/ai-observability.md、docs/architecture/research-workflow.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -11,7 +11,14 @@
  */
 
 import { describe, expect, it } from "vitest"
-import { isTaskRunPolicy, type TaskRunPolicy } from "./index"
+import {
+  type TaskRunPolicy,
+  isResearchNetworkMode,
+  isTaskRunPolicy,
+  isTaskRunResourceSummary,
+  isTaskSkillId,
+  isUserTaskSkillId,
+} from "./index"
 
 const POLICY = {
   limits: { maxOutputTokens: null, maxSteps: 8, timeoutMs: 120_000 },
@@ -40,5 +47,48 @@ describe("共享运行策略契约", () => {
       false,
     )
     expect(isTaskRunPolicy({ ...POLICY, limits: { ...POLICY.limits, timeoutMs: -1 } })).toBe(false)
+  })
+
+  it("拒绝损坏的策略字段", () => {
+    expect(isTaskRunPolicy({ ...POLICY, mode: "background" })).toBe(false)
+    expect(isTaskRunPolicy({ ...POLICY, reasoning: "ultra" })).toBe(false)
+    expect(isTaskRunPolicy({ ...POLICY, skillId: "user:Invalid Name" })).toBe(false)
+    expect(isTaskRunPolicy({ ...POLICY, toolScope: "filesystem" })).toBe(false)
+    expect(isTaskRunPolicy({ ...POLICY, webSearch: "true" })).toBe(false)
+  })
+})
+
+describe("共享运行资源摘要契约", () => {
+  const summary = {
+    attachmentCount: 1,
+    continuedFromMessageId: null,
+    currentDocumentPath: "notes/example.md",
+    researchNetworkMode: "system",
+    resumedResearchRequestId: null,
+    workspaceId: "workspace-1",
+    workspaceName: "示例工作区",
+  }
+
+  it("接受合法摘要并拒绝非法计数与网络模式", () => {
+    expect(isTaskRunResourceSummary(summary)).toBe(true)
+    expect(isTaskRunResourceSummary({ ...summary, attachmentCount: -1 })).toBe(false)
+    expect(isTaskRunResourceSummary({ ...summary, attachmentCount: 1.5 })).toBe(false)
+    expect(isTaskRunResourceSummary({ ...summary, researchNetworkMode: "proxy" })).toBe(false)
+  })
+})
+
+describe("共享运行策略基础字面量", () => {
+  it("只接受规范的用户 Skill ID", () => {
+    expect(isUserTaskSkillId("user:meeting-notes")).toBe(true)
+    expect(isTaskSkillId("question-answering")).toBe(true)
+    expect(isTaskSkillId(null)).toBe(true)
+    expect(isUserTaskSkillId("user:")).toBe(false)
+    expect(isUserTaskSkillId("user:Meeting Notes")).toBe(false)
+  })
+
+  it("只接受冻结的研究网络模式", () => {
+    expect(isResearchNetworkMode("system")).toBe(true)
+    expect(isResearchNetworkMode("direct")).toBe(true)
+    expect(isResearchNetworkMode("proxy")).toBe(false)
   })
 })
