@@ -119,7 +119,10 @@ export function classifyProviderStreamError(error: unknown, apiKey: string): Tas
     const message = error instanceof Error ? error.message : "工具执行失败。"
     return {
       code: "runtime",
-      message: message.split(apiKey || "\0").join("[已隐藏]").slice(0, MAX_ERROR_MESSAGE_LENGTH),
+      message: message
+        .split(apiKey || "\0")
+        .join("[已隐藏]")
+        .slice(0, MAX_ERROR_MESSAGE_LENGTH),
       phase: "stream",
       retryable: false,
       version: 1,
