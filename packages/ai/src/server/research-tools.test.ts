@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 模拟主进程研究服务、网页读取工具结果与 AI SDK 工具定义
- * [OUTPUT]: 研究工具窄契约、正文仅供模型当前步骤使用以及公共消息裁剪的回归验证
+ * [OUTPUT]: 研究工具的 http(s) 窄契约、正文仅供模型当前步骤使用以及公共消息裁剪的回归验证
  * [POS]: research-tools 的协议与秘密/体积边界单元测试
  * [DOC]: docs/architecture/research-workflow.md
  *
@@ -11,7 +11,11 @@
  */
 
 import { describe, expect, it, vi } from "vitest"
-import { createResearchToolSet, publicResearchToolOutput } from "./research-tools"
+import {
+  createResearchToolSet,
+  publicResearchToolOutput,
+  researchReadSourceInputSchema,
+} from "./research-tools"
 
 const progress = {
   phase: "reading" as const,
@@ -24,6 +28,18 @@ const progress = {
 }
 
 describe("研究领域工具", () => {
+  it("只允许研究读取工具接收 http(s) 网页地址", () => {
+    expect(
+      researchReadSourceInputSchema.safeParse({ url: "https://example.com", questionIds: ["q1"] }).success,
+    ).toBe(true)
+    expect(
+      researchReadSourceInputSchema.safeParse({ url: "file:///tmp/private.md", questionIds: ["q1"] }).success,
+    ).toBe(false)
+    expect(
+      researchReadSourceInputSchema.safeParse({ url: "ftp://example.com/a", questionIds: ["q1"] }).success,
+    ).toBe(false)
+  })
+
   it("注册完整研究工具，但网页正文不会进入公共消息事件", async () => {
     const readSource = vi.fn(async () => ({
       requestId: "request-1",

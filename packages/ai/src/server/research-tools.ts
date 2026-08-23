@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 主进程提供的研究领域服务、当前运行的持久化进度与 AI SDK 工具执行上下文
- * [OUTPUT]: 发布计划、受限网页深读、证据登记、来源推荐、领域完成检查工具，以及不会把网页正文写入公共消息的输出裁剪
+ * [OUTPUT]: 发布计划、仅限 http(s) 的受限网页深读、证据登记、来源推荐、领域完成检查工具，以及不会把网页正文写入公共消息的输出裁剪
  * [POS]: 统一 ToolLoopAgent 与主进程可信研究服务之间的窄契约适配层
  * [DOC]: docs/architecture/research-workflow.md
  *
@@ -49,8 +49,14 @@ const researchProgressSchema = z.strictObject({
   recommendationCount: z.number().int().nonnegative(),
 })
 
+const httpUrlSchema = z.url({ protocol: /^https?$/u }).max(4_096)
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
 export const researchReadSourceInputSchema = z.strictObject({
-  url: z.url().max(4_096).describe("要读取的公开 http(s) 网页 URL，优先选择一手或高质量来源"),
+  url: httpUrlSchema.describe("要读取的公开 http(s) 网页 URL，优先选择一手或高质量来源"),
   questionIds: z.array(z.string().min(1).max(80)).min(1).max(8).describe("本次读取要回答的研究问题 ID"),
 })
 
@@ -58,7 +64,7 @@ export const researchReadSourceOutputSchema = z.strictObject({
   requestId: z.string().min(1),
   sourceId: z.string().min(1),
   status: z.enum(["read", "unusable"]),
-  finalUrl: z.url(),
+  finalUrl: httpUrlSchema,
   title: z.string().optional(),
   author: z.string().optional(),
   publishedAt: z.string().optional(),
@@ -120,7 +126,7 @@ export const researchRecommendSourcesOutputSchema = z.strictObject({
   recommendations: z.array(
     z.strictObject({
       sourceId: z.string().min(1),
-      finalUrl: z.url(),
+      finalUrl: httpUrlSchema,
       title: z.string().optional(),
       author: z.string().optional(),
       publishedAt: z.string().optional(),
@@ -264,14 +270,14 @@ export function createResearchToolSet(
 }
 
 export function publicResearchToolOutput(toolName: string, output: unknown) {
-  if (!output || typeof output !== "object") return output
-  const candidate = output as Partial<TaskResearchReadSourceOutput>
+  if (!isRecord(output)) return output
+  const candidate = output
   const isReadResult =
     toolName === READ_WEB_SOURCE_TOOL_NAME ||
     (typeof candidate.sourceId === "string" &&
       (candidate.status === "read" || candidate.status === "unusable") &&
       typeof candidate.finalUrl === "string")
   if (!isReadResult) return output
-  const { content: _content, ...publicOutput } = output as TaskResearchReadSourceOutput
+  const { content: _content, ...publicOutput } = candidate
   return publicOutput
 }

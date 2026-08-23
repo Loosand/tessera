@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 对话正文或供应商 reasoning 返回的 Markdown 文本、密度、流式光标与工作区引用跳转回调
- * [OUTPUT]: 正文和思考过程共享的安全 Markdown 语义渲染及受限 Markdown 文件链接解析
+ * [OUTPUT]: 正文和思考过程共享的安全 Markdown 语义渲染、完整圆角表格及受限 Markdown 文件链接解析
  * [POS]: chat-parts 内统一 Markdown 视觉与行为的基础呈现单元
  * [DOC]: design.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/ai-providers.md
  *
@@ -129,17 +129,27 @@ export function ChatMarkdown({
             </pre>
           ),
           table: ({ children: tableChildren }) => (
-            <div className={`${compact ? "my-3" : "my-4"} overflow-x-auto rounded-lg ring-1 ring-border`}>
-              <table className="w-full border-collapse text-sm">{tableChildren}</table>
+            <div
+              className={`${compact ? "my-3 rounded-lg" : "my-4 rounded-xl"} overflow-hidden border border-border/80 bg-background`}
+            >
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[480px] border-separate border-spacing-0 text-[13px] leading-5 [&_:is(th,td):first-child]:whitespace-nowrap [&_tbody_tr]:transition-colors [&_tbody_tr:hover]:bg-muted/25">
+                  {tableChildren}
+                </table>
+              </div>
             </div>
           ),
           td: ({ children: cellChildren }) => (
-            <td className={`${compact ? "px-2 py-1.5" : "px-3 py-2"} border-t border-border`}>
+            <td
+              className={`${compact ? "px-2.5 py-1.5" : "px-3.5 py-2.5"} border-t border-border/70 align-top text-foreground/90`}
+            >
               {cellChildren}
             </td>
           ),
           th: ({ children: cellChildren }) => (
-            <th className={`${compact ? "px-2 py-1.5" : "px-3 py-2"} bg-muted text-left font-medium`}>
+            <th
+              className={`${compact ? "px-2.5 py-1.5" : "px-3.5 py-2.5"} bg-muted/60 text-left text-xs font-semibold tracking-wide text-muted-foreground`}
+            >
               {cellChildren}
             </th>
           ),

@@ -127,7 +127,6 @@ describe("联网搜索轨迹", () => {
     expect(markup).toContain("overflow-y-auto")
     expect(markup).toContain('<section aria-label="联网搜索过程"')
     expect(markup).toContain('aria-label="联网搜索过程"')
-    expect(markup).toContain('tabindex="0"')
     expect(markup).not.toContain("不得进入界面的供应商续轮数据")
     expect(markup).not.toContain("javascript:alert")
   })

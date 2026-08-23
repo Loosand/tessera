@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 配置、供应商状态、网络、恢复和未知运行异常样例
+ * [INPUT]: 配置、主进程领域错误、供应商状态、网络、恢复和未知运行异常样例
  * [OUTPUT]: 公开错误分类、脱敏回退和重试语义的回归保障
  * [POS]: AI 运行错误协议分类器的单元测试
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
@@ -12,6 +12,9 @@
 
 import { describe, expect, it } from "vitest"
 import { classifyTaskRunError, classifyTaskToolError, taskRunError } from "./ai-chat-error"
+import { ContentLibraryError } from "./content-library-service"
+import { McpConfigError } from "./mcp-service"
+import { UserSkillError } from "./user-skill-service"
 
 describe("AI chat public error protocol", () => {
   it("把配置错误保留为不可重试的公开失败", () => {
@@ -24,6 +27,20 @@ describe("AI chat public error protocol", () => {
       phase: "start",
       retryable: false,
       version: 1,
+    })
+  })
+
+  it("保留主进程领域错误的安全公开文案", () => {
+    expect(classifyTaskRunError(new UserSkillError("Skill 已停用。"), "start")).toMatchObject({
+      code: "invalid-request",
+      message: "Skill 已停用。",
+    })
+    expect(
+      classifyTaskRunError(new ContentLibraryError("内容库不可用。", "library-unavailable"), "stream"),
+    ).toMatchObject({ code: "invalid-request", message: "内容库不可用。" })
+    expect(classifyTaskRunError(new McpConfigError("MCP 配置无效。"), "stream")).toMatchObject({
+      code: "tool-failed",
+      message: "MCP 配置无效。",
     })
   })
 

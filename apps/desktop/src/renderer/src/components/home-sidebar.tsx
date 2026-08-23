@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 当前 Space、服务端分页任务读取、作用域任务实时快照、文件索引、最近文件工作区与任务/文件/Skill/Space 操作
- * [OUTPUT]: Eigent 风格内嵌一级侧栏，顶部切换 Space，以加载更多呈现当前 Space 最近任务，并通过区块标题进入全部任务页
+ * [OUTPUT]: Eigent 风格内嵌一级侧栏，顶部切换 Space，以每批二十条加载更多呈现当前 Space 最近任务；文件 Space 中限制任务区高度并保持文件区独立可见
  * [POS]: Tessera Space 壳层的主导航侧栏
  * [DOC]: design.md、docs/architecture/editor.md、docs/architecture/task-navigation.md
  *
@@ -35,6 +35,7 @@ import { TaskContextMenu } from "./task-context-menu"
 import { TaskNavigationRow } from "./task-navigation-row"
 
 const TASK_LOADING_PLACEHOLDERS = ["first", "second", "third"] as const
+const TASK_FEED_PAGE_SIZE = 20
 
 type HomeSidebarProps = Readonly<{
   activeItem: "new-task" | "skills" | null
@@ -133,7 +134,7 @@ export function HomeSidebar({
 }: HomeSidebarProps) {
   const taskFeed = useTaskFeed({
     loadPage: loadTasksPage,
-    pageSize: 6,
+    pageSize: TASK_FEED_PAGE_SIZE,
     refreshKey: taskListRevision,
     scopeKey: workspace?.id ?? "default-space",
   })
@@ -141,7 +142,7 @@ export function HomeSidebar({
   const visibleTasks = taskFeed.result.items.map((task) => liveTasksById.get(task.id) ?? task)
 
   return (
-    <aside className="flex h-full min-h-0 w-62.5 shrink-0 flex-col rounded-2xl border border-sidebar-border/60 bg-sidebar text-sidebar-foreground shadow-[inset_0_1px_0_color-mix(in_oklch,var(--background)_70%,transparent)] max-[760px]:w-[240px] max-[760px]:shadow-xl">
+    <aside className="flex h-full min-h-0 w-62.5 shrink-0 flex-col overflow-hidden rounded-2xl border border-sidebar-border/60 bg-sidebar text-sidebar-foreground shadow-[inset_0_1px_0_color-mix(in_oklch,var(--background)_70%,transparent)] max-[760px]:w-[240px] max-[760px]:shadow-xl">
       <div className="app-drag-region relative h-11 shrink-0">
         <Button
           type="button"
@@ -184,8 +185,8 @@ export function HomeSidebar({
           />
         </div>
 
-        <div className="mt-5 min-h-0 flex-1 overflow-y-auto pb-3">
-          <section>
+        <div className="mt-5 flex min-h-0 flex-1 flex-col overflow-hidden pb-3">
+          <section className={`flex min-h-0 flex-col ${workspace ? "max-h-[45%] shrink-0" : "flex-1"}`}>
             <div className="flex items-center justify-between gap-2 px-2 pb-1">
               <p className="text-[10px] font-medium text-muted-foreground">最近任务</p>
               <button
@@ -197,63 +198,66 @@ export function HomeSidebar({
                 <Icon icon={ArrowRight01Icon} size={10} />
               </button>
             </div>
-            <div className="grid gap-0.5 pr-1">
-              {visibleTasks.map((task) => (
-                <TaskContextMenu
-                  key={task.id}
-                  task={task}
-                  trigger={
-                    <TaskNavigationRow
-                      active={task.id === activeTaskId}
-                      status={task.status}
-                      taskTitle={task.title}
-                      tooltip={task.title}
-                      onClick={() => onOpenTask(task)}
-                    />
-                  }
-                  onOpen={onOpenTask}
-                  onRename={onRenameTask}
-                  onDelete={onDeleteTask}
-                />
-              ))}
-              {taskFeed.loading && visibleTasks.length === 0 ? (
-                <div className="grid gap-1 px-2 py-1.5" aria-label="正在读取任务">
-                  {TASK_LOADING_PLACEHOLDERS.map((placeholder) => (
-                    <span
-                      key={`task-loading-${placeholder}`}
-                      className="h-5 animate-pulse rounded-md bg-sidebar-accent/60 motion-reduce:animate-none"
-                    />
-                  ))}
-                </div>
-              ) : null}
-              {taskFeed.error ? (
+            <div className="min-h-0 min-w-0 max-w-full overflow-x-hidden overflow-y-auto pr-1">
+              <div className="grid min-w-0 gap-0.5">
+                {visibleTasks.map((task) => (
+                  <TaskContextMenu
+                    key={task.id}
+                    task={task}
+                    trigger={
+                      <TaskNavigationRow
+                        active={task.id === activeTaskId}
+                        status={task.status}
+                        taskTitle={task.title}
+                        tooltip={task.title}
+                        onClick={() => onOpenTask(task)}
+                      />
+                    }
+                    onOpen={onOpenTask}
+                    onRename={onRenameTask}
+                    onDelete={onDeleteTask}
+                  />
+                ))}
+                {taskFeed.loading && visibleTasks.length === 0 ? (
+                  <div className="grid gap-1 px-2 py-1.5" aria-label="正在读取任务">
+                    {TASK_LOADING_PLACEHOLDERS.map((placeholder) => (
+                      <span
+                        key={`task-loading-${placeholder}`}
+                        className="h-5 animate-pulse rounded-md bg-sidebar-accent/60 motion-reduce:animate-none"
+                      />
+                    ))}
+                  </div>
+                ) : null}
+                {taskFeed.error ? (
+                  <button
+                    type="button"
+                    className="w-full rounded-md px-2 py-2 text-left text-[10px] leading-4 text-destructive hover:bg-destructive/8"
+                    onClick={taskFeed.reload}
+                  >
+                    {taskFeed.error} 点击重试。
+                  </button>
+                ) : null}
+                {!taskFeed.loading && !taskFeed.error && taskFeed.result.total === 0 ? (
+                  <p className="px-2 py-2 text-[11px] leading-5 text-muted-foreground">这里还没有任务。</p>
+                ) : null}
+              </div>
+              {taskFeed.hasMore ? (
                 <button
                   type="button"
-                  className="w-full rounded-md px-2 py-2 text-left text-[10px] leading-4 text-destructive hover:bg-destructive/8"
-                  onClick={taskFeed.reload}
+                  className="mt-1 flex h-7 w-full items-center justify-center rounded-lg text-[10px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground disabled:pointer-events-none disabled:opacity-60"
+                  disabled={taskFeed.loading}
+                  onClick={taskFeed.loadMore}
                 >
-                  {taskFeed.error} 点击重试。
+                  {taskFeed.loading ? "正在加载…" : "加载更多"}
                 </button>
               ) : null}
-              {!taskFeed.loading && !taskFeed.error && taskFeed.result.total === 0 ? (
-                <p className="px-2 py-2 text-[11px] leading-5 text-muted-foreground">这里还没有任务。</p>
-              ) : null}
             </div>
-            {taskFeed.hasMore ? (
-              <button
-                type="button"
-                className="mt-1 flex h-7 w-full items-center justify-center rounded-lg text-[10px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground disabled:pointer-events-none disabled:opacity-60"
-                disabled={taskFeed.loading}
-                onClick={taskFeed.loadMore}
-              >
-                {taskFeed.loading ? "正在加载…" : "加载更多"}
-              </button>
-            ) : null}
           </section>
 
           {workspace ? (
             <SpaceFilesSection
               key={workspace.id}
+              className="flex-1"
               activePath={activeDocumentPath}
               directories={directories}
               documents={documents}

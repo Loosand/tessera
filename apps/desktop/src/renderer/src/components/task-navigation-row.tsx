@@ -55,7 +55,7 @@ export function TaskNavigationRow({
     <button
       type="button"
       className={cn(
-        "group flex min-h-8 w-full items-center gap-2 rounded-md py-0 pl-2 pr-2 text-left text-[12px] transition-colors hover:bg-sidebar-accent/55 data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium data-[active=true]:text-sidebar-accent-foreground",
+        "group flex min-h-8 w-full min-w-0 max-w-full items-center gap-2 rounded-md py-0 pl-2 pr-2 text-left text-[12px] transition-colors hover:bg-sidebar-accent/55 data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium data-[active=true]:text-sidebar-accent-foreground",
         className,
       )}
       aria-current={active ? "page" : undefined}

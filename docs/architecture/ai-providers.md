@@ -69,6 +69,7 @@ DeepSeek V4 在官方连接上的普通对话明确绑定 `openai-chat-completio
 - 模型类型使用 `chat`、`embedding`、`rerank`、`image-generation`、`video-generation`、`text-to-speech`、`speech-to-text` 与 `realtime`；输入输出模态独立使用 `text`、`image`、`audio`、`video` 与 `vector`。
 - 模型固有能力目前维护 `functionCall`、`reasoning` 与 `structuredOutput`；视觉输入属于输入模态，原生搜索属于端点绑定，不再混入同一个能力对象。
 - OpenRouter 返回的 `architecture.input_modalities` 与 `supported_parameters` 可补充模态、推理、工具和结构化输出；普通模型目录仅返回 ID 时，由保守的内建目录补足常见模型。
+- 手动输入、远端目录、持久化与生成运行时共用 512 字符模型 ID 边界；远端 Token 限额只接受正安全整数，拒绝小数和超出 JavaScript 安全整数范围的值。
 - 能力与模型字段分别携带 `builtin`、`remote`、`custom` 或 `unknown` 来源；用户覆盖优先于供应商目录，内建规则升级后只重新计算未覆盖字段。
 - `agentReady` 不持久化，由“对话模型 + 当前端点可用 + 工具调用已验证 + 产品运行边界”推导。原生联网同理由“供应商 × 模型 × 端点 × 官方/自定义连接”推导。
 - 目前 Anthropic 官方 Messages、DeepSeek 官方 V4 Responses/Anthropic 与 Grok 官方 Responses 的已验证原生搜索进入运行时。兼容中转、旧版 DeepSeek、OpenAI Chat Completions 和 OpenRouter 不会仅凭模型名称伪装联网能力。
@@ -114,7 +115,7 @@ useChat + Electron ChatTransport
 | Grok | `https://api.x.ai/v1` | 推导 `/models`，Bearer |
 | OpenRouter | `https://openrouter.ai/api/v1` | 推导 `/models`；公共目录可匿名读取，存在 Key 时附加 Bearer |
 
-用户只配置 API 根地址。若误填 `chat/completions`、`responses`、`response` 或 `messages` 完整端点，适配器会回退到同一 API 根下的模型目录；不提供独立 models URL 输入。模型同步不强制要求 Key，适配器只在 Key 非空时发送认证头；远端返回 401/403 时由界面原样提示需要凭据。兼容服务可能只实现生成接口而没有标准模型目录；此时用户通过手动模型 ID 完成配置，后续真实生成请求才是推理链路的判断依据。
+用户只配置 API 根地址。配置持久化、目录发现和生成运行时共用同一 URL 校验：最多 2,048 字符，只接受不含账号、密码、查询参数或片段的完整 http(s) URL。若误填 `chat/completions`、`responses`、`response` 或 `messages` 完整端点，适配器会回退到同一 API 根下的模型目录；不提供独立 models URL 输入。模型同步不强制要求 Key，适配器只在 Key 非空时发送认证头；远端返回 401/403 时由界面原样提示需要凭据。兼容服务可能只实现生成接口而没有标准模型目录；此时用户通过手动模型 ID 完成配置，后续真实生成请求才是推理链路的判断依据。
 
 ## 安全边界
 
@@ -130,6 +131,6 @@ useChat + Electron ChatTransport
 
 ## 后续能力
 
-- **部分实现**：普通对话已接入流式生成、显式取消、页面断线恢复、Markdown、来源、图片和模型能力控件；任务消息数据库已实现。开发环境已用 AI SDK 官方 DevTools 持久化明文调试 run/step/tool/usage/timing，产品运行恢复仍依赖 SQLite 检查点与主进程短期事件；生产脱敏日志、完整用量与耗时记录尚未实现。
+- **部分实现**：普通对话已接入流式生成、显式取消、页面断线恢复、Markdown、来源、图片和模型能力控件；任务消息数据库已实现。开发环境已用 AI SDK 官方 DevTools 持久化明文调试 run/step/tool/usage/timing，产品侧已按 run 保存 Token、缓存、步骤、工具和耗时数值汇总，恢复仍依赖 SQLite 检查点与主进程短期事件；独立的生产诊断事件层、有限保留策略和聚合查询尚未实现。
 - **规划**：为出站 AI 请求记录不含密钥和正文的目标、目的与数据范围审计事件。
 - **规划**：把内建模型目录升级为可版本化、可验证更新的注册表，并把连接中的模型持久化改为相对于注册表和供应商模型绑定的稀疏用户差异。

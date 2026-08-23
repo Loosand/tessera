@@ -401,6 +401,10 @@ export type TaskRunPolicy = {
   webSearch: boolean
 }
 
+function isPositiveSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0
+}
+
 export function isTaskRunPolicy(value: unknown): value is TaskRunPolicy {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false
   const policy = value as Record<string, unknown>
@@ -420,10 +424,10 @@ export function isTaskRunPolicy(value: unknown): value is TaskRunPolicy {
     Boolean(limits) &&
     typeof limits === "object" &&
     !Array.isArray(limits) &&
-    (typeof (limits as Record<string, unknown>).maxOutputTokens === "number" ||
+    (isPositiveSafeInteger((limits as Record<string, unknown>).maxOutputTokens) ||
       (limits as Record<string, unknown>).maxOutputTokens === null) &&
-    typeof (limits as Record<string, unknown>).maxSteps === "number" &&
-    typeof (limits as Record<string, unknown>).timeoutMs === "number"
+    isPositiveSafeInteger((limits as Record<string, unknown>).maxSteps) &&
+    isPositiveSafeInteger((limits as Record<string, unknown>).timeoutMs)
   )
 }
 

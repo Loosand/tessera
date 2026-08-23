@@ -15,7 +15,7 @@
     },
     "apps/desktop": {
       "name": "@tessera/desktop",
-      "version": "0.0.1",
+      "version": "0.1.0-alpha.1",
       "dependencies": {
         "@codemirror/commands": "^6.11.0",
         "@codemirror/lang-markdown": "^6.5.2",
@@ -75,8 +75,6 @@
         "@ai-sdk/openai-compatible": "^3.0.34",
         "@ai-sdk/react": "^4.0.76",
         "@ai-sdk/xai": "^4.0.42",
-        "@json-render/core": "^0.20.0",
-        "@json-render/react": "^0.20.0",
         "@lobehub/icons": "^5.16.0",
         "@tessera/agent-runtime": "workspace:*",
         "@tessera/contracts": "workspace:*",
@@ -95,6 +93,9 @@
     "packages/contracts": {
       "name": "@tessera/contracts",
       "version": "0.0.1",
+      "devDependencies": {
+        "vitest": "^4.1.11",
+      },
     },
     "packages/core": {
       "name": "@tessera/core",
@@ -435,10 +436,6 @@
     "@jridgewell/sourcemap-codec": ["@jridgewell/sourcemap-codec@1.5.5", "", {}, "sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og=="],
 
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
-
-    "@json-render/core": ["@json-render/core@0.20.0", "", { "dependencies": { "zod": "^4.3.6" } }, "sha512-cXAXn7h3QaylefQgh85AEGPuVq4C8SJ3k9JqigWLJhaBSozF1Fmsrm43DP16RmkqNiVgj5pBRdmB48lEO5qlow=="],
-
-    "@json-render/react": ["@json-render/react@0.20.0", "", { "dependencies": { "@json-render/core": "0.20.0" }, "peerDependencies": { "react": "^19.2.3" } }, "sha512-arRrlf7zeIJYM6i2JHcTBKW5Kl+ErBtoNR29h4i6rG4AtTzLmaWDgPTs35pr3MdSCTp0UxKwY4O3vWMdUihpRQ=="],
 
     "@lezer/common": ["@lezer/common@1.5.2", "", {}, "sha512-sxQE460fPZyU3sdc8lafxiPwJHBzZRy/udNFynGQky1SePYBdhkBl1kOagA9uT3pxR8K09bOrmTUqA9wb/PjSQ=="],
 

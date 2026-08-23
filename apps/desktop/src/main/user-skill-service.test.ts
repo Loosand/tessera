@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 临时目录、内存 SQLite 与用户 Skill 安装服务
- * [OUTPUT]: 递归扫描/批量安装、重复识别、原子导入、托管副本、启停、删除、损坏检测和符号链接拒绝的回归验证
+ * [OUTPUT]: 递归扫描/批量安装、重复识别、原子导入、托管副本、启停、删除、数据库 ID/文件损坏检测和符号链接拒绝的回归验证
  * [POS]: user-skill-service 的主进程文件安全与生命周期单元测试
  * [DOC]: docs/architecture/skill-system.md
  *
@@ -191,6 +191,18 @@ describe("用户 Skill 服务", () => {
   it("拒绝无效用户 Skill ID", async () => {
     const { client, service } = setupService()
     await expect(service.setEnabled("user:../escape" as never, true)).rejects.toBeInstanceOf(UserSkillError)
+    client.close()
+  })
+
+  it("拒绝 SQLite 中损坏的用户 Skill ID", async () => {
+    const sourcePath = await createSource("damaged-id")
+    const { client, service } = setupService()
+    const installed = await service.install(sourcePath)
+    client.connection
+      .prepare("UPDATE user_skill_configs SET id = ? WHERE id = ?")
+      .run("broken-id", installed.id)
+
+    await expect(service.list()).rejects.toThrow("用户 Skill ID 无效")
     client.close()
   })
 })

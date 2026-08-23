@@ -1,6 +1,6 @@
 /**
  * [INPUT]: SQLite MCP 配置仓储、Electron safeStorage、MCP SDK 传输和 Agent 中止/审批上下文
- * [OUTPUT]: 加密配置 CRUD、stdio/HTTP/SSE 连接池、工具发现和强制审批 Agent 工具适配
+ * [OUTPUT]: 带前置边界校验的加密配置 CRUD、具名配置错误、stdio/HTTP/SSE 连接池、工具发现和强制审批 Agent 工具适配
  * [POS]: Electron 主进程持有的 MCP 信任、连接与执行安全边界
  * [DOC]: docs/architecture/mcp.md、docs/architecture/database.md、docs/architecture/task-navigation.md
  *
@@ -11,6 +11,11 @@
  */
 
 import { createHash } from "node:crypto"
+import { Client } from "@modelcontextprotocol/sdk/client/index.js"
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js"
+import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js"
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js"
 import type { ExternalAgentTool } from "@tessera/ai/server"
 import type { McpServerConfig, McpServerSaveInput, McpToolSummary } from "@tessera/contracts"
 import {
@@ -21,11 +26,6 @@ import {
   listMcpServerConfigRecords,
   upsertMcpServerConfigRecord,
 } from "@tessera/database"
-import { Client } from "@modelcontextprotocol/sdk/client/index.js"
-import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js"
-import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js"
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
-import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js"
 import { app } from "electron"
 
 const MAX_ARGUMENTS = 64
@@ -35,7 +35,9 @@ const MAX_TOOL_PAGES = 20
 const MIN_TIMEOUT_MS = 1_000
 const MAX_TIMEOUT_MS = 180_000
 
-export class McpConfigError extends Error {}
+export class McpConfigError extends Error {
+  override readonly name = "McpConfigError"
+}
 
 type SecretStorage = Readonly<{
   decrypt: (value: string) => string
@@ -84,34 +86,41 @@ export type McpService = Readonly<{
   testServer: (serverId: string) => Promise<{ server: McpServerConfig; tools: McpToolSummary[] }>
 }>
 
-function parseStringArray(value: string, field: string) {
+function parseStringArray(value: string, field: string): string[] {
   try {
     const parsed: unknown = JSON.parse(value)
-    if (!Array.isArray(parsed) || !parsed.every((item) => typeof item === "string")) throw new Error()
+    if (!Array.isArray(parsed) || !parsed.every((item): item is string => typeof item === "string")) {
+      throw new Error()
+    }
     return parsed
   } catch {
     throw new McpConfigError(`${field}配置已损坏，请删除后重新添加这个 MCP 服务器。`)
   }
 }
 
-function parseSecretMap(value: string, field: string) {
+type SecretMapKind = "environment" | "headers"
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      Object.entries(value).every(([key, item]) => key && typeof item === "string"),
+  )
+}
+
+function parseSecretMap(value: string, field: string, kind: SecretMapKind) {
   try {
     const parsed: unknown = JSON.parse(value)
-    if (
-      !parsed ||
-      typeof parsed !== "object" ||
-      Array.isArray(parsed) ||
-      !Object.entries(parsed).every(([key, item]) => key && typeof item === "string")
-    ) {
-      throw new Error()
-    }
-    return parsed as Record<string, string>
-  } catch {
+    if (!isStringRecord(parsed)) throw new Error()
+    return normalizeSecretMap(parsed, field, kind) ?? {}
+  } catch (error) {
+    if (error instanceof McpConfigError) throw error
     throw new McpConfigError(`${field}无法解密或格式已损坏，请重新保存。`)
   }
 }
 
-function normalizeSecretMap(value: Record<string, string> | undefined, field: string) {
+function normalizeSecretMap(value: Record<string, string> | undefined, field: string, kind: SecretMapKind) {
   if (!value) return undefined
   const entries = Object.entries(value)
   if (entries.length > MAX_SECRET_ENTRIES) throw new McpConfigError(`${field}最多允许 64 项。`)
@@ -123,6 +132,15 @@ function normalizeSecretMap(value: Record<string, string> | undefined, field: st
     }
     if (rawValue.length > 8_192 || /[\0]/u.test(rawValue)) {
       throw new McpConfigError(`${field}值过长或包含无效字符。`)
+    }
+    if (kind === "environment" && /[=\0]/u.test(key)) {
+      throw new McpConfigError("环境变量名称不能包含等号或空字符。")
+    }
+    if (kind === "headers" && !/^[!#$%&'*+\-.^_`|~\dA-Za-z]+$/u.test(key)) {
+      throw new McpConfigError("请求头名称只能使用合法的 HTTP token 字符。")
+    }
+    if (kind === "headers" && /[^\t\x20-\x7e\x80-\xff]/u.test(rawValue)) {
+      throw new McpConfigError("请求头值包含 HTTP 不支持的字符，请只粘贴原始凭据或请求头值。")
     }
     normalized[key] = rawValue
   }
@@ -182,8 +200,12 @@ function normalizeInput(input: McpServerSaveInput): McpServerSaveInput {
     args: input.transport === "stdio" ? args : [],
     disabledTools,
     timeoutMs,
-    ...(input.env === undefined ? {} : { env: normalizeSecretMap(input.env, "环境变量") ?? {} }),
-    ...(input.headers === undefined ? {} : { headers: normalizeSecretMap(input.headers, "请求头") ?? {} }),
+    ...(input.env === undefined
+      ? {}
+      : { env: normalizeSecretMap(input.env, "环境变量", "environment") ?? {} }),
+    ...(input.headers === undefined
+      ? {}
+      : { headers: normalizeSecretMap(input.headers, "请求头", "headers") ?? {} }),
   }
 }
 
@@ -240,6 +262,11 @@ function fetchWithHeaders(headers: Record<string, string>) {
     fetch(input, { ...init, headers: mergeHeaders(init?.headers, headers) })
 }
 
+function sdkTransport(transport: StdioClientTransport | SSEClientTransport | StreamableHTTPClientTransport) {
+  // SDK 三个客户端类均声明 implements Transport，但其 d.ts 未按 exactOptionalPropertyTypes 书写 sessionId。
+  return transport as Transport
+}
+
 async function createSdkMcpClient(server: ResolvedMcpServer): Promise<McpClientAdapter> {
   const client = new Client({ name: "Tessera", version: app.getVersion() }, { capabilities: {} })
   const transport =
@@ -260,7 +287,7 @@ async function createSdkMcpClient(server: ResolvedMcpServer): Promise<McpClientA
           })
 
   try {
-    await client.connect(transport as unknown as Transport, { timeout: server.timeoutMs })
+    await client.connect(sdkTransport(transport), { timeout: server.timeoutMs })
   } catch (error) {
     await client.close().catch(() => undefined)
     throw error
@@ -385,8 +412,15 @@ export function createMcpService({
   }
 
   const resolveRecord = (record: McpServerConfigRecord): ResolvedMcpServer => {
-    const decrypt = (ciphertext: string | null, field: string) =>
-      ciphertext ? parseSecretMap(secretStorage.decrypt(ciphertext), field) : {}
+    const decrypt = (ciphertext: string | null, field: string, kind: SecretMapKind) => {
+      if (!ciphertext) return {}
+      try {
+        return parseSecretMap(secretStorage.decrypt(ciphertext), field, kind)
+      } catch (error) {
+        if (error instanceof McpConfigError) throw error
+        throw new McpConfigError(`${field}无法解密或格式已损坏，请重新保存。`)
+      }
+    }
     return {
       id: record.id,
       name: record.name,
@@ -397,8 +431,8 @@ export function createMcpService({
       args: parseStringArray(record.argsJson, "启动参数"),
       url: record.url,
       timeoutMs: record.timeoutMs,
-      env: decrypt(record.envCiphertext, "环境变量"),
-      headers: decrypt(record.headersCiphertext, "请求头"),
+      env: decrypt(record.envCiphertext, "环境变量", "environment"),
+      headers: decrypt(record.headersCiphertext, "请求头", "headers"),
       disabledTools: parseStringArray(record.disabledToolsJson, "禁用工具"),
     }
   }
@@ -441,8 +475,16 @@ export function createMcpService({
     const pending = pendingConnections.get(record.id)
     if (pending) return pending
 
+    let resolved: ResolvedMcpServer
+    try {
+      resolved = resolveRecord(record)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "MCP 配置无法读取，请重新保存。"
+      setRuntime(record.id, { state: "error", error: message.slice(0, 500) })
+      if (error instanceof McpConfigError) throw error
+      throw new McpConfigError(message)
+    }
     setRuntime(record.id, { state: "connecting" })
-    const resolved = resolveRecord(record)
     const connecting = createClient(resolved)
       .then((mcpClient) => {
         connections.set(record.id, { client: mcpClient, fingerprint })

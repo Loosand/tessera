@@ -1,6 +1,6 @@
 /**
  * [INPUT]: AI 供应商元数据与模型草稿转换函数
- * [OUTPUT]: 首批供应商范围、搜索、模型同步默认状态与批量启停行为的回归测试
+ * [OUTPUT]: 首批供应商范围、搜索、模型 ID 边界、模型同步默认状态与批量启停行为的回归测试
  * [POS]: @tessera/ai 供应商目录与配置模型的回归测试
  * [DOC]: design.md、docs/architecture/ai-providers.md
  *
@@ -160,7 +160,7 @@ describe("AI 供应商设置模型", () => {
     expect(matchesAiProvider(anthropic, "openrouter")).toBe(false)
   })
 
-  it("手动模型会修剪空白并拒绝重复", () => {
+  it("手动模型会修剪空白并拒绝重复或超长 ID", () => {
     const first = appendAiProviderModel([], "  model-a  ", "openai-compatible")
     expect(first).toEqual([
       expect.objectContaining({
@@ -177,6 +177,7 @@ describe("AI 供应商设置模型", () => {
       }),
     ])
     expect(appendAiProviderModel(first, "model-a", "openai-compatible")).toEqual(first)
+    expect(appendAiProviderModel(first, "m".repeat(513), "openai-compatible")).toEqual(first)
   })
 
   it("同步多个模型时保留已有开关并默认停用新模型", () => {

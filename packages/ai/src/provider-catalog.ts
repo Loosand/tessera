@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 跨进程 AI 供应商标识、首批 API/端点接入范围、模型目录能力、搜索词与用户维护的模型草稿
- * [OUTPUT]: 供应商/端点元数据、默认模型目录策略、逐字段用户覆盖、界面草稿类型与纯状态转换函数
+ * [OUTPUT]: 供应商/端点元数据、默认模型目录策略、受模型 ID 边界保护的逐字段用户覆盖、界面草稿类型与纯状态转换函数
  * [POS]: @tessera/ai 内与 UI 框架无关的供应商目录和配置模型
  * [DOC]: design.md、docs/architecture/ai-providers.md
  *
@@ -22,6 +22,7 @@ import type {
   AiProviderModel,
 } from "@tessera/contracts"
 import { resolveAiModelCapabilities } from "./model-capabilities"
+import { normalizeAiProviderModelId } from "./provider-input-validation"
 
 export type { AiProviderId } from "@tessera/contracts"
 
@@ -209,7 +210,7 @@ export function appendAiProviderModel(
   modelId: string,
   providerId: AiProviderId,
 ): AiProviderModelDraft[] {
-  const normalizedId = modelId.trim()
+  const normalizedId = normalizeAiProviderModelId(modelId)
   if (!normalizedId || models.some((model) => model.id === normalizedId)) return [...models]
   return [
     ...models,
@@ -237,14 +238,14 @@ export function mergeDiscoveredAiProviderModels(
   const mergedModelIds = new Set(models.map((model) => model.id))
 
   for (const discoveredModel of discoveredModels) {
-    const normalizedId = discoveredModel.id.trim()
+    const normalizedId = normalizeAiProviderModelId(discoveredModel.id)
     if (normalizedId) mergedModelIds.add(normalizedId)
   }
 
   const enableNewModelsByDefault = mergedModelIds.size === 1
 
   for (const discoveredModel of discoveredModels) {
-    const normalizedId = discoveredModel.id.trim()
+    const normalizedId = normalizeAiProviderModelId(discoveredModel.id)
     if (!normalizedId || knownModelIds.has(normalizedId)) continue
     knownModelIds.add(normalizedId)
     const existingModel = existingById.get(normalizedId)

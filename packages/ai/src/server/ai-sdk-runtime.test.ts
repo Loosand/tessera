@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 五类供应商配置、联网搜索额度与真实 AI SDK provider 工厂
- * [OUTPUT]: 密钥请求头校验、供应商到 AI SDK LanguageModel、原生联网工具和有界搜索额度的映射回归验证
+ * [OUTPUT]: 密钥/地址/模型 ID 边界、供应商到 AI SDK LanguageModel、原生联网工具和有界搜索额度的映射回归验证
  * [POS]: @tessera/ai/server AI SDK 适配器单元测试
  * [DOC]: docs/architecture/ai-providers.md
  *
@@ -66,6 +66,27 @@ describe("AI SDK 供应商适配", () => {
         apiKey: "test-key",
       }),
     ).toThrow("有效的 http(s) URL")
+  })
+
+  it("在创建供应商客户端前拒绝超长 API 地址和模型 ID", () => {
+    expect(() =>
+      createAiSdkLanguageModel({
+        configId: "openai-compatible",
+        providerId: "openai-compatible",
+        baseUrl: `https://example.com/${"a".repeat(2_048)}`,
+        modelId: "model-a",
+        apiKey: "test-key",
+      }),
+    ).toThrow("请输入有效的 API 地址")
+    expect(() =>
+      createAiSdkLanguageModel({
+        configId: "openai-compatible",
+        providerId: "openai-compatible",
+        baseUrl: "https://example.com/v1",
+        modelId: "m".repeat(513),
+        apiKey: "test-key",
+      }),
+    ).toThrow("请先选择模型")
   })
 
   it.each([

@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 当前文件 Space 的目录/Markdown 文档索引、活动文档路径与受限文件操作
- * [OUTPUT]: 一级 Space 侧栏内带叶节点自然缩进与右侧安全区的可折叠文件树，以及新增、刷新、重命名、定位和废纸篓入口
+ * [INPUT]: 当前文件 Space 的目录/Markdown 文档索引、活动文档路径、布局类名与受限文件操作
+ * [OUTPUT]: 一级 Space 侧栏内独立滚动、带叶节点自然缩进与右侧安全区的可折叠文件树，以及新增、刷新、重命名、定位和废纸篓入口
  * [POS]: Space 主侧栏中的文件浏览区块，不创建独立工作区导航层
  * [DOC]: design.md、docs/architecture/editor.md、docs/architecture/task-navigation.md
  *
@@ -21,6 +21,7 @@ import {
 } from "@tessera/design-system/components/icons"
 import { Button } from "@tessera/design-system/components/ui/button"
 import { Icon } from "@tessera/design-system/components/ui/icon"
+import { cn } from "@tessera/design-system/lib/utils"
 import { useEffect, useMemo, useState } from "react"
 import {
   type DocumentTreeNode,
@@ -32,6 +33,7 @@ import { WorkspaceEntryContextMenu } from "./workspace-entry-context-menu"
 
 type SpaceFilesSectionProps = Readonly<{
   activePath: string | undefined
+  className?: string
   directories: readonly WorkspaceDirectoryEntry[]
   documents: readonly WorkspaceDocumentEntry[]
   onCopyPath: (relativePath: string) => void
@@ -51,6 +53,7 @@ function documentLabel(name: string) {
 
 export function SpaceFilesSection({
   activePath,
+  className,
   directories,
   documents,
   onCopyPath,
@@ -172,7 +175,7 @@ export function SpaceFilesSection({
   }
 
   return (
-    <section className="mt-5">
+    <section className={cn("mt-5 flex min-h-0 min-w-0 flex-col overflow-hidden", className)}>
       <header className="group/files flex h-7 items-center px-2">
         <span className="min-w-0 flex-1 truncate text-[10px] font-medium text-muted-foreground">文件</span>
         <span className="mr-1 text-[10px] tabular-nums text-muted-foreground">{documents.length}</span>
@@ -211,7 +214,7 @@ export function SpaceFilesSection({
         </Button>
       </header>
 
-      <div className="grid gap-0.5 pr-1">
+      <div className="grid min-h-0 min-w-0 max-w-full flex-1 content-start gap-0.5 overflow-x-hidden overflow-y-auto pr-1">
         {tree.length > 0 ? (
           tree.map((node) => renderTreeNode(node, 0))
         ) : (

@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 模型目录适配器、模拟 HTTP 响应与不同供应商连接配置
- * [OUTPUT]: URL 推导、密钥请求头校验、鉴权、响应归一化和错误脱敏的回归验证
+ * [OUTPUT]: URL 推导、密钥请求头校验、鉴权、模型 ID/数值边界、响应归一化和错误脱敏的回归验证
  * [POS]: @tessera/ai/server 模型发现单元测试
  * [DOC]: docs/architecture/ai-providers.md
  *
@@ -67,6 +67,35 @@ describe("AI 模型目录发现", () => {
     ])
     const [, request] = fetcher.mock.calls[0] ?? []
     expect(new Headers(request?.headers).get("authorization")).toBe("Bearer secret-key")
+  })
+
+  it("忽略超长模型 ID，并拒绝不安全或非整数的 Token 限额", async () => {
+    const fetcher = vi.fn<typeof fetch>(
+      async () =>
+        new Response(
+          JSON.stringify({
+            data: [
+              { id: "m".repeat(513), context_length: 128_000 },
+              {
+                id: "valid-model",
+                context_length: 0.5,
+                max_output_tokens: Number.MAX_SAFE_INTEGER + 1,
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+    )
+
+    await expect(listAiProviderModels(OPENAI_CONNECTION, { fetch: fetcher })).resolves.toEqual([
+      {
+        id: "valid-model",
+        name: null,
+        ownedBy: null,
+        contextWindow: null,
+        maxOutputTokens: null,
+      },
+    ])
   })
 
   it("公共模型目录没有 API Key 时不发送 Authorization", async () => {

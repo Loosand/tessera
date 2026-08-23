@@ -250,12 +250,7 @@ export function WebSearchPart({ parts, streaming }: WebSearchPartProps) {
       icon={<Icon icon={AiWebBrowsingIcon} size={15} />}
       status={status}
     >
-      {/* biome-ignore lint/a11y/noNoninteractiveTabindex: 限高滚动区需要进入键盘焦点顺序，才能独立滚动长检索轨迹。 */}
-      <section
-        aria-label="联网搜索过程"
-        className="max-h-64 overflow-y-auto pr-1 [scrollbar-gutter:stable] focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        tabIndex={0}
-      >
+      <section aria-label="联网搜索过程" className="max-h-64 overflow-y-auto pr-1 [scrollbar-gutter:stable]">
         <div className="flex flex-col gap-1">
           {trace.queries.map((query) => (
             <div className="flex min-h-7 items-center gap-2 rounded-md px-1.5 py-0.5" key={query}>

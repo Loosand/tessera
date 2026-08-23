@@ -53,10 +53,10 @@ Tessera 当前聚焦研究与文档写作，不计划复制图片、Slides、视
 
 - **已实现**：Electron 安全外壳、本地 Markdown 工作区、TipTap 即时预览、按需加载的 CodeMirror 6 源码编辑、
   Typeset 主题定制、自动保存、外部修改冲突处理、SQLite 数据层和模型供应商安全配置。
-- **部分实现**：普通 Chat 与工作区 Agent 已接入统一运行时，支持本地 Markdown 读取/搜索、只读研究子 Agent、
-  可点击引用、运行恢复和 Markdown Diff 审批写入；Skill 选择与加载仍在演进。
-- **下一阶段**：网页/PDF 等材料采集、引用核查、编辑器内文本补丁、CodeMirror 真实 renderer 基准、MCP、Shell、
-  durable Agent 续跑、本地版本历史和已有 Git 工作区支持。
+- **部分实现**：普通问答、研究、写作和内容整理已接入统一 Agent 运行时，支持受限网页深读与证据登记、本地 Markdown
+  读取/搜索、用户 Skill、需逐次批准的 MCP 工具、运行恢复和 Markdown Diff 审批写入；生产级审计仍在演进。
+- **下一阶段**：PDF/订阅源等材料采集、引用核查、编辑器内文本补丁、CodeMirror 真实 renderer 基准、Shell、
+  更完整的 durable Agent 续跑、本地版本历史和已有 Git 工作区支持。
 - **尚未承诺**：公开发布时间、正式开源许可证和商业分发边界。
 
 状态标签只描述仓库当前能力，不代表发布时间承诺。更细的能力边界见[产品说明](docs/product.md)和
@@ -116,6 +116,7 @@ apps/desktop            Electron 主进程、预加载脚本和 React 渲染层
 packages/contracts      IPC 与跨进程共享契约
 packages/core           平台无关的应用核心
 packages/agent-runtime  可替换 Agent 运行时契约
+packages/ai             模型事实、供应商适配、Agent 运行时与 AI 设置界面
 packages/database       SQLite 本地索引与运行状态
 packages/skills         SKILL.md 发现、加载与权限契约
 packages/design-system  共享组件与视觉系统
@@ -129,6 +130,11 @@ packages/design-system  共享组件与视觉系统
 - [编辑器与 Markdown](docs/architecture/editor.md)
 - [AI 对话与工作区 Agent TODO](docs/architecture/ai-chat-agent-todo.md)
 - [AI 供应商与模型发现](docs/architecture/ai-providers.md)
+- [统一创作 Agent](docs/architecture/unified-creation-agent.md)
+- [研究工作流](docs/architecture/research-workflow.md)
+- [AI 可观测性](docs/architecture/ai-observability.md)
+- [MCP 安全边界](docs/architecture/mcp.md)
+- [Skill 系统](docs/architecture/skill-system.md)
 - [本地数据库](docs/architecture/database.md)
 - [本地版本历史与 Git 工作区支持](docs/architecture/local-version-history-and-git-workspaces.md)
 - [macOS Alpha 发行](docs/architecture/release.md)

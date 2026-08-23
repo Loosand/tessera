@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 内置 Skill 注册表、用户 Skill 单目录导入/扫描安装 Hook、侧栏状态与按 Skill 创建任务回调
- * [OUTPUT]: 支持单目录导入、递归扫描预览/批量安装、搜索、选择、启停、删除和权限检查的本地 Skill 管理页
+ * [OUTPUT]: 支持单目录导入、递归扫描预览/批量安装、搜索、Sheet 详情、启停、删除和权限检查的本地 Skill 管理页
  * [POS]: 一级导航中的 Skill 安装管理与任务入口
  * [DOC]: design.md、docs/architecture/skill-system.md
  *
@@ -40,9 +40,10 @@ import {
 } from "@tessera/design-system/components/ui/dialog"
 import { Icon } from "@tessera/design-system/components/ui/icon"
 import { Input } from "@tessera/design-system/components/ui/input"
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@tessera/design-system/components/ui/sheet"
 import { Switch } from "@tessera/design-system/components/ui/switch"
 import { type SkillPermission, listBuiltInSkills } from "@tessera/skills"
-import React, { useEffect, useMemo, useState } from "react"
+import React, { useEffect, useMemo, useRef, useState } from "react"
 import { useUserSkills } from "../hooks/use-user-skills"
 
 type SelectableSkillId = BuiltInTaskSkillId | UserTaskSkillId
@@ -131,7 +132,8 @@ function SkillCard({
       <button
         type="button"
         className="flex flex-1 flex-col p-4 text-left focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-        aria-pressed={active}
+        aria-expanded={active}
+        aria-haspopup="dialog"
         onClick={onSelect}
       >
         <span className="flex w-full items-start gap-3">
@@ -228,52 +230,54 @@ function SkillDetail({
   onUseSkill: (skillId: SelectableSkillId) => void
 }) {
   return (
-    <aside className="rounded-xl border border-border bg-muted/20 p-5">
-      <div className="flex items-center gap-3">
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-background shadow-xs">
-          <Icon icon={skillIcon(skill)} size={19} />
-        </span>
-        <div className="min-w-0 flex-1">
-          <h2 className="truncate text-base font-semibold">{skill.displayName}</h2>
-          <p className="font-mono text-[10px] text-muted-foreground">${skill.name}</p>
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 pt-6 pb-5">
+        <div className="flex items-center gap-3 pr-10">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground">
+            <Icon icon={skillIcon(skill)} size={19} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <SheetTitle className="truncate">{skill.displayName}</SheetTitle>
+            <p className="font-mono text-[10px] text-muted-foreground">${skill.name}</p>
+          </div>
+          <span className="rounded-full border border-border bg-background px-2 py-1 text-[9px] text-muted-foreground">
+            {skill.kind === "built-in" ? "内置" : "用户"}
+          </span>
         </div>
-        <span className="rounded-full border border-border bg-background px-2 py-1 text-[9px] text-muted-foreground">
-          {skill.kind === "built-in" ? "内置" : "用户"}
-        </span>
+
+        <SheetDescription className="mt-4">{skill.description}</SheetDescription>
+        {skill.error ? (
+          <p className="mt-3 rounded-lg bg-destructive/10 px-3 py-2 text-[10px] leading-4 text-destructive">
+            {skill.error}
+          </p>
+        ) : null}
+
+        <section className="mt-6">
+          <h3 className="flex items-center gap-1.5 text-xs font-medium">
+            <Icon icon={Shield01Icon} size={14} />
+            权限边界
+          </h3>
+          <SkillPermissions skill={skill} />
+          <p className="mt-2 text-[10px] leading-4 text-muted-foreground">
+            声明只描述所需能力，不会自动授予联网或文件权限。
+          </p>
+        </section>
+
+        <section className="mt-6">
+          <h3 className="flex items-center gap-1.5 text-xs font-medium">
+            <Icon icon={SourceCodeIcon} size={14} />
+            加载方式
+          </h3>
+          <ol className="mt-2 grid gap-2 text-[11px] leading-4 text-muted-foreground">
+            <li>1. 目录中必须有标准 SKILL.md。</li>
+            <li>2. 安装时复制到 Tessera 托管目录并限制文件体积。</li>
+            <li>3. 任务开始前再次校验，只注入当前 Skill 正文。</li>
+            <li>4. 附带脚本不会自动执行。</li>
+          </ol>
+        </section>
       </div>
 
-      <p className="mt-4 text-xs leading-5 text-muted-foreground">{skill.description}</p>
-      {skill.error ? (
-        <p className="mt-3 rounded-lg bg-destructive/10 px-3 py-2 text-[10px] leading-4 text-destructive">
-          {skill.error}
-        </p>
-      ) : null}
-
-      <section className="mt-6">
-        <h3 className="flex items-center gap-1.5 text-xs font-medium">
-          <Icon icon={Shield01Icon} size={14} />
-          权限边界
-        </h3>
-        <SkillPermissions skill={skill} />
-        <p className="mt-2 text-[10px] leading-4 text-muted-foreground">
-          声明只描述所需能力，不会自动授予联网或文件权限。
-        </p>
-      </section>
-
-      <section className="mt-6">
-        <h3 className="flex items-center gap-1.5 text-xs font-medium">
-          <Icon icon={SourceCodeIcon} size={14} />
-          加载方式
-        </h3>
-        <ol className="mt-2 grid gap-2 text-[11px] leading-4 text-muted-foreground">
-          <li>1. 目录中必须有标准 SKILL.md。</li>
-          <li>2. 安装时复制到 Tessera 托管目录并限制文件体积。</li>
-          <li>3. 任务开始前再次校验，只注入当前 Skill 正文。</li>
-          <li>4. 附带脚本不会自动执行。</li>
-        </ol>
-      </section>
-
-      <div className="mt-6 border-t border-border pt-4">
+      <div className="shrink-0 border-t border-border bg-background px-6 py-4">
         <div className="mb-3 flex items-center justify-between gap-3 text-[10px] text-muted-foreground">
           <span>{skill.kind === "built-in" ? "Tessera 内置" : "Tessera 托管"}</span>
           {skill.userConfig ? (
@@ -300,7 +304,7 @@ function SkillDetail({
           </Button>
         ) : null}
       </div>
-    </aside>
+    </div>
   )
 }
 
@@ -440,8 +444,10 @@ function SkillScanDialog({
 }
 
 export function SkillManagementPage({ sidebarOpen, onToggleSidebar, onUseSkill }: SkillManagementPageProps) {
+  const pageRef = useRef<HTMLElement>(null)
   const [query, setQuery] = useState("")
   const [selectedSkillId, setSelectedSkillId] = useState<SelectableSkillId>("research")
+  const [detailOpen, setDetailOpen] = useState(false)
   const [pendingAction, setPendingAction] = useState<"install" | "scan" | "batch" | null>(null)
   const {
     busy,
@@ -488,11 +494,10 @@ export function SkillManagementPage({ sidebarOpen, onToggleSidebar, onUseSkill }
     [userSkills],
   )
   const filteredSkills = catalog.filter((skill) => matchesQuery(skill, query))
-  const selectedSkill =
-    catalog.find((skill) => skill.id === selectedSkillId) ?? filteredSkills[0] ?? catalog[0]
+  const selectedSkill = catalog.find((skill) => skill.id === selectedSkillId)
 
   return (
-    <section className="flex h-full min-h-0 flex-col bg-background">
+    <section ref={pageRef} className="flex h-full min-h-0 flex-col bg-background">
       <header
         className="app-drag-region window-titlebar-leading relative flex h-12 shrink-0 items-center pr-3"
         data-sidebar-open={sidebarOpen}
@@ -558,7 +563,10 @@ export function SkillManagementPage({ sidebarOpen, onToggleSidebar, onUseSkill }
                   setPendingAction("install")
                   void install()
                     .then((skill) => {
-                      if (skill) setSelectedSkillId(skill.id)
+                      if (skill) {
+                        setSelectedSkillId(skill.id)
+                        setDetailOpen(true)
+                      }
                     })
                     .finally(() => setPendingAction(null))
                 }}
@@ -594,52 +602,62 @@ export function SkillManagementPage({ sidebarOpen, onToggleSidebar, onUseSkill }
             </p>
           ) : null}
 
-          <div className="mt-6 grid grid-cols-[minmax(0,1fr)_320px] items-start gap-5 max-[900px]:grid-cols-1">
-            <section aria-labelledby="installed-skills-title">
-              <div className="flex items-center justify-between gap-3">
-                <h2 id="installed-skills-title" className="text-sm font-medium">
-                  已安装
-                </h2>
-                <span className="text-[10px] text-muted-foreground">{filteredSkills.length} 个结果</span>
+          <section className="mt-6" aria-labelledby="installed-skills-title">
+            <div className="flex items-center justify-between gap-3">
+              <h2 id="installed-skills-title" className="text-sm font-medium">
+                已安装
+              </h2>
+              <span className="text-[10px] text-muted-foreground">{filteredSkills.length} 个结果</span>
+            </div>
+
+            {filteredSkills.length > 0 ? (
+              <div className="mt-3 grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3">
+                {filteredSkills.map((skill) => (
+                  <SkillCard
+                    key={skill.id}
+                    skill={skill}
+                    active={detailOpen && selectedSkill?.id === skill.id}
+                    onSelect={() => {
+                      setSelectedSkillId(skill.id)
+                      setDetailOpen(true)
+                    }}
+                    onToggle={(enabled) => void setEnabled(skill.id as UserTaskSkillId, enabled)}
+                  />
+                ))}
               </div>
-
-              {filteredSkills.length > 0 ? (
-                <div className="mt-3 grid grid-cols-2 gap-3 max-[680px]:grid-cols-1">
-                  {filteredSkills.map((skill) => (
-                    <SkillCard
-                      key={skill.id}
-                      skill={skill}
-                      active={selectedSkill?.id === skill.id}
-                      onSelect={() => setSelectedSkillId(skill.id)}
-                      onToggle={(enabled) => void setEnabled(skill.id as UserTaskSkillId, enabled)}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-12 text-center">
-                  <p className="text-sm font-medium">没有匹配的 Skill</p>
-                  <p className="mt-1 text-xs text-muted-foreground">换个关键词，或从本地文件夹添加。</p>
-                </div>
-              )}
-            </section>
-
-            {selectedSkill ? (
-              <SkillDetail
-                skill={selectedSkill}
-                onUseSkill={onUseSkill}
-                onDelete={(skill) => {
-                  if (!window.confirm(`删除用户 Skill“${skill.displayName}”？托管副本会移到废纸篓。`)) {
-                    return
-                  }
-                  void remove(skill.id as UserTaskSkillId).then((removed) => {
-                    if (removed) setSelectedSkillId("research")
-                  })
-                }}
-              />
-            ) : null}
-          </div>
+            ) : (
+              <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-12 text-center">
+                <p className="text-sm font-medium">没有匹配的 Skill</p>
+                <p className="mt-1 text-xs text-muted-foreground">换个关键词，或从本地文件夹添加。</p>
+              </div>
+            )}
+          </section>
         </div>
       </div>
+      <Sheet open={detailOpen && Boolean(selectedSkill)} onOpenChange={setDetailOpen}>
+        <SheetContent container={pageRef}>
+          {selectedSkill ? (
+            <SkillDetail
+              skill={selectedSkill}
+              onUseSkill={(skillId) => {
+                setDetailOpen(false)
+                onUseSkill(skillId)
+              }}
+              onDelete={(skill) => {
+                if (!window.confirm(`删除用户 Skill“${skill.displayName}”？托管副本会移到废纸篓。`)) {
+                  return
+                }
+                void remove(skill.id as UserTaskSkillId).then((removed) => {
+                  if (removed) {
+                    setDetailOpen(false)
+                    setSelectedSkillId("research")
+                  }
+                })
+              }}
+            />
+          ) : null}
+        </SheetContent>
+      </Sheet>
       <SkillScanDialog
         scan={scanResult}
         busy={busy && pendingAction === "batch"}
@@ -650,7 +668,10 @@ export function SkillManagementPage({ sidebarOpen, onToggleSidebar, onUseSkill }
           void installScanned(scanResult.id, candidateIds)
             .then((result) => {
               const firstInstalled = result?.ok ? result.skills[0] : null
-              if (firstInstalled) setSelectedSkillId(firstInstalled.id)
+              if (firstInstalled) {
+                setSelectedSkillId(firstInstalled.id)
+                setDetailOpen(true)
+              }
             })
             .finally(() => setPendingAction(null))
         }}

@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 用户选择的本地目录、Tessera 用户数据目录、SQLite 用户 Skill 目录仓储与系统废纸篓能力
- * [OUTPUT]: 受限递归发现/短时扫描会话、单个与批量原子导入、可用性复核、启停、删除及按需加载用户 SKILL.md 的主进程服务
+ * [OUTPUT]: 受限递归发现/短时扫描会话、单个与批量原子导入、可用性复核、具名领域错误、启停、删除及按需加载用户 SKILL.md 的主进程服务
  * [POS]: Electron 平台文件系统与 @tessera/skills 纯领域协议之间的安全安装边界
  * [DOC]: docs/architecture/database.md、docs/architecture/skill-system.md
  *
@@ -33,8 +33,8 @@ import {
   upsertUserSkillConfigRecord,
 } from "@tessera/database"
 import {
-  SKILL_FILENAME,
   type LoadedSkill,
+  SKILL_FILENAME,
   createUserSkillDescriptor,
   parseSkillDocument,
   userSkillDisplayName,
@@ -66,7 +66,9 @@ type ScanSession = {
   createdAt: number
 }
 
-export class UserSkillError extends Error {}
+export class UserSkillError extends Error {
+  override readonly name = "UserSkillError"
+}
 
 export type UserSkillService = {
   readonly delete: (skillId: UserTaskSkillId) => Promise<void>
@@ -110,6 +112,8 @@ function toConfig(
   record: NonNullable<ReturnType<typeof findUserSkillConfigRecord>>,
   availability: { available: boolean; error?: string },
 ): UserSkillConfig {
+  const id = record.id
+  requireUserSkillId(id)
   const descriptor = createUserSkillDescriptor(record)
   return {
     available: availability.available,
@@ -118,7 +122,7 @@ function toConfig(
     enabled: record.enabled,
     ...(availability.error ? { error: availability.error } : {}),
     fileCount: record.fileCount,
-    id: record.id as UserTaskSkillId,
+    id,
     installedAt: record.installedAt.getTime(),
     name: record.name,
     shortDescription: descriptor.shortDescription,

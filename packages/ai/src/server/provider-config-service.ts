@@ -30,6 +30,7 @@ import {
   isAiProviderId,
 } from "@tessera/contracts"
 import { resolveAiModelCapabilities } from "../model-capabilities"
+import { normalizeAiProviderModelId, validateAiProviderBaseUrl } from "../provider-input-validation"
 import { aiProviderApiKeyValidationMessage } from "./api-key-validation"
 
 const MULTI_CONFIG_PROVIDER_IDS = new Set<AiProviderId>(["openai-compatible", "anthropic-compatible"])
@@ -44,8 +45,6 @@ const CAPABILITY_SOURCES = [
   "custom",
   "unknown",
 ] as const satisfies readonly AiModelCapabilitySource[]
-const MAX_BASE_URL_LENGTH = 2_048
-const MAX_MODEL_ID_LENGTH = 512
 const MAX_MODELS = 10_000
 const MAX_CONFIG_ID_LENGTH = 128
 const MAX_DISPLAY_NAME_LENGTH = 80
@@ -125,24 +124,9 @@ function normalizeDisplayName(value: unknown): string {
 }
 
 function normalizeBaseUrl(value: unknown): string {
-  const baseUrl = typeof value === "string" ? value.trim() : ""
-  if (!baseUrl || baseUrl.length > MAX_BASE_URL_LENGTH) {
-    throw new AiProviderConfigError("请输入有效的 API 地址。")
-  }
-
-  let parsed: URL
-  try {
-    parsed = new URL(baseUrl)
-  } catch {
-    throw new AiProviderConfigError("API 地址必须是完整的 http(s) URL。")
-  }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new AiProviderConfigError("API 地址只支持 http 或 https 协议。")
-  }
-  if (parsed.username || parsed.password || parsed.search || parsed.hash) {
-    throw new AiProviderConfigError("API 地址不能包含凭据、查询参数或片段。")
-  }
-  return baseUrl.replace(/\/+$/u, "")
+  const result = validateAiProviderBaseUrl(value)
+  if (!result.ok) throw new AiProviderConfigError(result.message)
+  return result.baseUrl
 }
 
 function normalizeCapabilities(value: unknown): AiModelCapabilities | undefined {
@@ -223,8 +207,8 @@ function normalizeEndpointBindings(value: unknown): AiModelEndpointBinding[] | u
 
 function normalizeModel(value: unknown, providerId: AiProviderId): AiProviderConfiguredModel | null {
   if (!isRecord(value)) return null
-  const id = typeof value.id === "string" ? value.id.trim() : ""
-  if (!id || id.length > MAX_MODEL_ID_LENGTH || typeof value.enabled !== "boolean") return null
+  const id = normalizeAiProviderModelId(value.id)
+  if (!id || typeof value.enabled !== "boolean") return null
   const capabilitySource = isCapabilitySource(value.capabilitySource) ? value.capabilitySource : undefined
   const capabilities = normalizeCapabilities(value.capabilities)
   const legacyCapabilities = isRecord(value.capabilities) ? value.capabilities : null

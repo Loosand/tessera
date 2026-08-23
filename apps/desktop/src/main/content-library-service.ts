@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 用户授权的内容库目录、SQLite 内容控制层、任务/Run 标识与领域工具输入
- * [OUTPUT]: 未归档内容库、托管项目、Markdown Artifact 创建/查询/检查/安全移动及可恢复审计
+ * [OUTPUT]: 未归档内容库、托管项目、Markdown Artifact 创建/查询/检查/安全移动、具名领域错误及可恢复审计
  * [POS]: Electron 主进程中统一创作 Agent 的混合内容领域边界
  * [DOC]: docs/architecture/unified-creation-agent.md、docs/architecture/database.md
  *
@@ -53,6 +53,8 @@ const MAX_PROJECT_NAME_LENGTH = 80
 const MAX_DOCUMENT_TITLE_LENGTH = 120
 
 export class ContentLibraryError extends Error {
+  override readonly name = "ContentLibraryError"
+
   constructor(
     message: string,
     readonly code: "conflict" | "invalid-input" | "library-unavailable" | "not-found" | "operation-failed",
