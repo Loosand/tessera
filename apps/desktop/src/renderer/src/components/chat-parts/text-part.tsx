@@ -23,7 +23,7 @@ type TextPartProps = {
 }
 
 export function TextPart({ onOpenWorkspaceReference, part, streaming }: TextPartProps) {
-  if (!part.text) return null
+  if (!part.text && !streaming) return null
 
   return (
     <ChatMarkdown

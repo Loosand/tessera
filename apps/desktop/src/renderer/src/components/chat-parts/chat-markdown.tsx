@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 对话正文、供应商 reasoning 或 Agent 变更预览的 Markdown、密度、流式状态与工作区引用跳转回调
- * [OUTPUT]: 基于 Streamdown 的安全流式 Markdown，统一提供 GFM、CJK、Shiki、KaTeX、Mermaid、增量修复、动画、控件与工作区引用跳转
+ * [OUTPUT]: 基于尾部单调缓冲与 Streamdown 的安全流式 Markdown，统一提供 GFM、CJK、Shiki、KaTeX、Mermaid、增量修复、控件与工作区引用跳转
  * [POS]: chat-parts 内所有 AI 生成 Markdown 的唯一呈现边界
  * [DOC]: design.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/ai-providers.md
  *
@@ -18,7 +18,6 @@ import React from "react"
 import {
   Streamdown,
   defaultRehypePlugins,
-  type AnimateOptions,
   type ControlsConfig,
   type LinkSafetyConfig,
   type MermaidErrorComponentProps,
@@ -26,6 +25,7 @@ import {
   type PluginConfig,
   type StreamdownTranslations,
 } from "streamdown"
+import { useTailStreamText } from "./tail-stream-text"
 
 type ChatMarkdownProps = {
   readonly children: string
@@ -48,15 +48,6 @@ const CHAT_STREAMDOWN_CONTROLS = Object.freeze({
   mermaid: { copy: true, download: true, fullscreen: true, panZoom: true },
   table: { copy: true, download: true, fullscreen: true },
 }) satisfies ControlsConfig
-
-const CHAT_STREAMDOWN_ANIMATION = Object.freeze({
-  animation: "blurIn",
-  duration: 180,
-  easing: "ease-out",
-  maxBacklogMs: 260,
-  sep: "char",
-  stagger: 14,
-}) satisfies AnimateOptions
 
 // 工作区 Markdown 引用需要保留相对 href；外链导航由桌面壳的安全 URL 白名单接管，危险协议仍由 Streamdown urlTransform 过滤。
 const CHAT_LINK_SAFETY = Object.freeze({ enabled: false }) satisfies LinkSafetyConfig
@@ -147,6 +138,7 @@ export function ChatMarkdown({
   onOpenWorkspaceReference,
   streaming = false,
 }: ChatMarkdownProps) {
+  const visibleMarkdown = useTailStreamText(children, streaming)
   const handleClickCapture = React.useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
       if (!onOpenWorkspaceReference || !(event.target instanceof Element)) return
@@ -169,7 +161,6 @@ export function ChatMarkdown({
       onClickCapture={handleClickCapture}
     >
       <Streamdown
-        animated={CHAT_STREAMDOWN_ANIMATION}
         caret="block"
         codeBlockMaxHeight={420}
         controls={CHAT_STREAMDOWN_CONTROLS}
@@ -186,7 +177,7 @@ export function ChatMarkdown({
         tableMaxHeight={360}
         translations={CHAT_STREAMDOWN_TRANSLATIONS}
       >
-        {children}
+        {visibleMarkdown}
       </Streamdown>
     </div>
   )

@@ -136,10 +136,3 @@
   margin-block: 0.75rem;
   border-radius: var(--radius-lg);
 }
-
-@media (prefers-reduced-motion: reduce) {
-  .chat-markdown [data-sd-animate] {
-    animation-delay: 0ms;
-    animation-duration: 1ms;
-  }
-}

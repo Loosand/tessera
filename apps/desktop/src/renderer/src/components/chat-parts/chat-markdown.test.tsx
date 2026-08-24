@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 包含未闭合强调、CJK、链接、表格、数学公式和原始 HTML 的静态/流式 Markdown 示例
- * [OUTPUT]: Streamdown 统一渲染器的语义、增量修复、富内容控件和安全边界回归验证
+ * [OUTPUT]: Streamdown 统一渲染器的语义、增量修复、尾部缓冲边界、富内容控件和安全边界回归验证
  * [POS]: chat-parts Markdown 呈现契约的单元测试
  * [DOC]: design.md、docs/architecture/ai-chat-agent-todo.md
  *
@@ -62,13 +62,13 @@ describe("对话 Markdown", () => {
     expect(parseWorkspaceReference("https://example.com/readme.md#L1")).toBeNull()
   })
 
-  it("流式修复未闭合的 CJK 强调并为新增字符提供动画和光标", () => {
+  it("流式修复未闭合的 CJK 强调并只保留尾部光标", () => {
     const markup = renderToStaticMarkup(<ChatMarkdown streaming>{"中文里的**重点"}</ChatMarkdown>)
 
     expect(markup).toContain('aria-busy="true"')
     expect(markup).toContain('data-streaming="true"')
     expect(markup).toContain('data-streamdown="strong"')
-    expect(markup).toContain("data-sd-animate")
+    expect(markup).not.toContain("data-sd-animate")
     expect(markup).toContain("--streamdown-caret")
     expect(markup).not.toContain("**重点")
   })
