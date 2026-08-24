@@ -34,6 +34,10 @@ bun run dist:mac:release
 Tag、环境变量、有效 `.p8` 私钥和正式 `build/icon.icns`；签名、公证或 Gatekeeper 验证失败都会终止 Workflow，
 不创建 Release。
 
+两条路径共用主进程运行时闭包检查。Electron Vite 必须把纯 JavaScript 依赖编译进主进程产物，只允许
+Electron、Node.js 内建模块和随包分发的 `better-sqlite3` 保留为外部导入。预检在生成 DMG 前扫描编译入口，
+发现其他 bare import 就终止打包，避免开发环境可运行但安装包启动时缺包。
+
 ## GitHub Secrets
 
 仓库 Actions 需要以下 Secrets：
@@ -64,8 +68,7 @@ Release。正式 Job 只授予 `contents: write`，使用当前仓库的短时 `
 ## 公共下载边界
 
 GitHub Release 继承仓库可见性。`Loosand/tessera` 已设为 Public，因此成功发布的 Pre-release 可由任何人直接下载。
-公开源码尚未添加许可证；许可证会决定其他人复制、修改和分发源码的权利，必须在正式宣传为“开源”前由维护者明确选择。
-Workflow 不会自行选择许可证或改变仓库可见性。
+公开源码采用 Apache License 2.0；Workflow 不会改变仓库许可证或可见性。
 
 正式预检要求 `apps/desktop/build/icon.icns` 存在，避免 Electron 默认图标进入公开 Release。当前图标由版本化的
 `build/icon.png` 主稿生成，并通过 `electron-builder.yml` 显式接入 macOS 打包。

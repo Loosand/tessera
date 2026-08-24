@@ -1,6 +1,6 @@
 /**
- * [INPUT]: Electron Vite 编译后的主进程入口，以及正式发行时的版本、Tag 与签名环境
- * [OUTPUT]: 阻止工作区源码泄漏或不完整签名的打包前检查
+ * [INPUT]: Electron Vite 编译后的主进程入口，可随包分发的原生依赖，以及正式发行时的版本、Tag 与签名环境
+ * [OUTPUT]: 阻止主进程遗留未分发的运行时依赖、工作区源码泄漏或不完整签名的打包前检查
  * [POS]: Electron Builder 启动前的发行边界守卫
  * [DOC]: docs/architecture/release.md
  *
@@ -11,15 +11,30 @@
  */
 
 import { assertAlphaReleaseContract } from "./release-contract"
+import { builtinModules } from "node:module"
 
 const mainEntry = Bun.file(new URL("../out/main/index.js", import.meta.url))
 if (!(await mainEntry.exists())) throw new Error("缺少主进程构建产物，请先运行 bun run build。")
 
 const source = await mainEntry.text()
-const workspaceRuntimeImport = source.match(/(?:from\s+|import\()\s*["'](@tessera\/[^"']+)["']/u)
+const allowedRuntimeImports = new Set([
+  ...builtinModules,
+  ...builtinModules.map((moduleName) => `node:${moduleName}`),
+  "better-sqlite3",
+  "electron",
+])
+const unresolvedRuntimeImports = new Set<string>()
 
-if (workspaceRuntimeImport) {
-  throw new Error(`主进程仍包含未打包的工作区运行时依赖：${workspaceRuntimeImport[1]}`)
+for (const line of source.split("\n")) {
+  const staticImport = line.match(/^\s*import(?:\s+.+?\s+from)?\s*["']([^"']+)["'];?\s*$/u)
+  const specifier = staticImport?.[1]
+  if (specifier && !specifier.startsWith(".") && !allowedRuntimeImports.has(specifier)) {
+    unresolvedRuntimeImports.add(specifier)
+  }
+}
+
+if (unresolvedRuntimeImports.size > 0) {
+  throw new Error(`主进程仍包含未分发的运行时依赖：${[...unresolvedRuntimeImports].join(", ")}`)
 }
 
 if (Bun.argv.includes("--release")) {
@@ -55,5 +70,5 @@ if (Bun.argv.includes("--release")) {
 
   console.log(`正式发行预检通过：v${desktopVersion} 将使用 Developer ID 签名并提交 Apple 公证。`)
 } else {
-  console.log("内部构建预检通过：主进程没有外部工作区运行时依赖。")
+  console.log("内部构建预检通过：主进程没有未分发的运行时依赖。")
 }

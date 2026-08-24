@@ -7,12 +7,14 @@ export default defineConfig({
     build: {
       externalizeDeps: {
         exclude: [
+          "@modelcontextprotocol/sdk",
           "@tessera/agent-runtime",
           "@tessera/ai",
           "@tessera/contracts",
           "@tessera/core",
           "@tessera/database",
           "@tessera/skills",
+          "parse5",
         ],
       },
       rollupOptions: {
