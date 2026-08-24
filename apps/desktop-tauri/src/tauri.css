@@ -1,0 +1,26 @@
+html[data-desktop-host="tauri"] .app-drag-region,
+html[data-desktop-host="tauri"] .app-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+[data-tauri-bootstrap-error] {
+  box-sizing: border-box;
+  width: min(36rem, calc(100% - 3rem));
+  margin: 15vh auto 0;
+  padding: 1.25rem;
+  border: 1px solid color-mix(in srgb, CanvasText 14%, transparent);
+  border-radius: 1rem;
+  color: CanvasText;
+  background: Canvas;
+  font: 14px / 1.55 system-ui, sans-serif;
+}
+
+[data-tauri-bootstrap-error] h1 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+[data-tauri-bootstrap-error] p {
+  margin: 0;
+  color: color-mix(in srgb, CanvasText 68%, transparent);
+}

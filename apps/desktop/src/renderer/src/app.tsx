@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 预加载层提供的应用信息、Motion 特性与产品级 AppShell
+ * [INPUT]: 桌面 bridge 提供的宿主/运行时信息、Motion 特性与产品级 AppShell
  * [OUTPUT]: 尊重系统减少动态效果偏好的 Tessera 桌面渲染入口
  * [POS]: 渲染层根组件，负责加载全局应用信息与动效运行时
  * [DOC]: design.md、docs/architecture.md

@@ -349,6 +349,11 @@ function AboutSettings({ appInfo }: Pick<SettingsPageProps, "appInfo">) {
         description="应用运行时提供的平台标识。"
         control={<span className="text-[13px] text-muted-foreground">{appInfo?.platform ?? "—"}</span>}
       />
+      <SettingRow
+        title="桌面运行时"
+        description="用于区分完全复用同一界面的 Electron 与 Tauri 对照壳。"
+        control={<span className="text-[13px] text-muted-foreground">{appInfo?.runtime ?? "—"}</span>}
+      />
     </SettingSection>
   )
 }

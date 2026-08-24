@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 预加载层 SQLite AI 配置查询与配置变更事件、非敏感默认模型本地偏好
+ * [INPUT]: 桌面 bridge 的 AI 配置查询与配置变更事件、非敏感默认模型本地偏好
  * [OUTPUT]: 应用级共享的已启用对话模型 stale-while-revalidate 快照、实际连接地址、加载状态及错误
- * [POS]: 任务界面与 Electron AI 配置窄桥之间的应用级模型快照适配器
+ * [POS]: 任务界面与桌面 AI 配置窄桥之间的应用级模型快照适配器
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/ai-providers.md
  *
  * [PROTOCOL]:

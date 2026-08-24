@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 当前可空 Space 工作区 ID 与预加载层的任务会话 API
+ * [INPUT]: 当前可空 Space 工作区 ID 与宿主无关桌面 bridge 的任务会话 API
  * [OUTPUT]: 默认空间与文件工作区的活动任务、活动/归档服务端分页读取、统一草稿、跨资源保活的当前任务、可逐轮切换的创作方式、历史恢复、重命名、置顶、归档、删除和幂等保存操作
  * [POS]: 渲染层中工作区任务导航与对话持久化的单一状态入口
  * [DOC]: docs/architecture/skill-system.md、docs/architecture/task-navigation.md

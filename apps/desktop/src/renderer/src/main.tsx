@@ -1,8 +1,8 @@
 /**
  * [INPUT]: React DOM、顶级 App、编辑器基准查询参数与全局样式
  * [OUTPUT]: 正常 React 应用或隔离的编辑器性能基准入口
- * [POS]: Electron 渲染层的产品与基准路由边界
- * [DOC]: design.md、docs/architecture/editor.md
+ * [POS]: Electron/Tauri 共享桌面 renderer 的产品与基准路由边界
+ * [DOC]: design.md、docs/architecture/editor.md、docs/architecture/tauri-parity.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。

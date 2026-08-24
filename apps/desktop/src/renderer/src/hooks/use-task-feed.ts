@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 当前 Space 标识、每批数量、任务列表修订号与预加载层分页读取函数
+ * [INPUT]: 当前 Space 标识、每批数量、任务列表修订号与桌面 bridge 分页读取函数
  * [OUTPUT]: 拒绝过期响应、按页去重追加并支持加载更多/重试的最近任务状态
  * [POS]: 一级侧栏最近任务的渐进加载 Hook
  * [DOC]: docs/architecture/task-navigation.md

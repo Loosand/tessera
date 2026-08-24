@@ -345,6 +345,7 @@ export function AppShell({ appInfo }: AppShellProps) {
       <div
         className={`${view === "settings" ? "hidden" : "flex"} relative h-screen min-h-0 gap-1 bg-muted/55 p-1 text-foreground`}
         data-platform={appInfo?.platform}
+        data-runtime={appInfo?.runtime}
       >
         <AnimatePresence initial={false}>
           {sidebarOpen && compact ? (

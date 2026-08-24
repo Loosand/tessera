@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 预加载层用户 Skill 列表、单目录导入、扫描/批量安装、启停、删除与变更订阅 API
+ * [INPUT]: 桌面 bridge 用户 Skill 列表、单目录导入、扫描/批量安装、启停、删除与变更订阅 API
  * [OUTPUT]: 渲染层可复用的用户 Skill 目录、扫描预览、忙碌状态和安全操作
  * [POS]: Skill 管理页与任务创作方式选择器共用的状态入口
  * [DOC]: docs/architecture/skill-system.md

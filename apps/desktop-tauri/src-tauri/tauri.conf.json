@@ -1,0 +1,50 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Tessera Tauri",
+  "version": "0.1.0-alpha.1",
+  "identifier": "io.tessera.desktop.tauri",
+  "build": {
+    "beforeDevCommand": "bun run dev:web",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "bun run build:web",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Tessera Tauri",
+        "width": 1320,
+        "height": 840,
+        "minWidth": 520,
+        "minHeight": 420,
+        "center": true,
+        "visible": false,
+        "decorations": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 16,
+          "y": 16
+        },
+        "backgroundColor": "#f7f7f5"
+      }
+    ],
+    "security": {
+      "capabilities": ["main-capability"],
+      "freezePrototype": true,
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost data: https:; connect-src 'self' ipc: http://ipc.localhost; font-src 'self' data:",
+      "devCsp": "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost data: https:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:1420 ws://127.0.0.1:1420; font-src 'self' data:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg"],
+    "icon": ["../../desktop/build/icon.png", "../../desktop/build/icon.icns"],
+    "category": "Productivity",
+    "macOS": {
+      "minimumSystemVersion": "12.0",
+      "hardenedRuntime": true
+    }
+  }
+}

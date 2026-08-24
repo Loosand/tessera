@@ -1,8 +1,8 @@
 /**
  * [INPUT]: 固定 Markdown 语料、Tessera TipTap schema、React 编辑表面与浏览器性能 API
  * [OUTPUT]: 解析、挂载、输入、序列化、区块 hover、滚动和内存的结构化基准报告
- * [POS]: 生产 Electron 渲染进程内的编辑器性能采集器
- * [DOC]: docs/architecture/editor.md
+ * [POS]: 生产桌面 renderer 内由宿主 runner 驱动的编辑器性能采集器
+ * [DOC]: docs/architecture/editor.md、docs/architecture/tauri-parity.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。

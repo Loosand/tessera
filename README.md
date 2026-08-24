@@ -57,6 +57,8 @@ Tessera 当前聚焦研究与文档写作，不计划复制图片、Slides、视
   读取/搜索、用户 Skill、需逐次批准的 MCP 工具、运行恢复和 Markdown Diff 审批写入；生产级审计仍在演进。
 - **下一阶段**：PDF/订阅源等材料采集、引用核查、编辑器内文本补丁、CodeMirror 真实 renderer 基准、Shell、
   更完整的 durable Agent 续跑、本地版本历史和已有 Git 工作区支持。
+- **实验中**：Tauri v2 对照壳复用同一 React renderer 与 67 项桌面 API bridge；当前已能比较本地包体和人工窗口观感，
+  编辑器 benchmark route 已打包但自动化 runner 待实现。它只承诺壳层与空态，不代表后端功能已经兼容。
 - **尚未承诺**：公开发布时间和商业分发边界。
 
 状态标签只描述仓库当前能力，不代表发布时间承诺。更细的能力边界见[产品说明](docs/product.md)和
@@ -64,7 +66,7 @@ Tessera 当前聚焦研究与文档写作，不计划复制图片、Slides、视
 
 ## 技术栈
 
-- Electron、React、TypeScript
+- Electron；实验性 Tauri v2 / Rust 对照壳；共享 React、TypeScript renderer
 - Bun workspace 与 Turborepo
 - Tailwind CSS、Base UI、shadcn/ui 源码组织方式
 - TipTap、CodeMirror 6 与 Markdown
@@ -79,8 +81,12 @@ Tessera 当前聚焦研究与文档写作，不计划复制图片、Slides、视
 ```bash
 bun install
 bun run dev
+bun run dev:tauri
 bun run check
 ```
+
+`bun run dev` 与 `bun run dev:electron` 启动正式 Electron 应用；`bun run dev:tauri` 启动仍在实验阶段的 Tauri
+对照壳。它们复用同一 renderer，但当前不能用 Tauri 壳替代 Electron 的工作区、任务、AI、MCP、Skill 或研究后端。
 
 `bun run check` 依次执行格式检查、lint、类型检查、测试和构建。需要单独运行某一阶段时，可使用
 `bun run format`、`bun run lint`、`bun run typecheck`、`bun run test` 或 `bun run build`。
@@ -103,6 +109,15 @@ bun run dist:mac
 发行脚本会拒绝未打包的工作区 TypeScript 运行时依赖，并只携带 Electron、编译产物和 SQLite 原生模块；macOS
 发行包只保留中英语言资源，DMG 使用 UDBZ 压缩。
 
+实验性 Tauri `shell-only` 的未签名 `.app` 与 DMG 可用以下命令生成：
+
+```bash
+bun run dist:tauri:mac
+```
+
+产物写入 `apps/desktop-tauri/src-tauri/target/release/bundle/`，只用于本机 A/B；它尚未包含 Electron 后端，也没有签名、
+公证或自动更新。
+
 如果当前网络无法下载 Electron 预构建文件，可以在安装时临时指定镜像：
 
 ```bash
@@ -113,7 +128,9 @@ ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ bun install
 
 ```text
 apps/desktop            Electron 主进程、预加载脚本和 React 渲染层
+apps/desktop-tauri      复用同一 renderer 的实验性 Tauri v2 对照壳
 packages/contracts      IPC 与跨进程共享契约
+packages/desktop-bridge Electron/Tauri 共用的 DesktopApi 组装层
 packages/core           平台无关的应用核心
 packages/agent-runtime  可替换 Agent 运行时契约
 packages/ai             模型事实、供应商适配、Agent 运行时与 AI 设置界面
@@ -127,6 +144,7 @@ packages/design-system  共享组件与视觉系统
 - [产品边界](docs/product.md)
 - [设计规范](design.md)
 - [系统架构](docs/architecture.md)
+- [Tauri 兼容实验与 A/B 基线](docs/architecture/tauri-parity.md)
 - [编辑器与 Markdown](docs/architecture/editor.md)
 - [AI 对话与工作区 Agent TODO](docs/architecture/ai-chat-agent-todo.md)
 - [AI 供应商与模型发现](docs/architecture/ai-providers.md)

@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 当前 Space 标识、分页尺寸、任务列表修订号与预加载层分页读取函数
+ * [INPUT]: 当前 Space 标识、分页尺寸、任务列表修订号与桌面 bridge 分页读取函数
  * [OUTPUT]: 拒绝过期响应、自动回退空页并支持重试的任务分页状态
  * [POS]: 全部任务页的服务端分页 Hook，并向渐进任务 Hook 提供读取器类型
  * [DOC]: docs/architecture/task-navigation.md

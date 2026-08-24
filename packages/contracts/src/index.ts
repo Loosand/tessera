@@ -1,8 +1,8 @@
 /**
- * [INPUT]: Electron 桌面应用当前需要的跨进程数据、生命周期、默认空间/文件工作区条目、AI 模型事实/端点绑定、MCP 服务器、用户 Skill、研究网络偏好、任务运行策略、消息反馈、内容对象、开发期 AI 日志与 Agent 变更审批形状
- * [OUTPUT]: IPC 频道、默认空间切换、当前 Space 任务分页、工作区文件操作、模型/MCP/用户 Skill/研究网络配置、带正安全整数限制的类型化 RunPolicy、ContextManifest、批量研究证据、版本化公开运行/工具错误与引申问题、本地消息反馈、脱敏运行解释、后端无关内容引用、可恢复流式运行、开发期 AI 日志入口、客户端问答/研究计划工具、Agent Diff 审批、关闭握手与可推导的桌面 API 类型契约
+ * [INPUT]: Electron/Tauri 桌面宿主共同需要的跨进程数据、运行时标识、生命周期、默认空间/文件工作区条目、AI 模型事实/端点绑定、MCP 服务器、用户 Skill、研究网络偏好、任务运行策略、消息反馈、内容对象、开发期 AI 日志与 Agent 变更审批形状
+ * [OUTPUT]: 宿主无关桌面频道、运行时信息、默认空间切换、当前 Space 任务分页、工作区文件操作、模型/MCP/用户 Skill/研究网络配置、带正安全整数限制的类型化 RunPolicy、ContextManifest、批量研究证据、版本化公开运行/工具错误与引申问题、本地消息反馈、脱敏运行解释、后端无关内容引用、可恢复流式运行、开发期 AI 日志入口、客户端问答/研究计划工具、Agent Diff 审批、关闭握手与可推导的桌面 API 类型契约
  * [POS]: 应用和共享包共同依赖的底层契约入口
- * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/ai-observability.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/mcp.md、docs/architecture/research-workflow.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md、docs/architecture/unified-creation-agent.md
+ * [DOC]: docs/architecture.md、docs/architecture/tauri-parity.md、docs/architecture/ai-providers.md、docs/architecture/ai-observability.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/mcp.md、docs/architecture/research-workflow.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md、docs/architecture/unified-creation-agent.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -1050,10 +1050,13 @@ export type AgentChangePreview = {
   toolCallId: string
 }
 
+export type DesktopRuntime = "electron" | "tauri"
+
 export type AppInfo = {
   name: string
   version: string
   platform: string
+  runtime: DesktopRuntime
 }
 
 export type AiDevtoolsOpenResult = { ok: true } | { ok: false; error: string }
@@ -1217,7 +1220,7 @@ type SubscribeMethod<
  * 桌面桥接的唯一类型事实源。
  *
  * 每个成员同时绑定调用方式、IPC 频道、参数元组和返回值，避免 preload、main 与 renderer
- * 分别维护互不关联的签名。这里仅描述契约，不承载 Electron 运行时实现。
+ * 分别维护互不关联的签名。这里仅描述契约，不承载具体桌面宿主实现。
  */
 export type DesktopApiContract = {
   getAppInfo: InvokeMethod<typeof IPC_CHANNELS.appInfo, [], AppInfo>

@@ -25,7 +25,7 @@ export default defineConfig({
   preload: {
     build: {
       externalizeDeps: {
-        exclude: ["@tessera/contracts"],
+        exclude: ["@tessera/contracts", "@tessera/desktop-bridge"],
       },
       rollupOptions: {
         external: ["electron"],

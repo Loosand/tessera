@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@tessera/desktop-tauri",
+  "version": "0.1.0-alpha.1",
+  "description": "复用 Tessera renderer 的 Tauri v2 对照壳。",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tauri dev",
+    "dev:web": "vite --host 127.0.0.1 --port 1420",
+    "build": "bun run build:web && cargo build --manifest-path src-tauri/Cargo.toml",
+    "build:web": "vite build",
+    "dist:mac": "CI=true tauri build --bundles app,dmg",
+    "test": "vitest run src && cargo test --manifest-path src-tauri/Cargo.toml",
+    "typecheck": "tsc --noEmit && cargo check --manifest-path src-tauri/Cargo.toml",
+    "clean": "rm -rf dist src-tauri/target"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.0.0",
+    "@tessera/contracts": "workspace:*",
+    "@tessera/desktop": "workspace:*",
+    "@tessera/desktop-bridge": "workspace:*",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.2",
+    "@tauri-apps/cli": "^2.0.0",
+    "@vitejs/plugin-react": "5.0.4",
+    "tailwindcss": "4.3.2",
+    "typescript": "5.8.2",
+    "vite": "7.1.10",
+    "vitest": "^4.1.11"
+  }
+}

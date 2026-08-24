@@ -38,6 +38,7 @@
     "@tessera/contracts": "workspace:*",
     "@tessera/core": "workspace:*",
     "@tessera/database": "workspace:*",
+    "@tessera/desktop-bridge": "workspace:*",
     "@tessera/design-system": "workspace:*",
     "@tessera/skills": "workspace:*",
     "@tiptap/core": "3.30.2",

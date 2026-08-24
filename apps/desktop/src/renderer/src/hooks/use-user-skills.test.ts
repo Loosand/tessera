@@ -1,5 +1,5 @@
 /**
- * [INPUT]: Electron IPC 调用失败原因
+ * [INPUT]: 桌面 bridge 调用失败原因
  * [OUTPUT]: 主进程版本错配与普通 Skill 错误的用户可读文案回归验证
  * [POS]: use-user-skills 错误边界的纯函数单元测试
  * [DOC]: docs/architecture/skill-system.md

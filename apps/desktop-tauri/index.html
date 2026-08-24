@@ -1,0 +1,24 @@
+<!--
+  [INPUT]: Tauri Vite 启动脚本与共享 renderer 的延迟挂载
+  [OUTPUT]: 中文语言环境、启动占位和唯一 React 根节点
+  [POS]: Tauri WebView 的 HTML 入口
+  [DOC]: docs/architecture/tauri-parity.md
+
+  [PROTOCOL]:
+  1. 文件契约变化时更新本 Header。
+  2. 成员或职责变化时同步最近的 .folder.md。
+  3. 行为变化时同步 [DOC] 指向的文档。
+-->
+
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tessera Tauri</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

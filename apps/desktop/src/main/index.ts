@@ -634,6 +634,7 @@ function registerIpcHandlers() {
       name: app.getName(),
       version: app.getVersion(),
       platform: process.platform,
+      runtime: "electron",
     })
 
   handleDesktopInvoke(IPC_CHANNELS.appInfo, getAppInfo)

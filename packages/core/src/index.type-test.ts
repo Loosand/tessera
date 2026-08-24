@@ -19,11 +19,17 @@ type Equal<Left, Right> = (<Value>() => Value extends Left ? 1 : 2) extends <Val
   : false
 type Expect<Value extends true> = Value
 
-const appInfo = createAppInfo({ name: "Tessera", platform: "darwin", version: "0.0.1" } as const)
+const appInfo = createAppInfo({
+  name: "Tessera",
+  platform: "darwin",
+  runtime: "electron",
+  version: "0.0.1",
+} as const)
 
 export type CoreTypeContract = [
   Expect<Equal<ProductAreaId, "library" | "reader" | "inbox" | "skills">>,
   Expect<Equal<ProductAreaStatus, "foundation" | "planned">>,
   Expect<Equal<typeof appInfo.name, "Tessera">>,
   Expect<Equal<typeof appInfo.platform, "darwin">>,
+  Expect<Equal<typeof appInfo.runtime, "electron">>,
 ]
