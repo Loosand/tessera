@@ -1,8 +1,8 @@
 /**
- * [INPUT]: 具体 Agent 适配器定义的可序列化请求、取消信号与运行事件
- * [OUTPUT]: 支持按事件类型和工具输出收窄的 Agent 事件映射，以及保留具体请求/事件的泛型运行时端口
+ * [INPUT]: 具体 Agent 适配器定义的可序列化请求、取消信号、运行事件与工作区文件能力契约
+ * [OUTPUT]: 支持按事件类型和工具输出收窄的 Agent 运行时端口，以及与 AI SDK/桌面平台解耦的工作区文件 capability contract
  * [POS]: Tessera 核心与具体 Agent 适配器之间的稳定端口
- * [DOC]: docs/architecture.md
+ * [DOC]: docs/architecture.md、docs/architecture/agent-file-capabilities.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -43,3 +43,5 @@ export type AgentRuntime<Request = AgentRequest, Event = AgentEvent> = {
   readonly id: string
   run(request: Request, signal: AbortSignal): AsyncIterable<Event>
 }
+
+export * from "./workspace-file-capabilities"

@@ -1,7 +1,7 @@
 # Tessera 系统架构
 
 > 代码源头：`apps/desktop/src/main/index.ts`、`apps/desktop/src/preload/index.ts`、
-> `packages/agent-runtime/src/index.ts`、`packages/ai/src/index.ts`、`packages/ai/src/server/index.ts`、`packages/skills/src/index.ts`、
+> `packages/agent-runtime/src/index.ts`、`packages/agent-runtime/src/workspace-file-capabilities.ts`、`packages/ai/src/index.ts`、`packages/ai/src/server/index.ts`、`packages/skills/src/index.ts`、
 > `packages/database/client.ts`、`apps/desktop/src/main/user-skill-service.ts`
 >
 > 状态：部分实现。
@@ -64,7 +64,7 @@ SQLite 控制层”作为可逆实验基线，同时保留数据库正文和完�
 - **部分实现**：`@tessera/ai` 独立封装 OpenAI 兼容、Anthropic 兼容、DeepSeek、Grok 与 OpenRouter。已实现普通对话、供应商已验证的原生联网、受限工作区读写工具循环、AI SDK 标准工具审批、只读研究子 Agent，以及主进程注入的 MCP 动态工具；Shell 与 durable 自动续跑尚未接入。
 - **部分实现**：所有任务已收敛到 `ToolLoopAgent`，`toolChoice = auto` 允许零工具直接回答；主进程 RunPolicy 已按显式创作方式、内部作用域和已验证模型能力决定 Skill、联网、推理、工具作用域与预算，用户 turn 自动意图、规范化资源关系和更细权限输入仍待实现。
 - **部分实现**：研究方式的 P0 可信闭环已实现：运行时强制先发布结构化计划，供应商搜索只登记候选来源，主进程受限 Reader 深读公开网页，来源/证据/覆盖状态绑定 run 持久化，完成检查决定完整或部分结果，消息按真实 Tool Part 显示进度；来源推荐/保存、研究工作文档与隔离浏览器后备仍待实现，详见[研究工作流与证据链](architecture/research-workflow.md)。
-- **已实现**：Agent 工作区根目录只存在于主进程闭包；Markdown 列表、读取、搜索、当前文档和经批准写入统一执行真实路径、符号链接、文件类型、版本冲突与资源上限校验。Agent 只能获得请求期路由验证通过的供应商原生搜索，以及用户显式信任、启用并逐次批准的 MCP 工具；删除、重命名和 Shell 保持不可达。
+- **已实现**：Agent 工作区根目录只存在于主进程闭包；Markdown 列表、有界分页读取、搜索、当前文档和经批准写入通过 `@tessera/agent-runtime` 的类型化文件 capability contract 注入，统一执行真实路径、符号链接、文件类型、版本冲突与资源上限校验；同文件并发更新在复核与原子写入之间串行。Agent 只能获得请求期路由验证通过的供应商原生搜索，以及用户显式信任、启用并逐次批准的 MCP 工具；删除、重命名和 Shell 保持不可达。
 - **部分实现**：`packages/skills` 已实现标准 `SKILL.md` 校验、内置/用户级/工作区级描述、权限声明和内置渐进式加载注册表；研究、写作及已启用用户 Skill 的正文按本轮选择经 call options 注入并固化到 `task_run`。用户目录手动扫描已实现，用户 turn 自动选择、工作区级自动发现、更新与版本仍待实现。
 - **已实现**：Skill 只描述工作流和所需资源，不提升任务权限；具体工具由运行策略、显式资源、模型能力、主进程边界与人工审批共同决定。
 - **规划**：Agent 对文件的修改以文本补丁提出，批准后由核心层写入。
@@ -120,6 +120,7 @@ SQLite 控制层”作为可逆实验基线，同时保留数据库正文和完�
 
 - [产品边界](product.md)
 - [轻量 Agent Kernel 与能力运行时](architecture/agent-kernel-and-capability-runtime.md)
+- [Agent 本地文件能力评估与收敛设计](architecture/agent-file-capabilities.md)
 - [统一创作 Agent 与内容存储探索](architecture/unified-creation-agent.md)
 - [任务会话与导航](architecture/task-navigation.md)
 - [编辑器与 Markdown](architecture/editor.md)

@@ -1,8 +1,8 @@
 /**
  * [INPUT]: 临时 Markdown 工作区、越界/符号链接路径与只读 Agent 工具调用
- * [OUTPUT]: 文件类型、路径逃逸、体积、检索结果和当前文档边界的回归验证
+ * [OUTPUT]: 文件类型、路径逃逸、体积、分页/字节截断、检索结果和当前文档边界的回归验证
  * [POS]: 主进程只读 Agent 工作区能力的安全单元测试
- * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
+ * [DOC]: docs/architecture/agent-file-capabilities.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -90,11 +90,7 @@ describe("只读 Agent 工作区工具", () => {
     )
     const tools = createReadonlyWorkspaceAgentTools({ rootPath })
 
-    const result = (await tools.searchWorkspaceText({ query: "Agent" }, new AbortController().signal)) as {
-      matches: Array<{ line: number; path: string }>
-      resultLimit: number
-      truncated: boolean
-    }
+    const result = await tools.searchWorkspaceText({ query: "Agent" }, new AbortController().signal)
 
     expect(result).toMatchObject({
       resultLimit: 100,
@@ -102,6 +98,66 @@ describe("只读 Agent 工作区工具", () => {
     })
     expect(result.matches).toHaveLength(100)
     expect(result.matches.at(-1)).toMatchObject({ path: "many.md", line: 100 })
+  })
+
+  it("按行分页读取并为后续内容返回 nextOffset", async () => {
+    const rootPath = await createWorkspace()
+    await writeFile(
+      join(rootPath, "long.md"),
+      Array.from({ length: 450 }, (_, index) => `第 ${index + 1} 行`).join("\n"),
+    )
+    const tools = createReadonlyWorkspaceAgentTools({ rootPath })
+    const signal = new AbortController().signal
+
+    const firstPage = await tools.readWorkspaceFile({ path: "long.md" }, signal)
+    expect(firstPage.range).toEqual({ startLine: 1, endLine: 400, totalLines: 450 })
+    expect(firstPage.truncation).toMatchObject({
+      truncated: true,
+      reason: "lines",
+      nextOffset: 401,
+      lineTruncated: false,
+    })
+    expect(firstPage.content).toContain("第 400 行")
+    expect(firstPage.content).not.toContain("第 401 行")
+
+    const secondPage = await tools.readWorkspaceFile(
+      { path: "long.md", offset: firstPage.truncation.nextOffset ?? undefined },
+      signal,
+    )
+    expect(secondPage.range).toEqual({ startLine: 401, endLine: 450, totalLines: 450 })
+    expect(secondPage.truncation).toMatchObject({ truncated: false, nextOffset: null })
+  })
+
+  it("即使 Markdown 单行异常过长也不让工具结果超过字节预算", async () => {
+    const rootPath = await createWorkspace()
+    await writeFile(join(rootPath, "single-line.md"), "界".repeat(30_000))
+    const tools = createReadonlyWorkspaceAgentTools({ rootPath })
+
+    const result = await tools.readWorkspaceFile({ path: "single-line.md" }, new AbortController().signal)
+
+    expect(Buffer.byteLength(result.content, "utf8")).toBeLessThanOrEqual(50 * 1024)
+    expect(result.truncation).toMatchObject({
+      truncated: true,
+      reason: "bytes",
+      lineTruncated: true,
+      nextOffset: null,
+    })
+  })
+
+  it("在主进程边界拒绝非法读取范围", async () => {
+    const rootPath = await createWorkspace()
+    const tools = createReadonlyWorkspaceAgentTools({ rootPath })
+    const signal = new AbortController().signal
+
+    await expect(tools.readWorkspaceFile({ path: "README.md", offset: 0 }, signal)).rejects.toThrow(
+      "从 1 开始",
+    )
+    await expect(tools.readWorkspaceFile({ path: "README.md", limit: 1_001 }, signal)).rejects.toThrow(
+      "1 到 1000",
+    )
+    await expect(tools.readWorkspaceFile({ path: "README.md", offset: 99 }, signal)).rejects.toThrow(
+      "超出文件总行数",
+    )
   })
 
   it("响应已经取消的运行", async () => {

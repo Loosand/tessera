@@ -1,8 +1,8 @@
 /**
- * [INPUT]: 主进程持有的工作区根路径、共享 Markdown/忽略目录策略、可选当前文档路径与 Agent 工具输入
- * [OUTPUT]: 仅限 Markdown 的列表、读取、全文检索、当前文档读取，以及可写 Agent 复用的路径/版本/原子写安全原语
+ * [INPUT]: 主进程持有的工作区根路径、共享 Markdown/忽略目录策略、可选当前文档路径与类型化文件 capability 输入
+ * [OUTPUT]: 仅限 Markdown 的列表、有界分页读取、全文检索、当前文档读取，以及可写 Agent 复用的路径/版本/原子写安全原语
  * [POS]: Electron 主进程中 Agent 工作区文件访问的底层安全边界
- * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
+ * [DOC]: docs/architecture/agent-file-capabilities.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -18,7 +18,8 @@ import type {
   ReadWorkspaceFileInput,
   ReadonlyWorkspaceAgentTools,
   SearchWorkspaceTextInput,
-} from "@tessera/ai/server"
+  WorkspaceFileReadResult,
+} from "@tessera/agent-runtime"
 import { isIgnoredWorkspaceEntryName, isMarkdownPath } from "./workspace-file-service"
 
 const MAX_FILE_BYTES = 256 * 1024
@@ -27,6 +28,9 @@ const MAX_SCANNED_FILES = 2_000
 const MAX_SEARCH_BYTES = 8 * 1024 * 1024
 const MAX_SEARCH_RESULTS = 100
 const MAX_MATCH_CHARACTERS = 400
+const DEFAULT_READ_LINE_LIMIT = 400
+const MAX_READ_LINE_LIMIT = 1_000
+const MAX_READ_RESULT_BYTES = 50 * 1024
 export const MAX_AGENT_MARKDOWN_BYTES = 256 * 1024
 
 class ReadonlyAgentToolError extends Error {}
@@ -189,6 +193,88 @@ export async function readAgentMarkdownFile(rootPath: string, path: string, sign
   }
 }
 
+function normalizeReadRange(input: ReadWorkspaceFileInput) {
+  const offset = input.offset ?? 1
+  const limit = input.limit ?? DEFAULT_READ_LINE_LIMIT
+  if (!Number.isSafeInteger(offset) || offset < 1) {
+    throw new ReadonlyAgentToolError("读取起始行必须是从 1 开始的整数。")
+  }
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_READ_LINE_LIMIT) {
+    throw new ReadonlyAgentToolError(`单次读取行数必须在 1 到 ${MAX_READ_LINE_LIMIT} 之间。`)
+  }
+  return { limit, offset }
+}
+
+function truncateUtf8Prefix(value: string, maxBytes: number) {
+  if (Buffer.byteLength(value, "utf8") <= maxBytes) return value
+  let low = 0
+  let high = value.length
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2)
+    if (Buffer.byteLength(value.slice(0, middle), "utf8") <= maxBytes) low = middle
+    else high = middle - 1
+  }
+  let end = low
+  const finalCodeUnit = value.charCodeAt(end - 1)
+  if (finalCodeUnit >= 0xd800 && finalCodeUnit <= 0xdbff) end -= 1
+  return value.slice(0, Math.max(0, end))
+}
+
+type AgentMarkdownDocument = Awaited<ReturnType<typeof readAgentMarkdownFile>>
+
+function workspaceFileReadResult(
+  document: AgentMarkdownDocument,
+  input: ReadWorkspaceFileInput,
+): WorkspaceFileReadResult {
+  const { limit, offset } = normalizeReadRange(input)
+  const lines = document.content.split("\n")
+  if (offset > lines.length) {
+    throw new ReadonlyAgentToolError(`读取起始行 ${offset} 超出文件总行数 ${lines.length}。`)
+  }
+
+  const requestedLines = lines.slice(offset - 1, offset - 1 + limit)
+  const outputLines: string[] = []
+  let outputBytes = 0
+  let byteLimitReached = false
+  let lineTruncated = false
+
+  for (const line of requestedLines) {
+    const separator = outputLines.length > 0 ? "\n" : ""
+    const additionBytes = Buffer.byteLength(separator + line, "utf8")
+    if (outputBytes + additionBytes <= MAX_READ_RESULT_BYTES) {
+      outputLines.push(line)
+      outputBytes += additionBytes
+      continue
+    }
+    byteLimitReached = true
+    if (outputLines.length === 0) {
+      outputLines.push(truncateUtf8Prefix(line, MAX_READ_RESULT_BYTES))
+      lineTruncated = true
+    }
+    break
+  }
+
+  const endLine = offset + outputLines.length - 1
+  const hasMoreLines = endLine < lines.length
+  const reason = byteLimitReached ? "bytes" : hasMoreLines ? "lines" : null
+  return {
+    ...document,
+    content: outputLines.join("\n"),
+    range: {
+      startLine: offset,
+      endLine,
+      totalLines: lines.length,
+    },
+    truncation: {
+      truncated: reason !== null,
+      reason,
+      maxBytes: MAX_READ_RESULT_BYTES,
+      lineTruncated,
+      nextOffset: lineTruncated || !hasMoreLines ? null : endLine + 1,
+    },
+  }
+}
+
 export async function resolveAgentCreatePath(rootPath: string, inputPath: string) {
   const relativePath = normalizedRelativePath(inputPath, false)
   if (!isAgentMarkdownPath(relativePath)) {
@@ -287,13 +373,17 @@ export function createReadonlyWorkspaceAgentTools({
         limit: MAX_LISTED_FILES,
       }
     },
-    readWorkspaceFile: (input: ReadWorkspaceFileInput, signal) =>
-      readAgentMarkdownFile(rootPath, input.path, signal),
+    readWorkspaceFile: async (input: ReadWorkspaceFileInput, signal) =>
+      workspaceFileReadResult(await readAgentMarkdownFile(rootPath, input.path, signal), input),
     readCurrentDocument: async (signal) => {
       if (!currentDocumentPath) {
         return { available: false, reason: "用户当前没有在编辑器中打开 Markdown 文档。" }
       }
-      return { available: true, ...(await readAgentMarkdownFile(rootPath, currentDocumentPath, signal)) }
+      const input = { path: currentDocumentPath }
+      return {
+        available: true,
+        ...workspaceFileReadResult(await readAgentMarkdownFile(rootPath, currentDocumentPath, signal), input),
+      }
     },
     searchWorkspaceText: async (input: SearchWorkspaceTextInput, signal) => {
       const query = input.query.trim()

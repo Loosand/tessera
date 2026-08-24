@@ -2,7 +2,7 @@
  * [INPUT]: 已解析供应商连接与模型上下文上限、自动联网/思考策略、当前 Skill、完整 AI SDK UIMessage 历史、主进程按授权注入的研究/写作交接/内容库/工作区/MCP 能力、中止信号与运行指标/ContextManifest 回调
  * [OUTPUT]: 普通对话和工作区任务共用、先隔离不可重放历史再由 createAgentUIStream 标准转换模型消息，同时承载逐步上下文预算、供应商原生搜索及预算耗尽续答、可信研究闭环、证据化写作交接、内容领域、按请求相关性与 RunPolicy 双重收窄的工作区读写、强制审批 MCP、供应商错误分类、Skill instructions、标准 needsApproval、回答后类型化引申问题与原生生命周期观测的 AI SDK ToolLoopAgent 增量流
  * [POS]: @tessera/ai/server 中统一自然对话的 ToolLoopAgent 编排边界
- * [DOC]: docs/architecture/unified-creation-agent.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/ai-observability.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
+ * [DOC]: docs/architecture/unified-creation-agent.md、docs/architecture/agent-file-capabilities.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/ai-observability.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -10,7 +10,7 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import type { AgentRuntime } from "@tessera/agent-runtime"
+import type { AgentRuntime, WorkspaceAgentTools } from "@tessera/agent-runtime"
 import type {
   AiChatStreamChunk,
   TaskContextManifest,
@@ -42,25 +42,14 @@ import {
   hasRequestedUserInputSinceLastUserMessage,
 } from "./task-interaction-tools"
 
-export type ListWorkspaceFilesInput = Readonly<{
-  directory?: string | undefined
-}>
-
-export type ReadWorkspaceFileInput = Readonly<{
-  path: string
-}>
-
-export type SearchWorkspaceTextInput = Readonly<{
-  directory?: string | undefined
-  query: string
-}>
-
-export type ReadonlyWorkspaceAgentTools = {
-  readonly listWorkspaceFiles: (input: ListWorkspaceFilesInput, signal: AbortSignal) => Promise<unknown>
-  readonly readCurrentDocument: (signal: AbortSignal) => Promise<unknown>
-  readonly readWorkspaceFile: (input: ReadWorkspaceFileInput, signal: AbortSignal) => Promise<unknown>
-  readonly searchWorkspaceText: (input: SearchWorkspaceTextInput, signal: AbortSignal) => Promise<unknown>
-}
+export type {
+  ListWorkspaceFilesInput,
+  ReadonlyWorkspaceAgentTools,
+  ReadWorkspaceFileInput,
+  SearchWorkspaceTextInput,
+  WorkspaceAgentTools,
+  WorkspaceDocumentChangeInput,
+} from "@tessera/agent-runtime"
 
 export const workspaceDocumentChangeInputSchema = z
   .strictObject({
@@ -96,15 +85,6 @@ export const workspaceDocumentChangeInputSchema = z
       })
     }
   })
-
-export type WorkspaceDocumentChangeInput = Readonly<z.infer<typeof workspaceDocumentChangeInputSchema>>
-
-export type WorkspaceAgentTools = ReadonlyWorkspaceAgentTools & {
-  readonly writeWorkspaceDocument: (
-    input: WorkspaceDocumentChangeInput,
-    context: Readonly<{ signal: AbortSignal; toolCallId: string }>,
-  ) => Promise<unknown>
-}
 
 export type ExternalAgentTool = Readonly<{
   description: string
@@ -191,8 +171,8 @@ ${contentLibraryAvailable ? "当前可使用托管内容库；正式产物默认
 
 规则：
 1. 普通问答直接回答；需要最新事实时搜索，需要工作区事实时先调用读取工具，不要猜测文件内容。工作区授权只表示可用，不表示与当前问题相关；用户没有明确提到工作区、文档、附件或本地材料时，不要为了“看看有没有记录”而读取工作区。
-2. 历史消息里 state=output-available 的工具结果已经完成；优先直接使用，不要重复执行相同搜索或读取，除非结果明确过期、缺失或冲突。回答中的工作区结论使用可点击 Markdown 链接，格式为“[路径:行号](路径#L行号)”；没有行号时使用“[路径](路径)”。
-3. 修改已有文档前必须先读取最新内容，并把读取结果中的 modifiedAt 和 contentHash 原样传给写工具；创建文档使用 create 操作。
+2. 历史消息里 state=output-available 的工具结果已经完成；优先直接使用，不要重复执行相同搜索或读取，除非结果明确过期、缺失或冲突。读取结果的 truncation.nextOffset 非空时，按需继续读取后续行；lineTruncated=true 时改用搜索定位并说明限制。回答中的工作区结论使用可点击 Markdown 链接，格式为“[路径:行号](路径#L行号)”；没有行号时使用“[路径](路径)”。
+3. 修改已有文档前必须先按 nextOffset 读取全部最新内容，并把读取结果中的 modifiedAt 和 contentHash 原样传给写工具；存在 lineTruncated 时不得提出覆盖式更新。创建文档使用 create 操作。
 4. 写工具输入必须是完整候选 Markdown，并简要说明修改理由。写工具只会先请求用户审批；用户批准后才会在下一轮执行。
 5. 用户拒绝后不要在没有新要求或实质不同方案时重复提出同一修改。
 6. 工具返回冲突时重新读取文件并说明差异，不得覆盖磁盘新版本。
@@ -320,9 +300,12 @@ async function* runAiSdkAgent(
             relevantWorkspaceTools.listWorkspaceFiles(toolInput, options.abortSignal ?? abortSignal),
         }),
         "read-workspace-file": tool({
-          description: "读取一个工作区内 Markdown 文件的文本内容。路径必须来自工作区相对路径。",
+          description:
+            "分页读取一个工作区内 Markdown 文件。路径必须是工作区相对路径；结果截断时使用 truncation.nextOffset 继续。",
           inputSchema: z.strictObject({
             path: z.string().min(1).max(1_024).describe("要读取的 Markdown 文件相对路径"),
+            offset: z.number().int().min(1).optional().describe("从 1 开始的起始行；省略表示第一行"),
+            limit: z.number().int().min(1).max(1_000).optional().describe("本次最多返回的行数"),
           }),
           execute: (toolInput, options) =>
             relevantWorkspaceTools.readWorkspaceFile(toolInput, options.abortSignal ?? abortSignal),

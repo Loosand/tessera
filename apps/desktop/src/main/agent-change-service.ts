@@ -1,8 +1,8 @@
 /**
- * [INPUT]: SQLite Agent 变更仓储、当前工作区根目录、AI SDK 工具输入/审批 Part 与中止信号
- * [OUTPUT]: 冻结工作区 Markdown 候选内容、只对账本领域工具审批、版本复核、原子写入、Diff 预览和审计结果
+ * [INPUT]: SQLite Agent 变更仓储、当前工作区根目录、AI SDK 工具输入/审批 Part、文件变更队列与中止信号
+ * [OUTPUT]: 冻结工作区 Markdown 候选内容、只对账本领域工具审批、同文件串行的版本复核/原子写入、Diff 预览和审计结果
  * [POS]: Electron 主进程中可写 Agent 的人工审批与文件落盘领域边界
- * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md、docs/architecture/database.md
+ * [DOC]: docs/architecture/agent-file-capabilities.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md、docs/architecture/database.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -10,6 +10,7 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
+import type { WorkspaceDocumentWriteResult } from "@tessera/agent-runtime"
 import type { AgentChangePreview, TaskMessage, TaskToolMessagePart } from "@tessera/contracts"
 import {
   type AgentChangeProposal,
@@ -25,8 +26,10 @@ import {
   agentContentHash,
   readAgentMarkdownFile,
   resolveAgentCreatePath,
+  resolveAgentPath,
   writeAgentMarkdownFile,
 } from "./read-only-agent-tools"
+import { withWorkspaceFileMutation } from "./workspace-file-mutation-queue"
 
 const MAX_REASON_CHARACTERS = 2_000
 
@@ -133,7 +136,7 @@ export type AgentChangeService = {
     value: unknown,
     rootPath: string,
     signal: AbortSignal,
-  ): Promise<unknown>
+  ): Promise<WorkspaceDocumentWriteResult>
   preview(taskId: string, approvalId: string): AgentChangePreview
   reconcileDecisions(taskId: string, messages: readonly TaskMessage[]): void
   register(input: RegisterAgentChangeInput): Promise<void>
@@ -217,29 +220,41 @@ export function createAgentChangeService(client: DatabaseClient): AgentChangeSer
       }
 
       try {
-        if (change.operation === "update") {
-          const current = await readAgentMarkdownFile(rootPath, change.path, signal)
-          if (
-            current.modifiedAt !== change.baseModifiedAt ||
-            current.contentHash !== change.baseContentHash
-          ) {
-            completeAgentChangeProposal(client, proposal.approvalId, "conflict", "磁盘版本已变化")
-            return {
-              status: "conflict",
-              path: current.path,
-              message: "审批期间磁盘版本已变化，未写入任何内容。请重新读取并生成新的候选修改。",
+        const target =
+          change.operation === "create"
+            ? await resolveAgentCreatePath(rootPath, change.path)
+            : await resolveAgentPath(rootPath, change.path)
+        return await withWorkspaceFileMutation(target.absolutePath, async () => {
+          if (signal.aborted) throw new AgentChangeError("Agent 运行已停止。")
+          if (change.operation === "update") {
+            const current = await readAgentMarkdownFile(rootPath, change.path, signal)
+            if (
+              current.modifiedAt !== change.baseModifiedAt ||
+              current.contentHash !== change.baseContentHash
+            ) {
+              completeAgentChangeProposal(client, proposal.approvalId, "conflict", "磁盘版本已变化")
+              return {
+                status: "conflict",
+                path: current.path,
+                message: "审批期间磁盘版本已变化，未写入任何内容。请重新读取并生成新的候选修改。",
+              }
             }
           }
-        }
-        const document = await writeAgentMarkdownFile(rootPath, change.path, change.content, change.operation)
-        completeAgentChangeProposal(client, proposal.approvalId, "applied")
-        return {
-          status: "saved",
-          operation: change.operation,
-          path: document.path,
-          modifiedAt: document.modifiedAt,
-          contentHash: document.contentHash,
-        }
+          const document = await writeAgentMarkdownFile(
+            rootPath,
+            change.path,
+            change.content,
+            change.operation,
+          )
+          completeAgentChangeProposal(client, proposal.approvalId, "applied")
+          return {
+            status: "saved",
+            operation: change.operation,
+            path: document.path,
+            modifiedAt: document.modifiedAt,
+            contentHash: document.contentHash,
+          }
+        })
       } catch (error) {
         const message = error instanceof Error ? error.message : "写入 Markdown 文档失败。"
         const createConflict =

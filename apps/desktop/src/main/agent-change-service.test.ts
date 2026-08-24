@@ -1,8 +1,8 @@
 /**
  * [INPUT]: 临时 Markdown 工作区、内存 SQLite、冻结提案、人工批准/拒绝与外部磁盘变化
- * [OUTPUT]: Agent 变更预览、批准后原子写入、领域审批隔离、拒绝不写入和版本冲突保护的回归验证
+ * [OUTPUT]: Agent 变更预览、批准后原子写入、领域审批隔离、拒绝不写入、版本冲突与同文件并发保护的回归验证
  * [POS]: 可写 Agent 人工审批主进程边界的集成测试
- * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
+ * [DOC]: docs/architecture/agent-file-capabilities.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -242,6 +242,72 @@ describe("Agent Markdown 变更审批", () => {
       ),
     ).resolves.toMatchObject({ status: "conflict", path: "race.md" })
     expect(await readFile(join(rootPath, "race.md"), "utf8")).toBe("# 外部创建\n")
+    client.close()
+  })
+
+  test("同一基准版本的并发批准更新串行复核并阻止后写覆盖", async () => {
+    const { base, client, rootPath, service } = await fixture()
+    const changes = [
+      {
+        operation: "update" as const,
+        path: "README.md",
+        content: "# 并发候选 A\n",
+        reason: "并发测试 A",
+        baseModifiedAt: base.modifiedAt,
+        baseContentHash: base.contentHash,
+      },
+      {
+        operation: "update" as const,
+        path: "README.md",
+        content: "# 并发候选 B\n",
+        reason: "并发测试 B",
+        baseModifiedAt: base.modifiedAt,
+        baseContentHash: base.contentHash,
+      },
+    ]
+
+    await Promise.all(
+      changes.map((change, index) =>
+        service.register({
+          approvalId: `approval-concurrent-${index}`,
+          taskId: "agent-change-task",
+          requestId: "request-change",
+          toolCallId: `tool-concurrent-${index}`,
+          providerId: "deepseek",
+          modelId: "deepseek-chat",
+          rootPath,
+          change,
+        }),
+      ),
+    )
+    service.reconcileDecisions(
+      "agent-change-task",
+      changes.map((change, index) =>
+        approvedMessage(`approval-concurrent-${index}`, `tool-concurrent-${index}`, change, true),
+      ),
+    )
+
+    const results = await Promise.all(
+      changes.map((change, index) =>
+        service.execute(
+          "agent-change-task",
+          `tool-concurrent-${index}`,
+          change,
+          rootPath,
+          new AbortController().signal,
+        ),
+      ),
+    )
+    const statuses = results.map((result) => (result as { status: string }).status).sort()
+    expect(statuses).toEqual(["conflict", "saved"])
+    expect(changes.map((change) => change.content)).toContain(
+      await readFile(join(rootPath, "README.md"), "utf8"),
+    )
+    expect(
+      changes
+        .map((_change, index) => service.preview("agent-change-task", `approval-concurrent-${index}`).status)
+        .sort(),
+    ).toEqual(["applied", "conflict"])
     client.close()
   })
 })
