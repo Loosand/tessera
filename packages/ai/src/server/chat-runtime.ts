@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 已解析的供应商连接、受信任 RunPolicy、含图片/显式 Markdown 上下文的任务消息与 AI SDK UIMessageChunk
- * [OUTPUT]: 统一 Agent 复用的附件边界、输入校验、嵌套供应商错误分类/状态码脱敏、搜索额度和含引申问题的公开增量裁剪
+ * [OUTPUT]: 统一 Agent 复用的附件边界、模型历史投影、输入校验、嵌套供应商错误分类/状态码脱敏、搜索额度和含引申问题的公开增量裁剪
  * [POS]: Electron 主进程与统一 ToolLoopAgent 之间的共享流协议辅助层，不提供独立 Chat 运行时
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/ai-observability.md、docs/architecture/ai-providers.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -20,6 +20,7 @@ import type {
   TaskRunErrorCode,
   TaskRunErrorDataV1,
   TaskRunPolicy,
+  TaskToolMessagePart,
 } from "@tessera/contracts"
 import { type UIMessage, type UIMessageChunk, validateUIMessages } from "ai"
 
@@ -31,6 +32,12 @@ const MAX_ERROR_MESSAGE_LENGTH = 320
 const DEFAULT_WEB_SEARCH_MAX_USES = 12
 const RESEARCH_WEB_SEARCH_MAX_USES = 30
 const publicAgentToolErrors = new WeakSet<object>()
+const REPLAYABLE_TOOL_STATES = new Set<TaskToolMessagePart["state"]>([
+  "approval-responded",
+  "output-available",
+  "output-error",
+  "output-denied",
+])
 
 /** 标记由 Tessera 自有领域工具生成、可以安全展示给用户的操作错误。 */
 export class PublicAgentToolError extends Error {
@@ -139,6 +146,13 @@ export function classifyProviderStreamError(error: unknown, apiKey: string): Tas
     code = "provider-response"
     message = "联网搜索服务返回了不兼容的结果格式，请稍后重试，或改用问答模式直接回答。"
   } else if (
+    httpStatus === 402 ||
+    searchable.includes("insufficient balance") ||
+    searchable.includes("insufficient credits")
+  ) {
+    code = "provider-config"
+    message = errorMessageWithStatus("供应商账户余额不足，请充值，或切换到其他可用连接或模型。", httpStatus)
+  } else if (
     httpStatus === 401 ||
     httpStatus === 403 ||
     /\b(unauthorized|forbidden|invalid api key)\b/u.test(searchable)
@@ -177,7 +191,10 @@ export function classifyProviderStreamError(error: unknown, apiKey: string): Tas
     message = errorMessageWithStatus("供应商返回了无法解析或不完整的响应，请稍后继续。", httpStatus)
   } else if (httpStatus === 400 || httpStatus === 409 || httpStatus === 422) {
     code = "invalid-request"
-    message = errorMessageWithStatus("供应商拒绝了当前请求，请检查模型与请求配置。", httpStatus)
+    message = errorMessageWithStatus(
+      "供应商拒绝了当前请求。失败或不完整的历史已自动隔离；若重试仍失败，请检查模型与端点配置。",
+      httpStatus,
+    )
   } else {
     code = "provider-unavailable"
     message = errorMessageWithStatus("模型请求失败，请检查供应商配置、模型状态与网络连接。", httpStatus)
@@ -210,6 +227,54 @@ export function safeErrorMessage(error: unknown, apiKey: string): string {
 
 export function webSearchMaxUsesForSkill(skillId: AiChatStartInput["skillId"]) {
   return skillId === "research" ? RESEARCH_WEB_SEARCH_MAX_USES : DEFAULT_WEB_SEARCH_MAX_USES
+}
+
+function isTaskToolMessagePart(part: TaskMessage["parts"][number]): part is TaskToolMessagePart {
+  return part.type === "dynamic-tool" || part.type.startsWith("tool-")
+}
+
+function isReplayableToolPart(part: TaskToolMessagePart) {
+  return (
+    REPLAYABLE_TOOL_STATES.has(part.state) &&
+    !(part.state === "output-available" && part.preliminary === true)
+  )
+}
+
+function hasModelContent(parts: readonly TaskMessage["parts"][number][]) {
+  return parts.some((part) => part.type === "text" || isTaskToolMessagePart(part))
+}
+
+/**
+ * 将可持久化 UIMessage 历史投影为供应商可稳定重放的模型上下文。
+ *
+ * 历史 reasoning 与工具私有元数据不进入公开持久化协议，因此旧助手轮次只重放可见正文。
+ * 只有当前审批/自动续轮或显式失败续跑的最后助手消息保留已终止工具 Part。
+ * 可见历史与 SQLite 原始记录保持不变。
+ */
+export function taskMessagesForModel(
+  messages: readonly TaskMessage[],
+  continueFromMessageId?: string,
+): TaskMessage[] {
+  const lastMessage = messages.at(-1)
+
+  return messages.flatMap((message) => {
+    if (message.role === "user") return [message]
+
+    const hasFailure = message.parts.some((part) => part.type === "data-task-error")
+    const isCurrentProtocolMessage =
+      message.id === continueFromMessageId ||
+      (message === lastMessage && !hasFailure && message.parts.some(isTaskToolMessagePart))
+    const parts = isCurrentProtocolMessage
+      ? message.parts.filter(
+          (part) =>
+            part.type === "text" ||
+            part.type === "step-start" ||
+            (isTaskToolMessagePart(part) && isReplayableToolPart(part)),
+        )
+      : message.parts.filter((part) => part.type === "text")
+
+    return hasModelContent(parts) ? [{ ...message, parts }] : []
+  })
 }
 
 function validateDataFile(url: string, mediaType: string, filename?: string) {

@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 已解析供应商连接、自动联网/思考策略、当前 Skill、完整 AI SDK UIMessage 历史、主进程按授权注入的研究/写作交接/内容库/工作区/MCP 能力、中止信号与运行指标回调
- * [OUTPUT]: 普通对话和工作区任务共用、以 InferAgentUIMessage 约束并由 createAgentUIStream 标准转换模型消息，同时承载供应商原生搜索及预算耗尽续答、可信研究闭环、证据化写作交接、内容领域、按请求相关性与 RunPolicy 双重收窄的工作区读写、强制审批 MCP、供应商错误分类、Skill instructions、标准 needsApproval、回答后类型化引申问题与原生生命周期观测的 AI SDK ToolLoopAgent 增量流
+ * [OUTPUT]: 普通对话和工作区任务共用、先隔离不可重放历史再由 createAgentUIStream 标准转换模型消息，同时承载供应商原生搜索及预算耗尽续答、可信研究闭环、证据化写作交接、内容领域、按请求相关性与 RunPolicy 双重收窄的工作区读写、强制审批 MCP、供应商错误分类、Skill instructions、标准 needsApproval、回答后类型化引申问题与原生生命周期观测的 AI SDK ToolLoopAgent 增量流
  * [POS]: @tessera/ai/server 中统一自然对话的 ToolLoopAgent 编排边界
  * [DOC]: docs/architecture/unified-creation-agent.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/ai-observability.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -27,6 +27,7 @@ import {
   classifyProviderStreamError,
   isWebSearchMaxUsesExceededError,
   publicChunk,
+  taskMessagesForModel,
   toUiMessages,
   webSearchMaxUsesForSkill,
 } from "./chat-runtime"
@@ -413,7 +414,10 @@ async function* runAiSdkAgent(
     },
   })
   type AgentUiMessage = InferAgentUIMessage<typeof agent>
-  const originalMessages = await toUiMessages<AgentUiMessage>(input.messages, { tools })
+  const originalMessages = await toUiMessages<AgentUiMessage>(
+    taskMessagesForModel(input.messages, input.continueFromMessageId),
+    { tools },
+  )
   const classifiedStreamFailures: Array<{
     failure: TaskRunErrorDataV1
     webSearchBudgetExceeded: boolean
@@ -429,8 +433,8 @@ async function* runAiSdkAgent(
     },
     timeout: {
       totalMs: input.runPolicy.limits.timeoutMs,
-      firstChunkMs: 30_000,
-      chunkMs: 45_000,
+      firstChunkMs: 120_000,
+      chunkMs: 180_000,
     },
     sendReasoning: true,
     sendSources: true,

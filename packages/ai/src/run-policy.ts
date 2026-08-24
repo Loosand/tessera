@@ -26,7 +26,7 @@ export type TaskRunPolicyResolution = {
   policy: TaskRunPolicy
 }
 
-const TASK_TIMEOUT_MS = 120_000
+const TASK_TIMEOUT_MS = 5 * 60_000
 const RESEARCH_TIMEOUT_MS = 30 * 60_000
 const DEFAULT_MAX_OUTPUT_TOKENS = 4_096
 const DEFAULT_RESEARCH_EMERGENCY_MAX_STEPS = 32

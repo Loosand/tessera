@@ -67,7 +67,12 @@ describe("统一任务 RunPolicy", () => {
         providerId: "deepseek",
         skillId: "question-answering",
       }).policy,
-    ).toMatchObject({ reasoning: "auto", toolScope: "workspace-read", webSearch: false })
+    ).toMatchObject({
+      reasoning: "auto",
+      toolScope: "workspace-read",
+      webSearch: false,
+      limits: { maxSteps: 4, timeoutMs: 300_000 },
+    })
   })
 
   it("自动模式在自定义代理没有搜索能力时回落到普通端点", () => {

@@ -1,6 +1,6 @@
 /**
  * [INPUT]: AI SDK UI 工具增量、Markdown 上下文附件、供应商错误与 Tessera 公开流式协议
- * [OUTPUT]: 文档材料边界、工具/引申问题增量裁剪、错误归类脱敏和 Skill 搜索额度策略的回归验证
+ * [OUTPUT]: 文档材料边界、稳定模型历史投影、工具/引申问题增量裁剪、错误归类脱敏和 Skill 搜索额度策略的回归验证
  * [POS]: Chat/Agent 共用 UIMessageChunk 裁剪边界的单元测试
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
  *
@@ -10,6 +10,7 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
+import type { TaskMessage } from "@tessera/contracts"
 import { describe, expect, it } from "vitest"
 import {
   PublicAgentToolError,
@@ -17,6 +18,7 @@ import {
   isWebSearchMaxUsesExceededError,
   publicChunk,
   safeErrorMessage,
+  taskMessagesForModel,
   toUiMessages,
   webSearchMaxUsesForSkill,
 } from "./chat-runtime"
@@ -171,6 +173,108 @@ describe("Chat 运行时边界", () => {
       retryable: true,
       version: 1,
     })
+  })
+
+  it("把 402 映射为不会无效重试的余额错误", () => {
+    expect(
+      classifyProviderStreamError(
+        { statusCode: 402, message: "Insufficient Balance: api-key=secret-key" },
+        "secret-key",
+      ),
+    ).toEqual({
+      code: "provider-config",
+      httpStatus: 402,
+      message: "供应商账户余额不足，请充值，或切换到其他可用连接或模型。（HTTP 402）",
+      phase: "stream",
+      retryable: false,
+      version: 1,
+    })
+  })
+
+  it("历史助手轮次只向模型重放可见正文", () => {
+    const messages: TaskMessage[] = [
+      { id: "user-1", role: "user", parts: [{ type: "text", text: "查资料" }] },
+      {
+        id: "assistant-complete",
+        role: "assistant",
+        parts: [
+          { type: "reasoning", text: "内部思考", state: "done" },
+          { type: "step-start" },
+          {
+            type: "tool-web-search",
+            toolCallId: "search-1",
+            state: "output-available",
+            input: { query: "Tessera" },
+            output: { result: "结果" },
+            providerExecuted: true,
+          },
+          { type: "text", text: "这是已完成的结论。" },
+        ],
+      },
+      { id: "user-2", role: "user", parts: [{ type: "text", text: "继续" }] },
+      {
+        id: "assistant-failed",
+        role: "assistant",
+        parts: [
+          { type: "reasoning", text: "未完成思考", state: "streaming" },
+          {
+            type: "tool-web-search",
+            toolCallId: "search-2",
+            state: "input-available",
+            input: { query: "more" },
+            providerExecuted: true,
+          },
+          {
+            type: "data-task-error",
+            data: { code: "invalid-request", message: "失败", phase: "stream", retryable: false, version: 1 },
+          },
+        ],
+      },
+      { id: "user-3", role: "user", parts: [{ type: "text", text: "重试" }] },
+    ]
+
+    expect(taskMessagesForModel(messages)).toEqual([
+      messages[0],
+      {
+        id: "assistant-complete",
+        role: "assistant",
+        parts: [{ type: "text", text: "这是已完成的结论。" }],
+      },
+      messages[2],
+      messages[4],
+    ])
+    expect(messages[1]?.parts).toHaveLength(4)
+  })
+
+  it("显式续跑仅保留已终止的工具结果", () => {
+    const continuation: TaskMessage = {
+      id: "assistant-continuation",
+      role: "assistant",
+      parts: [
+        { type: "step-start" },
+        {
+          type: "tool-read-workspace-file",
+          toolCallId: "read-complete",
+          state: "output-available",
+          input: { path: "README.md" },
+          output: { content: "# Tessera" },
+        },
+        {
+          type: "tool-read-workspace-file",
+          toolCallId: "read-incomplete",
+          state: "input-available",
+          input: { path: "draft.md" },
+        },
+        {
+          type: "data-task-error",
+          data: { code: "network", message: "断流", phase: "stream", retryable: true, version: 1 },
+        },
+      ],
+    }
+
+    expect(taskMessagesForModel([continuation], continuation.id)).toEqual([
+      { ...continuation, parts: continuation.parts.slice(0, 2) },
+    ])
   })
 
   it("仅为研究 Skill 提升有界搜索额度", () => {

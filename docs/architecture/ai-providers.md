@@ -89,13 +89,13 @@ useChat + Electron ChatTransport
   -> Markdown 消息界面
 ```
 
-普通对话只发送用户显式输入、显式 Markdown/图片附件与当前对话历史，不读取未附加的工作区内容。主进程会把 Markdown 附件解码为带“材料而非系统指令”边界的受限文本，并把供应商明确返回的 reasoning 增量按 AI SDK Part 原始顺序送入 renderer；界面只为非空 reasoning 摘要显示默认展开、可折叠且最大高度 12rem 的紧凑 Markdown 过程块。只返回 reasoning start/end 而没有 delta 的兼容端点在同一回复内聚合成一个阶段状态，不重复渲染空正文。长内容在块内独立滚动，流式追加只在用户仍贴近末尾时自动跟随。正文与 reasoning 共享禁用原始 HTML 的语义渲染器。reasoning 不作为下一轮对话历史回传，也不把供应商未返回的内部思维链补写成可见内容。
+普通对话只发送用户显式输入、显式 Markdown/图片附件与当前对话中可稳定重放的历史，不读取未附加的工作区内容。持久化消息依然完整保留 UI Part，但模型输入投影仅向供应商重放旧助手的可见正文；当前审批/自动续轮或显式失败续跑才保留已终止工具 Part，防止缺少供应商私有元数据的历史协议导致整个对话持续 400。主进程会把 Markdown 附件解码为带“材料而非系统指令”边界的受限文本，并把供应商明确返回的 reasoning 增量按 AI SDK Part 原始顺序送入 renderer；界面只为非空 reasoning 摘要显示默认展开、可折叠且最大高度 12rem 的紧凑 Markdown 过程块。只返回 reasoning start/end 而没有 delta 的兼容端点在同一回复内聚合成一个阶段状态，不重复渲染空正文。长内容在块内独立滚动，流式追加只在用户仍贴近末尾时自动跟随。正文与 reasoning 共享禁用原始 HTML 的语义渲染器。reasoning 不作为下一轮对话历史回传，也不把供应商未返回的内部思维链补写成可见内容。
 
 无工作区与工作区请求现在都使用 `ToolLoopAgent`，并通过共用 `task-agent.ts` 的 `callOptionsSchema` / `prepareCall` 消费受信任 RunPolicy；差异只剩主进程实际注入的资源工具集合。无需工具时直接生成正文，需要时按每轮策略调用搜索、Skill 和受限领域工具。供应商适配与消息 Part 协议不因存储方案变化而分叉。
 
 实现前必须核对当前锁定 AI SDK 的随包 docs/source。每轮模型、instructions、active tools、provider options 和审批优先通过类型化 call options / `prepareCall` 配置；step 内调整使用 `prepareStep`，循环限制使用 `stopWhen`，观测使用生命周期回调。现有 Electron `ChatTransport` 只补足跨进程 IPC、后台事件持久化和 reconnect；不得平行实现 Agent loop、消息 Part、审批状态机或 React chat 状态。
 
-自动与写作方式会在请求期模型路由确认原生搜索可用时启用 `web_search`，研究 Skill 同样启用并获得更宽预算，问答预设始终关闭；renderer 只用同一纯策略解析器做发送前预检，IPC 不再接受 `reasoning` / `webSearch` 能力命令，主进程会根据已保存模型事实重新生成实际 RunPolicy。同一搜索工具既可进入无工作区任务，也可与工作区工具共同进入 Agent 的工具循环。主进程保留工具输出与 URL 来源 Part；renderer 优先按 AI SDK provider-executed 工具的标准 `output.action` / `output.sources` 读取查询、打开页面和来源，同时兼容旧供应商的 `input.query` 与结果数组，按同一助手消息聚合真实搜索次数、去重来源和执行状态，过滤非 http(s) URL 与供应商内部调用标识，并以可展开过程轨迹呈现。每个来源先通过 HTTPS 请求站点 `/favicon.ico`，失败后请求 Favicon.im，二者均失败时回退通用图标；图片懒加载且不发送 Referer。自动与写作每轮最多搜索 12 次，研究 Skill 每轮最多 30 次，运行时再以 50 次作为防御性硬上限；额度耗尽必须按 AI SDK 标准降级为 `tool-output-error`，兼容端点即使误发顶层错误，也要在模型继续产出完整正文时保留答案并正常结束，不能升级为整轮 Schema 崩溃。供应商用于续轮引用的加密内容保留在工具历史中，不进入可见界面；没有真实工具 Part 时不根据 reasoning 文本伪造搜索活动。供应商原始校验错误在公开前映射为可操作文案，不向 renderer 暴露 Schema、堆栈或凭据。
+自动与写作方式会在请求期模型路由确认原生搜索可用时启用 `web_search`，研究 Skill 同样启用并获得更宽预算，问答预设始终关闭；renderer 只用同一纯策略解析器做发送前预检，IPC 不再接受 `reasoning` / `webSearch` 能力命令，主进程会根据已保存模型事实重新生成实际 RunPolicy。同一搜索工具既可进入无工作区任务，也可与工作区工具共同进入 Agent 的工具循环。主进程保留工具输出与 URL 来源 Part；renderer 优先按 AI SDK provider-executed 工具的标准 `output.action` / `output.sources` 读取查询、打开页面和来源，同时兼容旧供应商的 `input.query` 与结果数组，按同一助手消息聚合真实搜索次数、去重来源和执行状态，过滤非 http(s) URL 与供应商内部调用标识，并以可展开过程轨迹呈现。每个来源先通过 HTTPS 请求站点 `/favicon.ico`，失败后请求 Favicon.im，二者均失败时回退通用图标；图片懒加载且不发送 Referer。自动与写作每轮最多搜索 12 次，研究 Skill 每轮最多 30 次，运行时再以 50 次作为防御性硬上限；额度耗尽必须按 AI SDK 标准降级为 `tool-output-error`，兼容端点即使误发顶层错误，也要在模型继续产出完整正文时保留答案并正常结束，不能升级为整轮 Schema 崩溃。供应商用于续轮引用的加密内容只在同一模型运行的内部工具历史中保留，不进入可见界面；没有真实工具 Part 时不根据 reasoning 文本伪造搜索活动。供应商原始校验错误在公开前映射为可操作文案，402 单独提示充值/切换连接且不标记可重试，不向 renderer 暴露 Schema、堆栈或凭据。
 
 原生搜索 Part 只证明供应商执行了搜索或报告了页面动作，不自动证明 Tessera 已取得并保存页面正文。只有 URL、摘要、
 结果数组或不透明加密上下文时，来源在研究领域仍是“已发现”；供应商明确返回可核查页面内容时才可归一化为“已阅读”。
