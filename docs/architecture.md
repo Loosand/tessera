@@ -119,6 +119,7 @@ SQLite 控制层”作为可逆实验基线，同时保留数据库正文和完�
 ## 相关文档
 
 - [产品边界](product.md)
+- [轻量 Agent Kernel 与能力运行时](architecture/agent-kernel-and-capability-runtime.md)
 - [统一创作 Agent 与内容存储探索](architecture/unified-creation-agent.md)
 - [任务会话与导航](architecture/task-navigation.md)
 - [编辑器与 Markdown](architecture/editor.md)
