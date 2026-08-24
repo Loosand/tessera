@@ -89,7 +89,7 @@ useChat + Electron ChatTransport
   -> Markdown 消息界面
 ```
 
-普通对话只发送用户显式输入、显式 Markdown/图片附件与当前对话中可稳定重放的历史，不读取未附加的工作区内容。持久化消息依然完整保留 UI Part，但模型输入投影仅向供应商重放旧助手的可见正文；当前审批/自动续轮或显式失败续跑才保留已终止工具 Part，防止缺少供应商私有元数据的历史协议导致整个对话持续 400。主进程会把 Markdown 附件解码为带“材料而非系统指令”边界的受限文本，并把供应商明确返回的 reasoning 增量按 AI SDK Part 原始顺序送入 renderer；界面只为非空 reasoning 摘要显示默认展开、可折叠且最大高度 12rem 的紧凑 Markdown 过程块。只返回 reasoning start/end 而没有 delta 的兼容端点在同一回复内聚合成一个阶段状态，不重复渲染空正文。长内容在块内独立滚动，流式追加只在用户仍贴近末尾时自动跟随。正文与 reasoning 共享禁用原始 HTML 的语义渲染器。reasoning 不作为下一轮对话历史回传，也不把供应商未返回的内部思维链补写成可见内容。
+普通对话只发送用户显式输入、显式 Markdown/图片附件与当前对话中可稳定重放的历史，不读取未附加的工作区内容。持久化消息依然完整保留 UI Part，但模型输入投影仅向供应商重放旧助手的可见正文；当前审批/自动续轮或显式失败续跑才保留已终止工具 Part，防止缺少供应商私有元数据的历史协议导致整个对话持续 400。主进程会把 Markdown 附件解码为带“材料而非系统指令”边界的受限文本，并把供应商明确返回的 reasoning 增量按 AI SDK Part 原始顺序送入 renderer；界面只为非空 reasoning 摘要显示默认展开、可折叠且最大高度 12rem 的紧凑 Streamdown 过程块。只返回 reasoning start/end 而没有 delta 的兼容端点在同一回复内聚合成一个阶段状态，不重复渲染空正文。长内容在块内独立滚动，流式追加只在用户仍贴近末尾时自动跟随。正文、reasoning 与 Agent 结果预览共享禁用原始 HTML 的 Streamdown 渲染边界，流式态负责修复未闭合 Markdown 并平滑已到达 renderer 的新增字符；Transport 的事件粒度和合并策略仍由上游协议决定。reasoning 不作为下一轮对话历史回传，也不把供应商未返回的内部思维链补写成可见内容。
 
 无工作区与工作区请求现在都使用 `ToolLoopAgent`，并通过共用 `task-agent.ts` 的 `callOptionsSchema` / `prepareCall` 消费受信任 RunPolicy；差异只剩主进程实际注入的资源工具集合。无需工具时直接生成正文，需要时按每轮策略调用搜索、Skill 和受限领域工具。供应商适配与消息 Part 协议不因存储方案变化而分叉。
 

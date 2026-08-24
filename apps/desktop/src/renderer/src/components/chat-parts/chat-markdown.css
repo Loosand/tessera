@@ -1,0 +1,145 @@
+.chat-markdown {
+  overflow-wrap: anywhere;
+}
+
+.chat-markdown :where([data-streamdown="heading-1"]) {
+  margin-block: 1.75rem 0.75rem;
+  font-size: 1.25rem;
+  line-height: 1.75rem;
+}
+
+.chat-markdown :where([data-streamdown="heading-2"]) {
+  margin-block: 1.5rem 0.5rem;
+  font-size: 1.125rem;
+  line-height: 1.75rem;
+}
+
+.chat-markdown :where([data-streamdown="heading-3"]) {
+  margin-block: 1.25rem 0.5rem;
+  font-size: 1rem;
+  line-height: 1.5rem;
+}
+
+.chat-markdown :where([data-streamdown="blockquote"]) {
+  margin-block: 1rem;
+  border-inline-start-width: 2px;
+  padding-inline-start: 1rem;
+  font-style: normal;
+}
+
+.chat-markdown :where([data-streamdown="ordered-list"], [data-streamdown="unordered-list"]) {
+  margin-block: 0.75rem;
+  padding-inline-start: 1.5rem;
+}
+
+.chat-markdown :where([data-streamdown="list-item"]) {
+  margin-block: 0.25rem;
+  padding-inline-start: 0.25rem;
+}
+
+.chat-markdown :where([data-streamdown="link"]) {
+  color: var(--link);
+  text-decoration-color: color-mix(in srgb, currentColor 55%, transparent);
+  text-underline-offset: 0.2em;
+}
+
+.chat-markdown :where([data-streamdown="inline-code"]) {
+  overflow-wrap: anywhere;
+  background: var(--code-background);
+}
+
+.chat-markdown :where([data-streamdown="code-block"], [data-streamdown="mermaid-block"]) {
+  margin-block: 1rem;
+  border-radius: var(--radius-xl);
+  background: var(--muted);
+}
+
+.chat-markdown :where([data-streamdown="code-block-body"]) {
+  border-color: var(--code-border);
+  background: var(--code-background);
+}
+
+.chat-markdown :where([data-streamdown="table-wrapper"]) {
+  margin-block: 1rem;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: var(--radius-xl);
+  background: var(--background);
+}
+
+.chat-markdown :where([data-streamdown="table"]) {
+  min-width: 30rem;
+  border-spacing: 0;
+  border-collapse: separate;
+  font-size: 0.8125rem;
+  line-height: 1.25rem;
+}
+
+.chat-markdown :where([data-streamdown="table-header-cell"]) {
+  background: color-mix(in srgb, var(--muted) 60%, transparent);
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.025em;
+}
+
+.chat-markdown :where([data-streamdown="table-cell"]) {
+  border-block-start: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  color: color-mix(in srgb, var(--foreground) 90%, transparent);
+  vertical-align: top;
+}
+
+.chat-markdown :where([data-streamdown="table-header-cell"], [data-streamdown="table-cell"]):first-child {
+  white-space: nowrap;
+}
+
+.chat-markdown :where(.katex-display, [data-streamdown="mermaid"]) {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.chat-markdown[data-compact="true"] :where([data-streamdown="heading-1"]) {
+  margin-block: 1.25rem 0.5rem;
+  font-size: 1rem;
+  line-height: 1.5rem;
+}
+
+.chat-markdown[data-compact="true"] :where([data-streamdown="heading-2"]) {
+  margin-block: 1rem 0.5rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+.chat-markdown[data-compact="true"] :where([data-streamdown="heading-3"]) {
+  margin-block: 1rem 0.5rem;
+  font-size: 0.8125rem;
+  line-height: 1.25rem;
+}
+
+.chat-markdown[data-compact="true"] :where([data-streamdown="blockquote"]) {
+  margin-block: 0.75rem;
+  padding-inline-start: 0.75rem;
+}
+
+.chat-markdown[data-compact="true"]
+  :where([data-streamdown="ordered-list"], [data-streamdown="unordered-list"]) {
+  margin-block: 0.5rem;
+  padding-inline-start: 1.25rem;
+}
+
+.chat-markdown[data-compact="true"]
+  :where(
+    [data-streamdown="code-block"],
+    [data-streamdown="mermaid-block"],
+    [data-streamdown="table-wrapper"]
+  ) {
+  margin-block: 0.75rem;
+  border-radius: var(--radius-lg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-markdown [data-sd-animate] {
+    animation-delay: 0ms;
+    animation-duration: 1ms;
+  }
+}

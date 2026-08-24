@@ -1,7 +1,15 @@
 @import "@tessera/design-system/styles/globals.css";
+@import "streamdown/styles.css";
+@import "katex/dist/katex.min.css";
 @import "./typeset.css";
+@import "./components/chat-parts/chat-markdown.css";
 @source "./**/*.{ts,tsx}";
 @source "../../../../../packages/ai/src/**/*.{ts,tsx}";
+@source "../../../node_modules/streamdown/dist/*.js";
+@source "../../../node_modules/@streamdown/code/dist/*.js";
+@source "../../../node_modules/@streamdown/cjk/dist/*.js";
+@source "../../../node_modules/@streamdown/math/dist/*.js";
+@source "../../../node_modules/@streamdown/mermaid/dist/*.js";
 
 html,
 body,

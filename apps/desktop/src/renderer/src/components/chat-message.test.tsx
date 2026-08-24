@@ -220,7 +220,7 @@ describe("ChatMessage reasoning 正文可见性", () => {
     )
 
     expect(markup).toContain('aria-expanded="true"')
-    expect(markup).toContain("正在判断检索范围。")
+    expect(markup.replace(/<[^>]+>/gu, "")).toContain("正在判断检索范围。")
     expect(markup).toContain("Celeste Madeline character")
     expect(markup).not.toContain("REQUEST")
   })

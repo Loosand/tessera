@@ -110,7 +110,11 @@ export function ReasoningPart({ part, streaming }: ReasoningPartProps) {
             }}
             ref={contentRef}
           >
-            <ChatMarkdown compact className="text-[13px] leading-6 text-muted-foreground/90">
+            <ChatMarkdown
+              compact
+              streaming={streaming}
+              className="text-[13px] leading-6 text-muted-foreground/90"
+            >
               {part.text}
             </ChatMarkdown>
           </section>

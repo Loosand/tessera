@@ -30,6 +30,8 @@ describe("思考过程区域", () => {
     expect(markup).toContain("overflow-y-auto")
     expect(markup).toContain('aria-label="模型思考过程"')
     expect(markup).toContain('aria-busy="true"')
+    expect(markup).toContain('data-streaming="true"')
+    expect(markup).toContain("data-sd-animate")
     expect(markup).not.toContain("border-l")
   })
 
