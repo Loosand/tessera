@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 用户消息与同一 Agent 消息内复用 provider reasoning ID 的多步骤 Part、正式回答前后的工具/文本、缺失/存在摘要的 reasoning Part，以及结构化研究/引申问题/本地反馈结果
- * [OUTPUT]: 用户/助手共享阅读栏、每个消息 Part 的稳定唯一 React key、“已工作”边界，以及 reasoning、搜索、研究笔记、正文、引申问题与赞踩操作的回归验证
+ * [OUTPUT]: 用户/助手共享阅读栏、每个消息 Part 的稳定唯一 React key、“已工作”边界，以及 reasoning、搜索、研究笔记、正文、引申问题、用量审计与赞踩操作的回归验证
  * [POS]: chat-message 多步骤流式协调的单元测试
  * [DOC]: docs/architecture/ai-observability.md、docs/architecture/task-navigation.md
  *
@@ -90,7 +90,7 @@ describe("ChatMessage reasoning 正文可见性", () => {
     expect(shouldRenderReasoningBody({ text: "可展示的推理摘要" })).toBe(true)
   })
 
-  it("完成消息只用图标提供按需运行解释入口", () => {
+  it("完成消息只用图标提供按需用量与运行审计入口", () => {
     const message = {
       id: "assistant-run",
       role: "assistant",
@@ -108,7 +108,7 @@ describe("ChatMessage reasoning 正文可见性", () => {
       />,
     )
 
-    expect(markup).toContain('aria-label="查看本次运行信息"')
+    expect(markup).toContain('aria-label="查看本次用量与运行审计"')
     expect(markup).not.toContain("实际模型")
     expect(markup).not.toContain("工作区读写")
   })

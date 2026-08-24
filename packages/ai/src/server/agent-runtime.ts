@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 已解析供应商连接、自动联网/思考策略、当前 Skill、完整 AI SDK UIMessage 历史、主进程按授权注入的研究/写作交接/内容库/工作区/MCP 能力、中止信号与运行指标回调
- * [OUTPUT]: 普通对话和工作区任务共用、先隔离不可重放历史再由 createAgentUIStream 标准转换模型消息，同时承载供应商原生搜索及预算耗尽续答、可信研究闭环、证据化写作交接、内容领域、按请求相关性与 RunPolicy 双重收窄的工作区读写、强制审批 MCP、供应商错误分类、Skill instructions、标准 needsApproval、回答后类型化引申问题与原生生命周期观测的 AI SDK ToolLoopAgent 增量流
+ * [INPUT]: 已解析供应商连接与模型上下文上限、自动联网/思考策略、当前 Skill、完整 AI SDK UIMessage 历史、主进程按授权注入的研究/写作交接/内容库/工作区/MCP 能力、中止信号与运行指标/ContextManifest 回调
+ * [OUTPUT]: 普通对话和工作区任务共用、先隔离不可重放历史再由 createAgentUIStream 标准转换模型消息，同时承载逐步上下文预算、供应商原生搜索及预算耗尽续答、可信研究闭环、证据化写作交接、内容领域、按请求相关性与 RunPolicy 双重收窄的工作区读写、强制审批 MCP、供应商错误分类、Skill instructions、标准 needsApproval、回答后类型化引申问题与原生生命周期观测的 AI SDK ToolLoopAgent 增量流
  * [POS]: @tessera/ai/server 中统一自然对话的 ToolLoopAgent 编排边界
  * [DOC]: docs/architecture/unified-creation-agent.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/ai-observability.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -13,6 +13,7 @@
 import type { AgentRuntime } from "@tessera/agent-runtime"
 import type {
   AiChatStreamChunk,
+  TaskContextManifest,
   TaskMessage,
   TaskRunErrorDataV1,
   TaskToolErrorDataV1,
@@ -121,6 +122,7 @@ export type AiAgentRuntimeOptions = Readonly<{
   contentTools?: ContentDomainAgentTools
   externalTools?: readonly ExternalAgentTool[]
   onChunk: (chunk: AiChatStreamChunk) => void | Promise<void>
+  onContextManifest?: (manifest: TaskContextManifest) => void
   onRunMetrics?: (metrics: TaskAgentRunMetrics) => void
   researchContext?: string
   researchTools?: ResearchAgentTools
@@ -133,6 +135,7 @@ export type AiSdkAgentRuntimeRequest = Readonly<{
   contentTools?: ContentDomainAgentTools
   externalTools?: readonly ExternalAgentTool[]
   input: AiChatRuntimeInput
+  onContextManifest?: (manifest: TaskContextManifest) => void
   onRunMetrics?: (metrics: TaskAgentRunMetrics) => void
   researchContext?: string
   researchTools?: ResearchAgentTools
@@ -286,6 +289,7 @@ async function* runAiSdkAgent(
     contentTools,
     externalTools = [],
     input,
+    onContextManifest,
     onRunMetrics,
     researchContext,
     researchTools,
@@ -403,6 +407,8 @@ async function* runAiSdkAgent(
   const agent = createTaskAgent({
     baseInstructions: agentInstructions(workspaceName, Boolean(contentTools), researchContext),
     model,
+    modelContextLimits: input.modelContextLimits,
+    ...(onContextManifest ? { onContextManifest } : {}),
     ...(onRunMetrics ? { onRunMetrics: captureRunMetrics } : {}),
     ...(runtime.providerOptions ? { providerOptions: runtime.providerOptions } : {}),
     ...(researchWorkflow ? { researchWorkflow } : {}),
@@ -613,6 +619,7 @@ export async function streamAiAgent(
     contentTools,
     externalTools,
     onChunk,
+    onContextManifest,
     onRunMetrics,
     researchContext,
     researchTools,
@@ -626,6 +633,7 @@ export async function streamAiAgent(
       input,
       ...(contentTools ? { contentTools } : {}),
       ...(onRunMetrics ? { onRunMetrics } : {}),
+      ...(onContextManifest ? { onContextManifest } : {}),
       ...(researchContext ? { researchContext } : {}),
       ...(researchTools ? { researchTools } : {}),
       ...(tools ? { tools } : {}),

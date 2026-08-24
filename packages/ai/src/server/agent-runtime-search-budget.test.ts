@@ -86,6 +86,7 @@ describe("Agent 联网搜索预算兼容恢复", () => {
         baseUrl: "https://api.deepseek.com",
         configId: "deepseek",
         endpointType: "anthropic-messages",
+        modelContextLimits: { contextWindow: null, maxInputTokens: null, maxOutputTokens: null },
         messages: [{ id: "user-1", role: "user", parts: [{ type: "text", text: "请查最新资料" }] }],
         mode: "agent",
         modelId: "deepseek-v4-flash",

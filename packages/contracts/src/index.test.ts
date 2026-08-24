@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 根入口重新导出的运行时守卫与合法、畸形 RunPolicy/资源摘要样例
- * [OUTPUT]: 领域拆分后共享契约仍拒绝非法资源限制、Skill ID 与研究网络模式的回归验证
+ * [INPUT]: 根入口重新导出的运行时守卫与合法、畸形 RunPolicy/ContextManifest/资源摘要样例
+ * [OUTPUT]: 领域拆分后共享契约仍拒绝非法资源限制、上下文预算、Skill ID 与研究网络模式的回归验证
  * [POS]: @tessera/contracts 根入口与 task-run-policy 领域文件之间的运行时回归测试
  * [DOC]: docs/architecture/ai-observability.md、docs/architecture/research-workflow.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -61,6 +61,19 @@ describe("共享运行策略契约", () => {
 describe("共享运行资源摘要契约", () => {
   const summary = {
     attachmentCount: 1,
+    contextManifest: {
+      availableInputTokens: 100_000,
+      estimatedInputTokens: 12_000,
+      estimator: "heuristic-v1",
+      modelContextWindow: 128_000,
+      modelMaxInputTokens: null,
+      observedStep: 2,
+      reservedOutputTokens: 16_000,
+      safetyMarginTokens: 6_000,
+      sections: [{ estimatedTokens: 12_000, kind: "conversation" }],
+      status: "within-budget",
+      version: 1,
+    },
     continuedFromMessageId: null,
     currentDocumentPath: "notes/example.md",
     researchNetworkMode: "system",
@@ -74,6 +87,12 @@ describe("共享运行资源摘要契约", () => {
     expect(isTaskRunResourceSummary({ ...summary, attachmentCount: -1 })).toBe(false)
     expect(isTaskRunResourceSummary({ ...summary, attachmentCount: 1.5 })).toBe(false)
     expect(isTaskRunResourceSummary({ ...summary, researchNetworkMode: "proxy" })).toBe(false)
+    expect(
+      isTaskRunResourceSummary({
+        ...summary,
+        contextManifest: { ...summary.contextManifest, status: "guess" },
+      }),
+    ).toBe(false)
   })
 })
 

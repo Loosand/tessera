@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 持久化 task_run、重复工具生命周期事件、类型化运行/工具错误与损坏事件
- * [OUTPUT]: 单次运行解释的策略/资源解析、工具归因、失败与安全降级回归测试
+ * [INPUT]: 持久化 task_run、ContextManifest、重复工具生命周期事件、类型化运行/工具错误与损坏事件
+ * [OUTPUT]: 单次运行审计的策略/资源/上下文预算解析、Token/执行指标、工具归因、失败与安全降级回归测试
  * [POS]: task-run-inspection 的主进程单元测试
  * [DOC]: docs/architecture/ai-observability.md、docs/architecture/task-navigation.md
  *
@@ -54,6 +54,19 @@ function run(events: TaskRunEventRecord[]): TaskRun & { events: TaskRunEventReco
     policyJson: JSON.stringify(policy),
     resourceSummaryJson: JSON.stringify({
       attachmentCount: 1,
+      contextManifest: {
+        availableInputTokens: 100_000,
+        estimatedInputTokens: 12_000,
+        estimator: "heuristic-v1",
+        modelContextWindow: 128_000,
+        modelMaxInputTokens: null,
+        observedStep: 2,
+        reservedOutputTokens: 16_000,
+        safetyMarginTokens: 6_000,
+        sections: [{ kind: "conversation", estimatedTokens: 12_000 }],
+        status: "within-budget",
+        version: 1,
+      },
       currentDocumentPath: "draft.md",
       researchNetworkMode: "system",
       workspaceId: "workspace-1",
@@ -115,6 +128,7 @@ describe("inspectTaskRun", () => {
     })
     expect(inspection.policy).toEqual(policy)
     expect(inspection.resources).toMatchObject({
+      contextManifest: { estimatedInputTokens: 12_000, status: "within-budget" },
       currentDocumentPath: "draft.md",
       researchNetworkMode: "system",
       workspaceName: "专题",
@@ -123,8 +137,16 @@ describe("inspectTaskRun", () => {
       { name: "web_search", callCount: 2, failureCount: 0, denialCount: 1 },
       { name: "read-web-source", callCount: 1, failureCount: 1, denialCount: 0 },
     ])
+    expect(inspection.execution).toEqual({ stepCount: 3, toolCallCount: 2 })
     expect(inspection.failure).toBeNull()
-    expect(inspection.usage.totalTokens).toBe(180)
+    expect(inspection.usage).toEqual({
+      cacheReadTokens: 40,
+      cacheWriteTokens: 10,
+      inputTokens: 100,
+      outputTokens: 80,
+      reasoningTokens: 20,
+      totalTokens: 180,
+    })
   })
 
   it("保留类型化运行失败，并把损坏事件降级为可展示失败", () => {

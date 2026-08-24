@@ -7,7 +7,7 @@
 > `apps/desktop/src/renderer/src/components/chat-parts/reasoning-part.tsx`、
 > `apps/desktop/src/main/task-run-inspection.ts`、
 > `apps/desktop/src/main/ai-chat-chunk-coalescer.ts`、
-> `packages/ai/src/server/task-agent.ts`、`packages/ai/src/server/follow-up-questions.ts`、`packages/database/schema.ts`、
+> `packages/ai/src/server/task-agent.ts`、`packages/ai/src/server/context-budget.ts`、`packages/ai/src/server/follow-up-questions.ts`、`packages/database/schema.ts`、
 > `packages/database/task-run-repository.ts`、`packages/contracts/src/index.ts`
 >
 > 状态：部分实现。开发环境的 AI SDK 官方 DevTools、统一 Agent 观测标识、正式回答前统一工作过程反馈、版本化运行/工具错误、SQLite 脱敏运行汇总及消息级按需运行解释已实现；有限保留的生产诊断事件与历史列表仍在规划。
@@ -21,14 +21,15 @@
 Viewer 按需启动，不阻塞 Tessera 首屏。设置页只在开发构建显示「开发者 → AI 运行日志」，点击后由窄 IPC 请求主进程启动官方本地 Viewer，并在系统浏览器打开 `http://localhost:4983`。渲染层不获得 Node.js、进程路径或日志文件读写权限。
 
 用户可解释性不依赖开发者 Viewer。每个助手回复在 metadata 中保存对应 `requestId`；完成态消息操作栏只显示一个
-“运行信息”图标，打开后经 `task-run:read(taskId, requestId)` 按需读取脱敏投影。主进程先验证任务归属，再返回
-实际模型、RunPolicy/Skill、资源摘要、按 `toolCallId` 去重的工具计数、结束/失败原因、用量与耗时；不返回 prompt、
+“用量与运行信息”图标，打开后经 `task-run:read(taskId, requestId)` 按需读取脱敏投影。主进程先验证任务归属，再返回
+供应商/AI SDK 上报的总、输入、输出、推理与缓存读写 Token，步骤/工具数、首次输出/模型/工具/总耗时、实际模型、RunPolicy/Skill、资源摘要、按 `toolCallId` 去重的工具归因和结束/失败原因。每个模型步骤前还生成不含正文的 `ContextManifest`，按 instructions、会话、工具结果、工具定义和协议 framing 展示预计输入、安全预算、预留输出及观测步骤；这是本地确定性估算，不伪装成供应商计费值。已知模型在预计输入超过安全预算时于出站前终止，并给出新建任务、缩小材料或切换模型的恢复建议。未上报数值显示为“未返回”，不伪造为 0；缓存和推理可能已包含在供应商的其他口径中，界面不重复求和。运行审计不返回 prompt、
 正文、完整工具输入输出、绝对路径或密钥。初始化阶段在 `task_run` 建立后失败时也先追加类型化错误事件，再结束运行，
 因此不会出现“前端看见失败但运行历史没有原因”的断层。
 
 公开流事件用于恢复和 UI，而不是 Token 级追踪。主进程在分配 `sequence`、写 SQLite 和广播 IPC 前，把同一 ID 的连续
-`text-delta`、`reasoning-delta` 或同一 tool call 的 `tool-input-delta` 合并到至少 160 字符；遇到不同类型/ID、工具
-结果、失败、`finish` 或异常收口时先刷新尾部。合并不改变 AI SDK `onStepEnd` / `onEnd` 指标，也不跨语义边界重排，
+`text-delta`、`reasoning-delta` 或同一 tool call 的 `tool-input-delta` 合并到 160 字符，或在首个待发增量等待 50ms
+后刷新；遇到不同类型/ID、工具结果、失败、`finish` 或异常收口时立即刷新尾部。双阈值使实时输出保持低延迟，同时把
+SQLite/IPC 更新限制在每秒约 20 次以内。合并不改变 AI SDK `onStepEnd` / `onEnd` 指标，也不跨语义边界重排，
 因此调试 Viewer 仍可观察供应商原始生成，而产品恢复链不会被数万条逐 token 事件淹没。对优化上线前已经持久化的
 高密度历史，恢复接口在只读快照中执行同一合并并生成临时连续序号；这只降低 renderer 回放压力，不修改 SQLite
 中的原始事件、`lastSequence` 或黄金审计依据。
@@ -56,13 +57,14 @@ ToolLoopAgent / generateText / streamText
 - **已实现**：Viewer 只监听 `localhost`；主进程退出时清理由 Tessera 启动的 Viewer 子进程。
 - **已实现**：IPC 只返回成功或脱敏后的启动错误，不把 API Key、Node 能力或任意日志路径暴露给 renderer。
 - **已实现**：`task_runs` 只保存模型/策略、资源摘要和数值型运行汇总，不保存 prompt、正文、完整工具输入输出或密钥；缓存读/写 Token 分列，避免把供应商缓存命中误判为界面模型目录缓存。
+- **已实现**：`ContextManifest` 只持久化分项 Token 估算、模型上限与状态，不保存对应正文；每个 ToolLoop step 重算，工具结果增长会在下一次模型调用前进入预算检查。
 - **已实现**：正常正文后的引申问题短调用使用同一模型且无工具权限；实际 Token、缓存、步骤和模型耗时并入同一
   run，短调用失败不覆盖主回答的完成状态，也不伪造零用量。
 - **已实现**：产品运行解释按 task/request 双重归属读取，UI 仅在用户点击图标后加载；损坏历史事件降级为安全的公开失败，不把原始 JSON 或内部异常交给 renderer。
 - **已实现**：供应商流错误在 AI SDK 压成公开字符串前遍历有限深度的 `cause/error/errors` 链，保留稳定错误码与可安全
   公开的 HTTP 状态；响应体、请求 Header、API Key 和任意供应商原始载荷仍不进入消息。重试复用成功 Tool Part 时，
   新 run 的资源摘要记录 `continuedFromMessageId`，可以区分“从工具结果继续”和“从头重新生成”。
-- **已实现**：流式正文、推理和工具参数 delta 在产品事件层顺序安全合并；结束或异常前强制刷新，不用降低审计完整性换取 UI 性能。
+- **已实现**：流式正文、推理和工具参数 delta 在产品事件层按字符/延迟双阈值顺序安全合并；结束或异常前强制刷新，不用降低审计完整性换取 UI 性能。
 - **已实现**：最新运行即使已经进入终态，只要对应助手消息尚未保存，也会从事件账本恢复一次；消息关联该
   `requestId` 后停止重放。历史高密度事件只在恢复快照中临时合并，原始审计记录保持不变。
 - **重要限制**：官方 DevTools 为调试可读性记录 prompt、output 与工具输入输出，可能包含用户正文和工作区材料。它只适合开发机器，不能作为生产审计仓库、同步服务或用户可见历史。

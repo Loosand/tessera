@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 内存/临时磁盘 SQLite 客户端与前向迁移
- * [OUTPUT]: 迁移幂等性、统一内容控制层、研究证据链、工作区最近项、通用任务会话、置顶/归档与全量分页、AI/MCP 加密配置恢复、任务运行单调检查点/观测指标和级联删除的回归验证
+ * [OUTPUT]: 迁移幂等性、统一内容控制层、研究证据链、工作区最近项、通用任务会话、置顶/归档与全量分页、AI/MCP 加密配置恢复、任务运行单调检查点/ContextManifest/观测指标和级联删除的回归验证
  * [POS]: 数据库包不依赖磁盘状态的基础集成测试
  * [DOC]: docs/architecture/database.md
  *
@@ -59,7 +59,13 @@ import {
   saveResearchSource,
   startResearchRun,
 } from "./research-repository"
-import { appendTaskRunEvent, findLatestTaskRun, finishTaskRun, startTaskRun } from "./task-run-repository"
+import {
+  appendTaskRunEvent,
+  findLatestTaskRun,
+  finishTaskRun,
+  startTaskRun,
+  updateTaskRunResourceSummary,
+} from "./task-run-repository"
 import {
   deleteTaskSession,
   findTaskSession,
@@ -1072,6 +1078,15 @@ describe("本地数据库基建", () => {
       sequence: 3,
       payloadJson: JSON.stringify({ sequence: 3, chunk: { type: "text-delta", delta: "进度" } }),
     })
+    updateTaskRunResourceSummary(
+      client,
+      "run-request",
+      JSON.stringify({
+        attachmentCount: 1,
+        contextManifest: { estimatedInputTokens: 2_400, status: "within-budget" },
+        currentDocumentPath: "notes/celeste.md",
+      }),
+    )
     finishTaskRun(client, "run-request", "completed", {
       sdkCallId: "sdk-call-1",
       finishReason: "stop",
@@ -1099,7 +1114,9 @@ describe("本地数据库基建", () => {
       reasoning: "high",
       webSearch: true,
       policyJson: expect.stringContaining('"toolScope":"conversation"'),
-      resourceSummaryJson: expect.stringContaining('"currentDocumentPath":"notes/celeste.md"'),
+      resourceSummaryJson: expect.stringMatching(
+        /"estimatedInputTokens":2400.*"currentDocumentPath":"notes\/celeste\.md"/u,
+      ),
       sdkCallId: "sdk-call-1",
       finishReason: "stop",
       rawFinishReason: "end_turn",

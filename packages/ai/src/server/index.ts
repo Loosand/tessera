@@ -27,7 +27,14 @@ export {
   resolveTaskRunPolicy,
   taskRunPolicyIssueMessage,
 } from "../run-policy"
-export { inferAutomaticTaskSkill } from "../intent-routing"
+export { inferAutomaticTaskSkill, inferCompletedResearchFollowUpSkill } from "../intent-routing"
+export {
+  ContextBudgetExceededError,
+  assertTaskContextBudget,
+  createTaskContextManifest,
+  estimateTextTokens,
+  type TaskModelContextLimits,
+} from "./context-budget"
 export {
   type AiAgentRuntimeOptions,
   type AiSdkAgentRuntimeRequest,
@@ -46,6 +53,8 @@ export {
   type ResearchAgentTools,
   createResearchToolSet,
   publicResearchToolOutput,
+  researchEvidenceBatchInputSchema,
+  researchEvidenceToolInputSchema,
   researchEvidenceInputSchema,
   researchFinalizeInputSchema,
   researchRecommendSourcesInputSchema,

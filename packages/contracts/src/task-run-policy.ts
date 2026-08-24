@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 任务执行模式、逐轮 Skill、研究网络模式以及持久化运行策略/资源摘要的未知载荷
- * [OUTPUT]: Task Run Policy、资源摘要及其依赖的稳定字面量契约与运行时守卫
+ * [INPUT]: 任务执行模式、逐轮 Skill、研究网络模式以及持久化运行策略/ContextManifest/资源摘要的未知载荷
+ * [OUTPUT]: Task Run Policy、脱敏上下文预算、资源摘要及其依赖的稳定字面量契约与运行时守卫
  * [POS]: @tessera/contracts 中独立于 IPC 聚合入口的任务运行策略领域边界
  * [DOC]: docs/architecture/ai-observability.md、docs/architecture/research-workflow.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -90,8 +90,69 @@ export function isTaskRunPolicy(value: unknown): value is TaskRunPolicy {
   )
 }
 
+export const TASK_CONTEXT_SECTION_KINDS = [
+  "instructions",
+  "conversation",
+  "tool-results",
+  "tool-definitions",
+  "framing",
+] as const
+
+export type TaskContextSectionKind = (typeof TASK_CONTEXT_SECTION_KINDS)[number]
+
+export type TaskContextManifest = {
+  availableInputTokens: number | null
+  estimatedInputTokens: number
+  estimator: "heuristic-v1"
+  modelContextWindow: number | null
+  modelMaxInputTokens: number | null
+  observedStep: number
+  reservedOutputTokens: number
+  safetyMarginTokens: number
+  sections: Array<{
+    estimatedTokens: number
+    kind: TaskContextSectionKind
+  }>
+  status: "within-budget" | "over-budget" | "unknown"
+  version: 1
+}
+
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+}
+
+export function isTaskContextManifest(value: unknown): value is TaskContextManifest {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false
+  const manifest = value as Record<string, unknown>
+  if (!Array.isArray(manifest.sections)) return false
+  return (
+    manifest.version === 1 &&
+    manifest.estimator === "heuristic-v1" &&
+    (manifest.status === "within-budget" ||
+      manifest.status === "over-budget" ||
+      manifest.status === "unknown") &&
+    (manifest.availableInputTokens === null || isNonNegativeSafeInteger(manifest.availableInputTokens)) &&
+    isNonNegativeSafeInteger(manifest.estimatedInputTokens) &&
+    (manifest.modelContextWindow === null || isPositiveSafeInteger(manifest.modelContextWindow)) &&
+    (manifest.modelMaxInputTokens === null || isPositiveSafeInteger(manifest.modelMaxInputTokens)) &&
+    isNonNegativeSafeInteger(manifest.observedStep) &&
+    isNonNegativeSafeInteger(manifest.reservedOutputTokens) &&
+    isNonNegativeSafeInteger(manifest.safetyMarginTokens) &&
+    manifest.sections.every((section) => {
+      if (!section || typeof section !== "object" || Array.isArray(section)) return false
+      const candidate = section as Record<string, unknown>
+      return (
+        typeof candidate.kind === "string" &&
+        TASK_CONTEXT_SECTION_KINDS.some((kind) => kind === candidate.kind) &&
+        isNonNegativeSafeInteger(candidate.estimatedTokens)
+      )
+    })
+  )
+}
+
 export type TaskRunResourceSummary = {
   attachmentCount: number
+  contextManifest?: TaskContextManifest
   continuedFromMessageId?: string | null
   currentDocumentPath: string | null
   researchNetworkMode: ResearchNetworkMode | null
@@ -107,6 +168,7 @@ export function isTaskRunResourceSummary(value: unknown): value is TaskRunResour
     typeof summary.attachmentCount === "number" &&
     Number.isSafeInteger(summary.attachmentCount) &&
     summary.attachmentCount >= 0 &&
+    (summary.contextManifest === undefined || isTaskContextManifest(summary.contextManifest)) &&
     (summary.continuedFromMessageId === undefined ||
       summary.continuedFromMessageId === null ||
       typeof summary.continuedFromMessageId === "string") &&

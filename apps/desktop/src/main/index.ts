@@ -1,6 +1,6 @@
 /**
  * [INPUT]: Electron 生命周期、共享 IPC 契约、主进程工作区文件服务、AI Chat/Agent/Skill 配置、AI SDK 开发期日志、用户 Skill 扫描安装服务、研究网络偏好、可信研究服务、混合内容库、Agent 变更服务、模型服务、safeStorage 与 Tessera 核心服务
- * [OUTPUT]: 可选系统代理/直连的受限研究 Reader、显式研究续跑/已完成工具结果续跑与来源保存、顺序安全的流增量合并、默认空间/工作区恢复与任务分页、工作区/MCP Agent 工具、托管内容库/Artifact 查询、内置/用户 Skill 校验后的 SQLite 可恢复后台 AI 运行、版本化公开错误与脱敏运行解释、官方 AI SDK 日志入口、Diff/MCP 审批、持久化研究/AI/MCP/用户 Skill 配置与扫描会话、关闭保存握手和满高桌面窗口
+ * [OUTPUT]: 可选系统代理/直连的受限研究 Reader、显式研究续跑/已完成工具结果续跑与来源保存、研究到 Writing Artifact 交接、逐步 ContextManifest 持久化、顺序安全的流增量合并、默认空间/工作区恢复与任务分页、工作区/MCP Agent 工具、托管内容库/Artifact 查询、内置/用户 Skill 校验后的 SQLite 可恢复后台 AI 运行、版本化公开错误与脱敏运行解释、官方 AI SDK 日志入口、Diff/MCP 审批、持久化研究/AI/MCP/用户 Skill 配置与扫描会话、关闭保存握手和满高桌面窗口
  * [POS]: Electron 主进程入口与平台安全边界
  * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/ai-observability.md、docs/architecture/database.md、docs/architecture/mcp.md、docs/architecture/research-workflow.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md、docs/architecture/unified-creation-agent.md
  *
@@ -21,6 +21,7 @@ import {
   type ContentDomainAgentTools,
   type ResearchAgentTools,
   type TaskAgentRunMetrics,
+  inferCompletedResearchFollowUpSkill,
   listAiProviderModels,
   streamAiAgent,
 } from "@tessera/ai/server"
@@ -43,6 +44,7 @@ import {
   type DatabaseClient,
   appendTaskRunEvent,
   findAppSetting,
+  findLatestCompletedResearchRun,
   findTaskRun,
   findWorkspaceById,
   finishTaskRun,
@@ -54,6 +56,7 @@ import {
   saveWorkspace,
   startResearchRun,
   startTaskRun,
+  updateTaskRunResourceSummary,
   upsertAppSetting,
 } from "@tessera/database"
 import {
@@ -370,7 +373,13 @@ async function streamAiTask(
   workspace: WorkspaceInfo | null,
   options: Pick<
     Parameters<typeof streamAiAgent>[1],
-    "abortSignal" | "onChunk" | "onRunMetrics" | "researchContext" | "researchTools" | "skill"
+    | "abortSignal"
+    | "onChunk"
+    | "onContextManifest"
+    | "onRunMetrics"
+    | "researchContext"
+    | "researchTools"
+    | "skill"
   >,
 ) {
   const workspaceTools = workspace
@@ -823,10 +832,28 @@ function registerIpcHandlers() {
       if (workspace) {
         requireAgentChangeService().reconcileDecisions(input.taskId, input.messages)
       }
-      const runtimeInput = resolveAiChatInput({ ...input, mode: workspace ? "agent" : "chat" })
-      const loadedSkill = await requireUserSkillService().load(runtimeInput.skillId)
       if (!databaseClient) throw new AiProviderConfigError("本地任务数据库尚未就绪。")
       const runDatabase = databaseClient
+      const requestedMode = workspace ? "agent" : "chat"
+      let runtimeInput = resolveAiChatInput({ ...input, mode: requestedMode })
+      const latestUserText = [...input.messages]
+        .reverse()
+        .find((message) => message.role === "user")
+        ?.parts.filter((part) => part.type === "text")
+        .map((part) => part.text)
+        .join("\n")
+      const followUpSkillId = inferCompletedResearchFollowUpSkill(
+        runtimeInput.runPolicy.skillId,
+        latestUserText ?? "",
+        runtimeInput.runPolicy.skillId === "research" &&
+          !input.resumeResearchRequestId &&
+          !input.regenerateMessageId &&
+          Boolean(findLatestCompletedResearchRun(runDatabase, input.taskId)),
+      )
+      if (followUpSkillId !== runtimeInput.runPolicy.skillId) {
+        runtimeInput = resolveAiChatInput({ ...input, mode: requestedMode, skillId: followUpSkillId })
+      }
+      const loadedSkill = await requireUserSkillService().load(runtimeInput.skillId)
       const regeneratedMessageRequestId =
         runtimeInput.runPolicy.skillId === "research" && input.regenerateMessageId
           ? requireDesktopTaskService()
@@ -858,6 +885,12 @@ function registerIpcHandlers() {
       initializingRunStartedAt = runStartedAt
       activeAiChats.set(input.requestId, run)
       aiChatRunsByTask.set(input.taskId, run)
+      let resourceSummary = summarizeTaskRunResources(
+        input,
+        workspace,
+        researchNetworkMode,
+        resumedResearchRequestId,
+      )
       startTaskRun(runDatabase, {
         requestId: input.requestId,
         taskId: input.taskId,
@@ -869,9 +902,7 @@ function registerIpcHandlers() {
         reasoning: runtimeInput.runPolicy.reasoning,
         webSearch: runtimeInput.runPolicy.webSearch,
         policyJson: JSON.stringify(runtimeInput.runPolicy),
-        resourceSummaryJson: JSON.stringify(
-          summarizeTaskRunResources(input, workspace, researchNetworkMode, resumedResearchRequestId),
-        ),
+        resourceSummaryJson: JSON.stringify(resourceSummary),
         startedAt: runStartedAt,
       })
       taskRunStarted = true
@@ -1003,6 +1034,10 @@ function registerIpcHandlers() {
       void streamAiTask(runtimeInput, workspace, {
         abortSignal: abortController.signal,
         onChunk: (chunk) => chunkCoalescer.push(chunk),
+        onContextManifest: (contextManifest) => {
+          resourceSummary = { ...resourceSummary, contextManifest }
+          updateTaskRunResourceSummary(runDatabase, input.requestId, JSON.stringify(resourceSummary))
+        },
         onRunMetrics: (metrics) => {
           runMetrics = metrics
         },

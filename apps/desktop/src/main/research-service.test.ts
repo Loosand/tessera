@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 内存 SQLite、注入式网页 Reader、公开/私有 URL 与研究计划/来源/证据/覆盖动作
- * [OUTPUT]: SSRF 地址拒绝、正文提取、读取失败、证据逐字约束、完整交叉核验、增量笔记/来源材料/写作交接与诚实部分完成的回归验证
+ * [INPUT]: 内存 SQLite、注入式网页 Reader、公开/私有 URL 与研究计划/来源/批量证据/覆盖动作
+ * [OUTPUT]: SSRF 地址拒绝、正文提取、读取失败、批量证据逐字约束与逐项失败、完整交叉核验、增量笔记/来源材料/写作交接与诚实部分完成的回归验证
  * [POS]: 主进程可信研究服务的安全与领域集成测试
  * [DOC]: docs/architecture/research-workflow.md、docs/architecture/database.md
  *
@@ -235,29 +235,34 @@ describe("研究领域完成门槛", () => {
       { url: "https://first.example/interview", questionIds: ["q1"] },
       toolContext,
     )
-    await expect(
-      service.recordEvidence(
+    expect(
+      await service.recordEvidenceBatch(
         {
-          sourceId: first.sourceId,
-          questionId: "q1",
-          relation: "supports",
-          claim: "FKJ 使用现场循环叠加乐器",
-          excerpt: "this sentence was never in the source",
+          evidence: [
+            {
+              sourceId: first.sourceId,
+              questionId: "q1",
+              relation: "supports",
+              claim: "这条无效证据不会拖累同批有效证据",
+              excerpt: "this sentence was never in the source",
+            },
+            {
+              sourceId: first.sourceId,
+              questionId: "q1",
+              relation: "supports",
+              claim: "FKJ 使用现场循环叠加乐器",
+              excerpt: "FKJ layers several instruments through live looping during performance.",
+              locator: "p1",
+            },
+          ],
         },
         toolContext,
       ),
-    ).rejects.toThrow("必须逐字来自已读取正文")
-    await service.recordEvidence(
-      {
-        sourceId: first.sourceId,
-        questionId: "q1",
-        relation: "supports",
-        claim: "FKJ 使用现场循环叠加乐器",
-        excerpt: "FKJ layers several instruments through live looping during performance.",
-        locator: "p1",
-      },
-      toolContext,
-    )
+    ).toMatchObject({
+      status: "partial",
+      recorded: [{ index: 1 }],
+      rejected: [{ index: 0, error: expect.stringContaining("必须逐字来自已读取正文") }],
+    })
     expect(
       await service.finalize(
         {

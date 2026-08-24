@@ -1,6 +1,6 @@
 /**
  * [INPUT]: Drizzle 数据库实例、含完整 RunPolicy/资源摘要的任务运行元数据、AI SDK 生命周期完成指标与按序序列化的 UIMessageChunk 事件
- * [OUTPUT]: 带实际执行策略、可见资源摘要、完成原因、Token/缓存与耗时指标的任务运行创建、幂等事件追加与单调检查点、结束、崩溃中断标记、恢复读取与清理
+ * [OUTPUT]: 带实际执行策略、可运行中刷新 ContextManifest 的资源摘要、完成原因、Token/缓存与耗时指标的任务运行创建、幂等事件追加与单调检查点、结束、崩溃中断标记、恢复读取与清理
  * [POS]: Electron 主进程持久化 AI 运行检查点的数据库边界
  * [DOC]: docs/architecture/database.md、docs/architecture/task-navigation.md
  *
@@ -104,6 +104,20 @@ export function appendTaskRunEvent(client: DatabaseClient, input: TaskRunEventIn
       .where(eq(taskRuns.requestId, input.requestId))
       .run()
   })
+}
+
+export function updateTaskRunResourceSummary(
+  client: DatabaseClient,
+  requestId: string,
+  resourceSummaryJson: string,
+) {
+  return (
+    client.db
+      .update(taskRuns)
+      .set({ resourceSummaryJson, updatedAt: new Date() })
+      .where(eq(taskRuns.requestId, requestId))
+      .run().changes > 0
+  )
 }
 
 export function finishTaskRun(

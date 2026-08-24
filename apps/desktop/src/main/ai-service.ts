@@ -1,6 +1,6 @@
 /**
  * [INPUT]: Electron safeStorage、SQLite 数据库客户端和不含客户端能力开关的跨进程任务输入
- * [OUTPUT]: 不暴露密钥的配置读写、模型目录连接解析、自动研究/写作意图收窄与由受信任 RunPolicy 生成的运行时输入
+ * [OUTPUT]: 不暴露密钥的配置读写、模型目录连接解析、自动研究/写作意图收窄与包含模型上下文上限/受信任 RunPolicy 的运行时输入
  * [POS]: 桌面主进程内的平台安全存储、数据库仓储和 @tessera/ai 领域层适配器
  * [DOC]: docs/architecture/unified-creation-agent.md、docs/architecture/ai-providers.md、docs/architecture/ai-chat-agent-todo.md
  *
@@ -140,6 +140,11 @@ export function createDesktopAiService(client: DatabaseClient): DesktopAiService
         skillId: effectiveSkillId,
         ...connection,
         endpointType: resolution.execution.endpointType,
+        modelContextLimits: {
+          contextWindow: model.contextWindow,
+          maxInputTokens: model.maxInputTokens ?? null,
+          maxOutputTokens: model.maxOutputTokens,
+        },
         runPolicy: resolution.policy,
       }
     },

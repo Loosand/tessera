@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 绑定 task_run 的研究仓储、公开 http(s) URL、模型选定的问题/证据/来源推荐和可取消工具执行上下文
- * [OUTPUT]: 防 SSRF 的固定地址网页读取、正文与元数据提取、研究计划/来源/证据/推荐持久化、带稳定来源 ID 的续跑上下文、可重建研究笔记、写作交接和完整/部分完成门槛
+ * [OUTPUT]: 防 SSRF 的固定地址网页读取、正文与元数据提取、研究计划/来源/批量证据/推荐持久化、带稳定来源 ID 的续跑上下文、可重建研究笔记、受限写作交接和完整/部分完成门槛
  * [POS]: Electron 主进程持有网络与 SQLite 权限的可信研究领域服务
  * [DOC]: docs/architecture/research-workflow.md、docs/architecture/database.md
  *
@@ -628,7 +628,7 @@ export function readResearchNotebook(
   }
 }
 
-export function researchWritingContext(client: DatabaseClient, taskId: string, maxChars = 80_000) {
+export function researchWritingContext(client: DatabaseClient, taskId: string, maxChars = 32_000) {
   const run = findLatestCompletedResearchRun(client, taskId)
   if (!run) return null
   const notebook = researchNotebookMarkdown(run)
@@ -713,6 +713,62 @@ export function createDesktopResearchService(
 ): DesktopResearchService {
   const reader = input.reader ?? readRestrictedWebSource
   const sourceBodies = new Map<string, string>()
+  const recordEvidenceBatch: ResearchAgentTools["recordEvidenceBatch"] = async ({ evidence }, context) => {
+    context.signal.throwIfAborted()
+    const run = requiredRun(client, input.requestId)
+    const knownQuestionIds = new Set(run.questions.map((question) => question.questionId))
+    const rejected: Array<{ error: string; index: number }> = []
+    const accepted = evidence.flatMap((item, index) => {
+      if (!knownQuestionIds.has(item.questionId)) {
+        rejected.push({ index, error: "证据引用了未知研究问题。" })
+        return []
+      }
+      const body = sourceBodies.get(item.sourceId)
+      if (!body) {
+        rejected.push({ index, error: "当前运行没有这个来源的可核查正文，请重新读取来源。" })
+        return []
+      }
+      const excerpt = normalizeText(item.excerpt)
+      if (excerpt.length < 8 || !normalizeText(body).includes(excerpt)) {
+        rejected.push({ index, error: "证据片段必须逐字来自已读取正文，请缩短或重新选择原文片段。" })
+        return []
+      }
+      return [
+        {
+          index,
+          persistence: {
+            id: `evidence-${randomUUID()}`,
+            requestId: input.requestId,
+            sourceId: item.sourceId,
+            questionId: item.questionId,
+            relation: item.relation,
+            claim: item.claim,
+            excerpt: item.excerpt,
+            locator: item.locator ?? null,
+          },
+        },
+      ]
+    })
+    const recorded = accepted.flatMap((candidate) => {
+      try {
+        const saved = saveResearchEvidence(client, candidate.persistence)
+        if (!saved) {
+          rejected.push({ index: candidate.index, error: "研究证据保存失败，请重试这条证据。" })
+          return []
+        }
+        return [{ index: candidate.index, evidenceId: saved.id }]
+      } catch {
+        rejected.push({ index: candidate.index, error: "研究证据保存失败，请检查问题与来源。" })
+        return []
+      }
+    })
+    return {
+      requestId: input.requestId,
+      status: rejected.length > 0 ? "partial" : "recorded",
+      recorded,
+      rejected,
+    }
+  }
 
   return {
     getProgress: () => researchProgress(client, input.requestId),
@@ -853,28 +909,14 @@ export function createDesktopResearchService(
       }
     },
     recordEvidence: async (evidence: TaskResearchEvidenceInput, context) => {
-      context.signal.throwIfAborted()
-      const body = sourceBodies.get(evidence.sourceId)
-      if (!body) {
-        throw new PublicAgentToolError("当前运行没有这个来源的可核查正文，请重新读取来源。")
-      }
-      const excerpt = normalizeText(evidence.excerpt)
-      if (excerpt.length < 8 || !normalizeText(body).includes(excerpt)) {
-        throw new PublicAgentToolError("证据片段必须逐字来自已读取正文，请缩短或重新选择原文片段。")
-      }
-      const record = saveResearchEvidence(client, {
-        id: `evidence-${randomUUID()}`,
-        requestId: input.requestId,
-        sourceId: evidence.sourceId,
-        questionId: evidence.questionId,
-        relation: evidence.relation,
-        claim: evidence.claim,
-        excerpt: evidence.excerpt,
-        locator: evidence.locator ?? null,
-      })
-      if (!record) throw new PublicAgentToolError("研究证据保存失败，请重试登记这条证据。")
-      return { evidenceId: record.id, requestId: input.requestId, status: "recorded" }
+      const result = await recordEvidenceBatch({ evidence: [evidence] }, context)
+      const rejection = result.rejected[0]
+      if (rejection) throw new PublicAgentToolError(rejection.error)
+      const recorded = result.recorded[0]
+      if (!recorded) throw new PublicAgentToolError("研究证据保存失败，请重试登记这条证据。")
+      return { evidenceId: recorded.evidenceId, requestId: input.requestId, status: "recorded" }
     },
+    recordEvidenceBatch,
     recommendSources: async ({ recommendations }, context): Promise<TaskResearchRecommendSourcesOutput> => {
       context.signal.throwIfAborted()
       const run = requiredRun(client, input.requestId)

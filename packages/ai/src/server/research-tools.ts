@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 主进程提供的研究领域服务、当前运行的持久化进度与 AI SDK 工具执行上下文
- * [OUTPUT]: 发布计划、仅限 http(s) 的受限网页深读、证据登记、来源推荐、领域完成检查工具，以及不会把网页正文写入公共消息的输出裁剪
+ * [OUTPUT]: 发布计划、仅限 http(s) 的受限网页深读、最多 12 条且逐项返回失败的批量证据登记、来源推荐、领域完成检查工具，以及不会把网页正文写入公共消息的输出裁剪
  * [POS]: 统一 ToolLoopAgent 与主进程可信研究服务之间的窄契约适配层
  * [DOC]: docs/architecture/research-workflow.md
  *
@@ -19,6 +19,8 @@ import {
   TASK_RESEARCH_PHASES,
   TASK_RESEARCH_SOURCE_STATUSES,
   type TaskResearchEvidenceInput,
+  type TaskResearchEvidenceBatchInput,
+  type TaskResearchEvidenceBatchOutput,
   type TaskResearchEvidenceOutput,
   type TaskResearchFinalizeInput,
   type TaskResearchFinalizeOutput,
@@ -108,6 +110,42 @@ export const researchEvidenceOutputSchema = z.strictObject({
   status: z.literal("recorded"),
 })
 
+export const researchEvidenceBatchInputSchema = z.strictObject({
+  evidence: z
+    .array(researchEvidenceInputSchema)
+    .min(1)
+    .max(12)
+    .describe("一次登记的证据；应覆盖当前已读材料能够支持的多个研究问题"),
+})
+
+export const researchEvidenceBatchOutputSchema = z.strictObject({
+  requestId: z.string().min(1),
+  status: z.enum(["recorded", "partial"]),
+  recorded: z.array(
+    z.strictObject({
+      index: z.number().int().nonnegative(),
+      evidenceId: z.string().min(1),
+    }),
+  ),
+  rejected: z.array(
+    z.strictObject({
+      index: z.number().int().nonnegative(),
+      error: z.string().min(1),
+    }),
+  ),
+})
+
+/** 兼容升级前已经持久化的单条证据 Tool Part；新调用由指令引导使用 batch 形状。 */
+export const researchEvidenceToolInputSchema = z.union([
+  researchEvidenceBatchInputSchema,
+  researchEvidenceInputSchema,
+])
+
+const researchEvidenceToolOutputSchema = z.union([
+  researchEvidenceBatchOutputSchema,
+  researchEvidenceOutputSchema,
+])
+
 export const researchRecommendSourcesInputSchema = z.strictObject({
   recommendations: z
     .array(
@@ -187,6 +225,10 @@ export type ResearchAgentTools = Readonly<{
     input: TaskResearchEvidenceInput,
     context: ResearchToolContext,
   ) => Promise<TaskResearchEvidenceOutput>
+  recordEvidenceBatch: (
+    input: TaskResearchEvidenceBatchInput,
+    context: ResearchToolContext,
+  ) => Promise<TaskResearchEvidenceBatchOutput>
   recommendSources: (
     input: TaskResearchRecommendSourcesInput,
     context: ResearchToolContext,
@@ -232,18 +274,20 @@ export function createResearchToolSet(
     }),
     [RECORD_RESEARCH_EVIDENCE_TOOL_NAME]: tool({
       description:
-        "把 read-web-source 返回的短原文片段登记为具体研究问题的证据。每条证据只对应一个可核查的原子声明。",
-      inputSchema: researchEvidenceInputSchema,
-      outputSchema: researchEvidenceOutputSchema,
+        "批量把 read-web-source 返回的短原文片段登记为研究证据。一次最多 12 条；每条只对应一个可核查的原子声明。无效项会按 index 返回，不会让有效项一起失败。",
+      inputSchema: researchEvidenceToolInputSchema,
+      outputSchema: researchEvidenceToolOutputSchema,
       execute: (input, options) =>
-        service.recordEvidence(
+        service.recordEvidenceBatch(
           {
-            questionId: input.questionId,
-            sourceId: input.sourceId,
-            claim: input.claim,
-            excerpt: input.excerpt,
-            relation: input.relation,
-            ...(input.locator !== undefined ? { locator: input.locator } : {}),
+            evidence: ("evidence" in input ? input.evidence : [input]).map((item) => ({
+              questionId: item.questionId,
+              sourceId: item.sourceId,
+              claim: item.claim,
+              excerpt: item.excerpt,
+              relation: item.relation,
+              ...(item.locator !== undefined ? { locator: item.locator } : {}),
+            })),
           },
           context(options),
         ),

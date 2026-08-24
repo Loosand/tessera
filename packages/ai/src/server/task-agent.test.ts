@@ -240,6 +240,7 @@ describe("统一 Task Agent 动态配置", () => {
       },
     })
     const agent = createTaskAgent({
+      modelContextLimits: { contextWindow: null, maxInputTokens: null, maxOutputTokens: null },
       model,
       onRunMetrics: (value) => {
         metricSnapshots.push(value)

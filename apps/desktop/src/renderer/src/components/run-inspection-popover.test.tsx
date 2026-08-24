@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 运行状态、Skill 与工具摘要
- * [OUTPUT]: 对话内运行解释的稳定中文标签与紧凑工具归因测试
+ * [INPUT]: 运行状态、Skill、Token/耗时数值、上下文预算与工具摘要
+ * [OUTPUT]: 对话内用量审计的稳定中文标签、精确数值格式、预算状态与紧凑工具归因测试
  * [POS]: run-inspection-popover 的纯展示回归测试
  * [DOC]: docs/architecture/ai-observability.md、docs/architecture/task-navigation.md
  *
@@ -11,7 +11,13 @@
  */
 
 import { describe, expect, it } from "vitest"
-import { taskRunSkillLabel, taskRunStatusLabel, taskRunToolsLabel } from "./run-inspection-popover"
+import {
+  taskRunContextStatusLabel,
+  taskRunMetricLabel,
+  taskRunSkillLabel,
+  taskRunStatusLabel,
+  taskRunToolsLabel,
+} from "./run-inspection-popover"
 
 describe("运行解释标签", () => {
   it("区分自动、内置与用户 Skill", () => {
@@ -31,5 +37,19 @@ describe("运行解释标签", () => {
       ]),
     ).toBe("web_search（3 次 · 1 次失败）、create-document（1 次拒绝）")
     expect(taskRunToolsLabel([])).toBe("未调用工具")
+  })
+
+  it("精确呈现 Token/耗时并不把未上报伪造为零", () => {
+    expect(taskRunMetricLabel(958_948, "tokens")).toBe("958,948 Token")
+    expect(taskRunMetricLabel(842, "milliseconds")).toBe("842 毫秒")
+    expect(taskRunMetricLabel(12_345, "milliseconds")).toBe("12.35 秒")
+    expect(taskRunMetricLabel(7, "value")).toBe("7")
+    expect(taskRunMetricLabel(null, "tokens")).toBe("未返回")
+  })
+
+  it("区分上下文预算状态", () => {
+    expect(taskRunContextStatusLabel("within-budget")).toBe("预算内")
+    expect(taskRunContextStatusLabel("over-budget")).toBe("已超预算")
+    expect(taskRunContextStatusLabel("unknown")).toBe("模型未声明上限")
   })
 })

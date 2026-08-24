@@ -1,6 +1,6 @@
 /**
  * [INPUT]: AI SDK 产生的细粒度正文、推理、工具输入 delta 与其他有序流事件
- * [OUTPUT]: 保序且按字符阈值合并的 AI Chat 事件，降低 IPC、SQLite 与 renderer 压力
+ * [OUTPUT]: 保序且按字符/延迟双阈值合并的 AI Chat 事件，在保持流式反馈的同时降低 IPC、SQLite 与 renderer 压力
  * [POS]: 模型运行流进入主进程持久化与窗口广播前的轻量背压边界
  * [DOC]: docs/architecture/ai-observability.md、docs/architecture/task-navigation.md
  *
@@ -44,28 +44,61 @@ function isMergeableChunk(chunk: AiChatStreamChunk): chunk is MergeableChunk {
 
 export class AiChatChunkCoalescer {
   private pending: MergeableChunk | null = null
+  private flushTimer: ReturnType<typeof setTimeout> | null = null
+  private operation = Promise.resolve()
 
   constructor(
     private readonly emit: (chunk: AiChatStreamChunk) => void | Promise<void>,
     private readonly maxCharacters = 160,
+    private readonly maxLatencyMs = 50,
   ) {}
 
-  async push(chunk: AiChatStreamChunk) {
+  push(chunk: AiChatStreamChunk) {
+    return this.enqueue(() => this.pushNow(chunk))
+  }
+
+  flush() {
+    return this.enqueue(() => this.flushNow())
+  }
+
+  private enqueue(operation: () => void | Promise<void>) {
+    const next = this.operation.then(operation)
+    this.operation = next.catch(() => {})
+    return next
+  }
+
+  private async pushNow(chunk: AiChatStreamChunk) {
     if (!isMergeableChunk(chunk)) {
-      await this.flush()
+      await this.flushNow()
       await this.emit(chunk)
       return
     }
     if (this.pending && mergeKey(this.pending) === mergeKey(chunk)) {
       this.pending = mergeChunks(this.pending, chunk)
     } else {
-      await this.flush()
+      await this.flushNow()
       this.pending = chunk
     }
-    if (this.pending && deltaLength(this.pending) >= this.maxCharacters) await this.flush()
+    if (this.pending && deltaLength(this.pending) >= this.maxCharacters) {
+      await this.flushNow()
+      return
+    }
+    this.scheduleFlush()
   }
 
-  async flush() {
+  private scheduleFlush() {
+    if (this.flushTimer || !this.pending) return
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = null
+      void this.enqueue(() => this.flushNow())
+    }, this.maxLatencyMs)
+  }
+
+  private async flushNow() {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer)
+      this.flushTimer = null
+    }
     const pending = this.pending
     if (!pending) return
     this.pending = null

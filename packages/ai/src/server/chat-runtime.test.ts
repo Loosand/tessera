@@ -22,6 +22,7 @@ import {
   toUiMessages,
   webSearchMaxUsesForSkill,
 } from "./chat-runtime"
+import { ContextBudgetExceededError, createTaskContextManifest } from "./context-budget"
 
 describe("Agent 工具公开增量", () => {
   it("保留工具名、相对路径输入与结构化输出", () => {
@@ -94,6 +95,22 @@ describe("Chat 运行时边界", () => {
     ).toMatchObject({
       code: "runtime",
       message: "当前运行没有这个来源的可核查正文，请重新读取来源。",
+      retryable: false,
+    })
+  })
+
+  it("保留本地上下文预算错误，不降级为供应商失败", () => {
+    const manifest = createTaskContextManifest({
+      activeToolNames: [],
+      instructions: "规则",
+      limits: { contextWindow: 4_096, maxInputTokens: 3_000, maxOutputTokens: 1_024 },
+      messages: [{ role: "user", content: "证".repeat(4_000) }],
+      observedStep: 0,
+      policyMaxOutputTokens: 1_024,
+    })
+    expect(classifyProviderStreamError(new ContextBudgetExceededError(manifest), "secret")).toMatchObject({
+      code: "invalid-request",
+      message: expect.stringContaining("超过安全输入预算"),
       retryable: false,
     })
   })

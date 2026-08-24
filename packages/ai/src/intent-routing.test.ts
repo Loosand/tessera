@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 自动/显式创作方式与典型中文创作请求
- * [OUTPUT]: 显式选择优先、写作交付优先于研究过程、普通问答保持自动的意图回归验证
+ * [INPUT]: 自动/显式创作方式、已完成研究状态与典型中文创作请求
+ * [OUTPUT]: 一般显式选择优先、写作交付优先、研究到 Artifact 交接和普通问答保持自动的意图回归验证
  * [POS]: 自动意图路由纯逻辑测试
  * [DOC]: docs/architecture/unified-creation-agent.md
  *
@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, it } from "vitest"
-import { inferAutomaticTaskSkill } from "./intent-routing"
+import { inferAutomaticTaskSkill, inferCompletedResearchFollowUpSkill } from "./intent-routing"
 
 describe("自动创作意图", () => {
   it("保留用户显式选择", () => {
@@ -29,5 +29,11 @@ describe("自动创作意图", () => {
   it("普通问答和项目操作保持自动，不擅自切成离线问答", () => {
     expect(inferAutomaticTaskSkill(null, "Celeste 的主角是谁？")).toBeNull()
     expect(inferAutomaticTaskSkill(null, "给刚才的稿子建一个独立项目")).toBeNull()
+  })
+
+  it("已完成研究后的保存请求从遗留 Research 交接给 Writing", () => {
+    expect(inferCompletedResearchFollowUpSkill("research", "写一份文档存下来", true)).toBe("writing")
+    expect(inferCompletedResearchFollowUpSkill("research", "继续查一下第三点", true)).toBe("research")
+    expect(inferCompletedResearchFollowUpSkill("research", "写一份文档存下来", false)).toBe("research")
   })
 })

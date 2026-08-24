@@ -1,6 +1,6 @@
 /**
  * [INPUT]: SQLite task_run 与按序持久化的 AI Chat 事件、共享 RunPolicy/资源摘要守卫
- * [OUTPUT]: 不泄露提示词、正文、绝对路径或供应商秘密的单次运行解释
+ * [OUTPUT]: 不泄露提示词、正文、绝对路径或供应商秘密的单次运行与 Token 用量审计
  * [POS]: task-run:read IPC 与数据库运行记录之间的只读投影边界
  * [DOC]: docs/architecture/ai-observability.md、docs/architecture/task-navigation.md
  *
@@ -130,6 +130,10 @@ export function inspectTaskRun(run: PersistedTaskRun): TaskRunInspection {
     requestId: run.requestId,
     taskId: run.taskId,
     status: run.status,
+    execution: {
+      stepCount: run.stepCount,
+      toolCallCount: run.toolCallCount,
+    },
     model: {
       configId: run.configId,
       providerId: run.providerId,

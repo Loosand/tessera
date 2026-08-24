@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 配置、主进程领域错误、供应商状态、网络、恢复和未知运行异常样例
- * [OUTPUT]: 公开错误分类、脱敏回退和重试语义的回归保障
+ * [INPUT]: 配置、上下文超预算、主进程领域错误、供应商状态、网络、恢复和未知运行异常样例
+ * [OUTPUT]: 公开错误分类、脱敏回退、上下文恢复建议和重试语义的回归保障
  * [POS]: AI 运行错误协议分类器的单元测试
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
  *
@@ -27,6 +27,17 @@ describe("AI chat public error protocol", () => {
       phase: "start",
       retryable: false,
       version: 1,
+    })
+  })
+
+  it("把本地上下文超预算作为可操作且不可重试的输入失败", () => {
+    const error = new Error("本轮上下文预计超过安全输入预算，请缩小材料范围。")
+    error.name = "ContextBudgetExceededError"
+
+    expect(classifyTaskRunError(error, "stream")).toMatchObject({
+      code: "invalid-request",
+      message: error.message,
+      retryable: false,
     })
   })
 

@@ -167,7 +167,8 @@ AI SDK `ToolLoopAgent` 通过每次调用的 `callOptionsSchema` / `prepareCall`
 | 问答 | 不联网，不主动操作项目或文件，使用会话和显式附件直接回答 | 仍使用同一 Agent runtime，不另建 Chat 实现 |
 
 自动方式需要按当前用户 turn 识别意图。例如会话前几轮只是人物问答，后续“写成一篇自媒体稿”应让下一次
-run 加载写作 Skill；过去的 run 保留当时实际策略，不被回写。
+run 加载写作 Skill；过去的 run 保留当时实际策略，不被回写。已完成研究后的明确成稿/保存请求即使仍带上一轮的
+Research 选择，也转交 Writing 并注入受限证据账本；续研与重新生成继续保持 Research provenance。
 
 当前研究策略已把计划、页面阅读、证据、来源推荐、完成检查和研究到写作交接固化为领域工作流，并支持新 request
 继承有 provenance 的研究控制状态。这些约束没有堆进统一 Agent Prompt，而由[研究工作流与证据链](research-workflow.md)
@@ -296,7 +297,7 @@ Markdown / 图片 / 附件             Task / Run / Message
 - 工具输入或执行错误保留 AI SDK 标准 Tool Part 状态，同时以版本化 `data-tool-error` 持久化稳定 code、retryable、`toolCallId` 与 `toolName`；用户界面复用原 Tool 卡说明哪个动作没有完成，不额外堆叠诊断卡，也不能暴露模型、工具内部异常或不确定的文件位置。
 - 正常正文后以版本化 `data-follow-up-questions` 呈现“继续探索”；只允许 2–4 个可直接发送的短问题，点击后覆盖当前
   输入框草稿但不自动发送。Part 与正文一同持久化并跨重启恢复，不能临时从 Markdown 标题或客户端随机推导。
-- 每个完成回复通过 `requestId` 关联对应 `task_run`；消息操作栏仅放置运行信息图标，点击后按需展示实际模型、Skill、资源、工具、结束或失败原因，不把权限说明、调试日志或内部 schema 常驻在对话正文。
+- 每个完成回复通过 `requestId` 关联对应 `task_run`；消息操作栏仅放置用量与运行信息图标，点击后按需展示供应商/AI SDK 上报的 Token/缓存分项、步骤/工具数、耗时、实际模型、Skill、资源、工具归因、结束或失败原因，以及每步出站前本地估算的 ContextManifest；不把未上报值伪造为零，也不把权限说明、调试日志或内部 schema 常驻在对话正文。
 
 ## 持久化目标与迁移
 

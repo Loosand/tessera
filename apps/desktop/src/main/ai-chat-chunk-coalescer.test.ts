@@ -11,10 +11,14 @@
  */
 
 import type { AiChatStreamChunk, AiChatStreamEvent } from "@tessera/contracts"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { AiChatChunkCoalescer, coalesceAiChatEvents } from "./ai-chat-chunk-coalescer"
 
 describe("AiChatChunkCoalescer", () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it("把同一正文增量合并到阈值，并在终止事件前刷新尾部", async () => {
     const chunks: AiChatStreamChunk[] = []
     const coalescer = new AiChatChunkCoalescer((chunk) => {
@@ -56,6 +60,47 @@ describe("AiChatChunkCoalescer", () => {
     expect(chunks).toEqual([
       { type: "reasoning-delta", id: "reasoning-1", delta: "先想" },
       { type: "tool-input-delta", toolCallId: "tool-1", inputTextDelta: '{"q":"FKJ"}' },
+    ])
+  })
+
+  it("正文未达到字符阈值时按最大延迟刷新", async () => {
+    vi.useFakeTimers()
+    const chunks: AiChatStreamChunk[] = []
+    const coalescer = new AiChatChunkCoalescer(
+      (chunk) => {
+        chunks.push(chunk)
+      },
+      160,
+      50,
+    )
+
+    await coalescer.push({ type: "text-delta", id: "text-1", delta: "你好" })
+    await vi.advanceTimersByTimeAsync(49)
+    expect(chunks).toEqual([])
+
+    await vi.advanceTimersByTimeAsync(1)
+    expect(chunks).toEqual([{ type: "text-delta", id: "text-1", delta: "你好" }])
+  })
+
+  it("延迟刷新与后续终止事件串行发出", async () => {
+    vi.useFakeTimers()
+    const chunks: AiChatStreamChunk[] = []
+    const coalescer = new AiChatChunkCoalescer(
+      async (chunk) => {
+        await Promise.resolve()
+        chunks.push(chunk)
+      },
+      160,
+      50,
+    )
+
+    await coalescer.push({ type: "text-delta", id: "text-1", delta: "你好" })
+    await vi.advanceTimersByTimeAsync(50)
+    await coalescer.push({ type: "finish", finishReason: "stop" })
+
+    expect(chunks).toEqual([
+      { type: "text-delta", id: "text-1", delta: "你好" },
+      { type: "finish", finishReason: "stop" },
     ])
   })
 

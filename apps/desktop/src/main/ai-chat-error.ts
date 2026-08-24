@@ -23,6 +23,7 @@ const TRUSTED_PUBLIC_ERROR_NAMES = new Set([
   "AgentChangeError",
   "AiProviderConfigError",
   "ContentLibraryError",
+  "ContextBudgetExceededError",
   "McpConfigError",
   "UserSkillError",
 ])
@@ -75,6 +76,7 @@ function inferErrorCode(error: unknown, phase: TaskRunErrorPhase): TaskRunErrorC
 
   if (phase === "resume") return "resume-failed"
   if (name === "AiProviderConfigError") return "provider-config"
+  if (name === "ContextBudgetExceededError") return "invalid-request"
   if (name === "AgentChangeError" || name === "ContentLibraryError" || name === "UserSkillError") {
     return "invalid-request"
   }
