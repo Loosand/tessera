@@ -2,7 +2,7 @@
 @import "streamdown/styles.css";
 @import "katex/dist/katex.min.css";
 @import "./typeset.css";
-@import "./components/chat-parts/chat-markdown.css";
+@import "./components/tasks/messages/chat-parts/chat-markdown.css";
 @source "./**/*.{ts,tsx}";
 @source "../../../../../packages/ai/src/**/*.{ts,tsx}";
 @source "../../../node_modules/streamdown/dist/*.js";

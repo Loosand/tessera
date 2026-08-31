@@ -1,6 +1,6 @@
 # 编辑器与 Markdown 同步
 
-> 代码源头：`apps/desktop/src/renderer/src/components/editor/`、
+> 代码源头：`apps/desktop/src/renderer/src/components/documents/editor/`、
 > `apps/desktop/src/renderer/src/hooks/use-workspace.ts`、`apps/desktop/src/main/index.ts`
 >
 > 状态：基础人工写作、CodeMirror 源码表面、兼容性保护与顶层区块连续多选已实现；嵌套操作和编辑器内 Agent 文本补丁处于规划阶段，聊天内文档 Diff 审批已实现。

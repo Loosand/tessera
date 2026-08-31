@@ -54,7 +54,7 @@ Eigent 的产品位置与分层，不把 renderer 变成第二个运行时。
 
 ### 2.2 Tessera
 
-- 统一任务表面：`apps/desktop/src/renderer/src/components/task-page.tsx`
+- 统一任务表面：`apps/desktop/src/renderer/src/components/tasks/conversation/task-page.tsx`
 - 文档右侧 AI 面板：`agent-sidebar.tsx`
 - 单次运行检查：`run-inspection-popover.tsx`
 - 运行检查投影：`apps/desktop/src/main/task-run-inspection.ts`

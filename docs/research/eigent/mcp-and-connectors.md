@@ -15,7 +15,7 @@
 > `src/components/Session/SidePanelSections/ExecutionContextSection.tsx`
 >
 > Tessera 对照：`apps/desktop/src/main/mcp-service.ts`、
-> `apps/desktop/src/renderer/src/components/mcp-settings.tsx`、
+> `apps/desktop/src/renderer/src/components/settings/mcp-settings.tsx`、
 > `packages/ai/src/server/agent-runtime.ts::createExternalAgentToolSet`、
 > `packages/contracts/src/index.ts`、`packages/database/schema.ts`、
 > `packages/database/mcp-server-config-repository.ts`、`docs/architecture/mcp.md`

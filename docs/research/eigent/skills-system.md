@@ -13,8 +13,8 @@
 >
 > Tessera 对照：`packages/skills/src/index.ts`、`packages/skills/builtins/`、
 > `apps/desktop/src/main/user-skill-service.ts`、`apps/desktop/src/main/index.ts`、
-> `apps/desktop/src/renderer/src/components/skill-management-page.tsx`、
-> `apps/desktop/src/renderer/src/components/task-capability-picker.tsx`、
+> `apps/desktop/src/renderer/src/components/skills/skill-management-page.tsx`、
+> `apps/desktop/src/renderer/src/components/tasks/conversation/task-capability-picker.tsx`、
 > `packages/contracts/src/index.ts`、`packages/database/user-skill-config-repository.ts`、
 > `docs/architecture/skill-system.md`
 >

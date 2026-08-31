@@ -29,8 +29,8 @@ import {
   type AiProviderSaveInput,
   isAiProviderId,
 } from "@tessera/contracts"
-import { resolveAiModelCapabilities } from "../model-capabilities"
-import { normalizeAiProviderModelId, validateAiProviderBaseUrl } from "../provider-input-validation"
+import { resolveAiModelCapabilities } from "../catalog/model-capabilities"
+import { normalizeAiProviderModelId, validateAiProviderBaseUrl } from "../catalog/provider-input-validation"
 import { aiProviderApiKeyValidationMessage } from "./api-key-validation"
 
 const MULTI_CONFIG_PROVIDER_IDS = new Set<AiProviderId>(["openai-compatible", "anthropic-compatible"])

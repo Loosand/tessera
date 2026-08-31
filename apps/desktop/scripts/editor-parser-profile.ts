@@ -16,8 +16,8 @@ import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { MarkdownManager } from "@tiptap/markdown"
 import { createPlainEditorBenchmarkDocument } from "../src/renderer/src/benchmarks/editor-benchmark-corpus"
-import { EDITOR_EXTENSIONS } from "../src/renderer/src/components/editor/editor-extensions"
-import { estimateMarkdownBlockCount } from "../src/renderer/src/components/editor/editor-mode-policy"
+import { EDITOR_EXTENSIONS } from "../src/renderer/src/components/documents/editor/editor-extensions"
+import { estimateMarkdownBlockCount } from "../src/renderer/src/components/documents/editor/editor-mode-policy"
 
 const SCRIPT_DIRECTORY = dirname(fileURLToPath(import.meta.url))
 const REPOSITORY_DIRECTORY = resolve(SCRIPT_DIRECTORY, "../../..")

@@ -6,8 +6,8 @@
 > `backend/app/controller/model_controller.py`、`backend/app/component/model_validation.py`、
 > `backend/app/agent/agent_model.py`、`backend/app/agent/factory/toolkit_assembler.py`
 >
-> Tessera 对照：`packages/ai/src/provider-catalog.ts`、`packages/ai/src/model-capabilities.ts`、
-> `packages/ai/src/server/model-discovery.ts`、`packages/ai/src/model-routing.ts`、
+> Tessera 对照：`packages/ai/src/catalog/provider-catalog.ts`、`packages/ai/src/catalog/model-capabilities.ts`、
+> `packages/ai/src/server/model-discovery.ts`、`packages/ai/src/routing/model-routing.ts`、
 > `packages/ai/src/server/provider-config-service.ts`、`docs/architecture/ai-providers.md`
 >
 > 状态：固定提交源码分析已完成

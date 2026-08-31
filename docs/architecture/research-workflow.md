@@ -1,11 +1,11 @@
 # 研究工作流与证据链
 
-> 代码源头：`packages/skills/builtins/research/SKILL.md`、`packages/ai/src/run-policy.ts`、
+> 代码源头：`packages/skills/builtins/research/SKILL.md`、`packages/ai/src/routing/run-policy.ts`、
 > `packages/ai/src/server/task-agent.ts`、`packages/ai/src/server/research-tools.ts`、
 > `packages/ai/src/server/agent-runtime.ts`、`apps/desktop/src/main/research-service.ts`、
 > `apps/desktop/src/main/browser-research-reader.ts`、
 > `apps/desktop/src/main/research-network-settings.ts`、`packages/database/app-setting-repository.ts`、
-> `apps/desktop/src/renderer/src/components/chat-parts/research-activity-part.tsx`、
+> `apps/desktop/src/renderer/src/components/tasks/messages/chat-parts/research-activity-part.tsx`、
 > `packages/contracts/src/index.ts`、`packages/database/research-repository.ts`、
 > `packages/database/migrations/0014-research-workflow.ts`、
 > `packages/database/migrations/0015-research-question-position.ts`、

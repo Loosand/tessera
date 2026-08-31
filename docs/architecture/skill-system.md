@@ -5,8 +5,8 @@
 > `packages/ai/src/server/task-interaction-tools.ts`、
 > `packages/database/schema.ts`、`apps/desktop/src/main/task-service.ts`、
 > `apps/desktop/src/main/user-skill-service.ts`、
-> `apps/desktop/src/renderer/src/components/task-composer.tsx`、
-> `apps/desktop/src/renderer/src/components/skill-management-page.tsx`
+> `apps/desktop/src/renderer/src/components/tasks/conversation/task-composer.tsx`、
+> `apps/desktop/src/renderer/src/components/skills/skill-management-page.tsx`
 >
 > 状态：部分实现。标准 `SKILL.md` 校验、内置注册表、用户单目录导入/递归扫描预览/批量托管/启停/删除、渐进式加载、逐轮显式选择与完整 RunPolicy 快照、统一 AI SDK `ToolLoopAgent` call options 注入、基础自动意图路由、研究提问/计划工具、Tessera 写作工作流和 Skill 管理页已实现；工作区级自动发现、更新/版本、附属资源按需加载、写作行为评测与社区目录尚未实现。
 

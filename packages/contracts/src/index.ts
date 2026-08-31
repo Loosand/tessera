@@ -17,9 +17,9 @@ import type {
   TaskRunResourceSummary,
   TaskSkillId,
   UserTaskSkillId,
-} from "./task-run-policy"
+} from "./tasks/task-run-policy"
 
-export * from "./task-run-policy"
+export * from "./tasks/task-run-policy"
 
 export const IPC_CHANNELS = {
   appInfo: "app:info",

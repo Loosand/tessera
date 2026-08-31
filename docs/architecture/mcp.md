@@ -3,7 +3,7 @@
 > 代码源头：`packages/contracts/src/index.ts`、`packages/database/mcp-server-config-repository.ts`、
 > `packages/database/migrations/0008-mcp-servers.ts`、`apps/desktop/src/main/mcp-service.ts`、
 > `apps/desktop/src/main/index.ts`、`packages/ai/src/server/agent-runtime.ts`、
-> `apps/desktop/src/renderer/src/components/mcp-settings.tsx`
+> `apps/desktop/src/renderer/src/components/settings/mcp-settings.tsx`
 >
 > 状态：部分实现。服务器安全配置、stdio / Streamable HTTP / SSE 传输、连接检测、工具发现、逐工具停用和 Agent 人工审批已实现；Resources、Prompts、OAuth、运行日志、市场导入及按任务绑定仍为规划。
 

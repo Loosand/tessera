@@ -1,10 +1,10 @@
 # AI 运行可观测性
 
 > 代码源头：`apps/desktop/src/main/ai-devtools.ts`、`apps/desktop/src/main/index.ts`、
-> `apps/desktop/src/preload/index.ts`、`apps/desktop/src/renderer/src/components/settings-page.tsx`、
-> `apps/desktop/src/renderer/src/components/chat-message.tsx`、
-> `apps/desktop/src/renderer/src/components/run-inspection-popover.tsx`、
-> `apps/desktop/src/renderer/src/components/chat-parts/reasoning-part.tsx`、
+> `apps/desktop/src/preload/index.ts`、`apps/desktop/src/renderer/src/components/settings/settings-page.tsx`、
+> `apps/desktop/src/renderer/src/components/tasks/messages/chat-message.tsx`、
+> `apps/desktop/src/renderer/src/components/tasks/messages/run-inspection-popover.tsx`、
+> `apps/desktop/src/renderer/src/components/tasks/messages/chat-parts/reasoning-part.tsx`、
 > `apps/desktop/src/main/task-run-inspection.ts`、
 > `apps/desktop/src/main/ai-chat-chunk-coalescer.ts`、
 > `packages/ai/src/server/task-agent.ts`、`packages/ai/src/server/context-budget.ts`、`packages/ai/src/server/follow-up-questions.ts`、`packages/database/schema.ts`、

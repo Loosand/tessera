@@ -52,7 +52,7 @@ import type {
 import type {
   TaskRunPolicy as TaskRunPolicyModule,
   TaskRunResourceSummary as TaskRunResourceSummaryModule,
-} from "./task-run-policy"
+} from "./tasks/task-run-policy"
 
 type Equal<Left, Right> = (<Value>() => Value extends Left ? 1 : 2) extends <Value>() => Value extends Right
   ? 1

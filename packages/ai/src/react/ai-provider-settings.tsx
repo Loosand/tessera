@@ -40,7 +40,7 @@ import {
   mergeDiscoveredAiProviderModels,
   setAllAiProviderModelsEnabled,
   updateAiProviderModelProfile,
-} from "../provider-catalog"
+} from "../catalog/provider-catalog"
 import { ModelEditorDialog } from "./model-editor-dialog"
 import { ProviderModelGroup } from "./provider-model-list"
 import { ProviderDirectory, ProviderMark, ProviderOverview, ProviderStatus } from "./provider-navigation"

@@ -17,7 +17,7 @@ import {
   type AiProviderDraft,
   type AiProviderDrafts,
   type AiProviderId,
-} from "../provider-catalog"
+} from "../catalog/provider-catalog"
 
 export type ProviderSelection = Readonly<{ kind: "all" }> | Readonly<{ configId: string; kind: "config" }>
 

@@ -14,7 +14,7 @@
 > `backend/tests/app/service/test_chat_service.py::TestInProcessHistoryCompaction`
 >
 > Tessera 对照：`packages/ai/src/server/agent-runtime.ts`、`packages/ai/src/server/task-agent.ts`、
-> `packages/ai/src/run-policy.ts`、`packages/contracts/src/index.ts`、
+> `packages/ai/src/routing/run-policy.ts`、`packages/contracts/src/index.ts`、
 > `packages/database/task-run-repository.ts`、`apps/desktop/src/main/task-service.ts`、
 > `apps/desktop/src/main/index.ts`、`docs/architecture/unified-creation-agent.md`、
 > `docs/architecture/database.md`、`docs/architecture/research-workflow.md`

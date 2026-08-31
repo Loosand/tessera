@@ -17,7 +17,7 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
 import { createXai } from "@ai-sdk/xai"
 import type { AiModelEndpointType, AiProviderConnectionInput } from "@tessera/contracts"
 import type { JSONValue, LanguageModel, ToolSet } from "ai"
-import { normalizeAiProviderModelId, validateAiProviderBaseUrl } from "../provider-input-validation"
+import { normalizeAiProviderModelId, validateAiProviderBaseUrl } from "../catalog/provider-input-validation"
 import { aiProviderApiKeyValidationMessage } from "./api-key-validation"
 
 const DEFAULT_WEB_SEARCH_MAX_USES = 12

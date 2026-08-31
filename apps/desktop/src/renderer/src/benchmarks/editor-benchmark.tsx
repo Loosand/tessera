@@ -17,8 +17,8 @@ import { TextSelection } from "@tiptap/pm/state"
 import { EditorContent } from "@tiptap/react"
 import { flushSync } from "react-dom"
 import { type Root, createRoot } from "react-dom/client"
-import { EDITOR_EXTENSIONS } from "../components/editor/editor-extensions"
-import { TopLevelBlockHandle } from "../components/editor/top-level-block-handle"
+import { EDITOR_EXTENSIONS } from "../components/documents/editor/editor-extensions"
+import { TopLevelBlockHandle } from "../components/documents/editor/top-level-block-handle"
 import { createEditorBenchmarkScenarios } from "./editor-benchmark-corpus"
 
 interface MemorySnapshot {

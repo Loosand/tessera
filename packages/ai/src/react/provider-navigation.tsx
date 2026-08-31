@@ -36,7 +36,7 @@ import {
   type AiProviderDrafts,
   type AiProviderId,
   matchesAiProvider,
-} from "../provider-catalog"
+} from "../catalog/provider-catalog"
 import { type ProviderConnectionView, listProviderConnections } from "./provider-settings-state"
 
 type ProviderIconProps = { size?: number }

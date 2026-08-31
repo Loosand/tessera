@@ -17,7 +17,7 @@ import {
   type AiProviderModel,
   isAiProviderId,
 } from "@tessera/contracts"
-import { normalizeAiProviderModelId, validateAiProviderBaseUrl } from "../provider-input-validation"
+import { normalizeAiProviderModelId, validateAiProviderBaseUrl } from "../catalog/provider-input-validation"
 import { aiProviderApiKeyValidationMessage } from "./api-key-validation"
 
 const DEFAULT_TIMEOUT_MS = 15_000

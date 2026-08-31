@@ -2,8 +2,8 @@
 
 > 代码源头：`packages/ai/src/server/ai-sdk-runtime.ts`、`packages/ai/src/react/ai-provider-settings.tsx`、
 > `packages/agent-runtime/src/index.ts`、`packages/skills/src/index.ts`、`packages/contracts/src/index.ts`、`packages/database/schema.ts`、
-> `apps/desktop/src/main/index.ts`、`apps/desktop/src/renderer/src/components/task-page.tsx`、
-> `apps/desktop/src/renderer/src/components/chat-parts/`、`packages/ai/src/react/use-electron-chat.test.ts`
+> `apps/desktop/src/main/index.ts`、`apps/desktop/src/renderer/src/components/tasks/conversation/task-page.tsx`、
+> `apps/desktop/src/renderer/src/components/tasks/messages/chat-parts/`、`packages/ai/src/react/use-electron-chat.test.ts`
 >
 > 状态：部分实现。本文记录实施顺序与验收门槛；勾选任务时必须同步对应代码、测试和架构文档。
 

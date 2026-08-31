@@ -42,7 +42,7 @@ import { Input } from "@tessera/design-system/components/ui/input"
 import { NativeSelect } from "@tessera/design-system/components/ui/native-select"
 import { Slider } from "@tessera/design-system/components/ui/slider"
 import { type ReactNode, useState } from "react"
-import type { AiProviderModelDraft, AiProviderModelProfileUpdate } from "../provider-catalog"
+import type { AiProviderModelDraft, AiProviderModelProfileUpdate } from "../catalog/provider-catalog"
 
 const MODEL_TYPE_LABELS: Record<AiModelType, string> = {
   chat: "对话",

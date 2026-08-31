@@ -12,7 +12,7 @@
 
 import type { AiProviderConfig } from "@tessera/contracts"
 import { describe, expect, it } from "vitest"
-import { createInitialAiProviderDrafts } from "../provider-catalog"
+import { createInitialAiProviderDrafts } from "../catalog/provider-catalog"
 import {
   ALL_PROVIDER_SELECTION,
   draftFromConfig,

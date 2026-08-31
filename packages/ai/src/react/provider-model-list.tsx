@@ -29,7 +29,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@tessera/design-system/components/ui/tooltip"
-import type { AiProviderModelDraft } from "../provider-catalog"
+import type { AiProviderModelDraft } from "../catalog/provider-catalog"
 import { AiModelIcon } from "./ai-model-icon"
 
 function formatTokenLimit(value: number): string {

@@ -6,11 +6,11 @@
 > `apps/desktop/src/main/read-only-agent-tools.ts`、`apps/desktop/src/main/workspace-file-service.ts`、
 > `apps/desktop/src/main/mcp-service.ts`、`packages/skills/src/index.ts`、`packages/ai/src/server/agent-runtime.ts`、
 > `packages/ai/src/server/task-interaction-tools.ts`、`packages/ai/src/react/use-electron-chat.ts`、`apps/desktop/src/main/index.ts`、
-> `apps/desktop/src/renderer/src/hooks/use-tasks.ts`、`apps/desktop/src/renderer/src/components/app-shell.tsx`、
-> `apps/desktop/src/renderer/src/components/task-page.tsx`、
-> `apps/desktop/src/renderer/src/components/task-composer.tsx`、
-> `apps/desktop/src/renderer/src/components/task-capability-picker.tsx`、
-> `apps/desktop/src/renderer/src/components/chat-parts/`
+> `apps/desktop/src/renderer/src/hooks/use-tasks.ts`、`apps/desktop/src/renderer/src/components/app/app-shell.tsx`、
+> `apps/desktop/src/renderer/src/components/tasks/conversation/task-page.tsx`、
+> `apps/desktop/src/renderer/src/components/tasks/conversation/task-composer.tsx`、
+> `apps/desktop/src/renderer/src/components/tasks/conversation/task-capability-picker.tsx`、
+> `apps/desktop/src/renderer/src/components/tasks/messages/chat-parts/`
 >
 > 状态：部分实现。不可删除默认空间、上次 Space 恢复、作用域任务导航、任务置顶/归档，以及无工作区与工作区任务共用的 AI SDK `ToolLoopAgent` 和类型化 call options / `prepareCall` 已实现；逐轮 Skill、保守自动意图、受信任 RunPolicy、动态资源、Artifact、内容项目工具、问题暂停/续跑、研究计划、研究状态续跑、回答后引申问题、本地消息赞踩、Markdown Diff、MCP 审批、运行恢复和消息历史已实现。Shell、通用步骤级 durable replay 与多窗口接管尚未实现。
 

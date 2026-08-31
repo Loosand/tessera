@@ -1,15 +1,15 @@
 # 统一创作 Agent 与内容存储探索
 
 > 代码源头：`packages/agent-runtime/src/index.ts`、`packages/ai/src/server/agent-runtime.ts`、
-> `packages/ai/src/server/content-domain-tools.ts`、`packages/ai/src/intent-routing.ts`、
+> `packages/ai/src/server/content-domain-tools.ts`、`packages/ai/src/routing/intent-routing.ts`、
 > `packages/ai/src/server/skill-instructions.ts`、`packages/ai/src/server/follow-up-questions.ts`、
 > `packages/contracts/src/index.ts`、`packages/database/schema.ts`、
 > `packages/database/content-domain-repository.ts`、`apps/desktop/src/main/content-library-service.ts`、
 > `apps/desktop/src/main/task-service.ts`、`apps/desktop/src/main/read-only-agent-tools.ts`、
 > `apps/desktop/src/renderer/src/hooks/use-tasks.ts`、
-> `apps/desktop/src/renderer/src/components/task-page.tsx`、
-> `apps/desktop/src/renderer/src/components/chat-parts/follow-up-questions-part.tsx`、
-> `apps/desktop/src/renderer/src/components/task-artifact-tray.tsx`
+> `apps/desktop/src/renderer/src/components/tasks/conversation/task-page.tsx`、
+> `apps/desktop/src/renderer/src/components/tasks/messages/chat-parts/follow-up-questions-part.tsx`、
+> `apps/desktop/src/renderer/src/components/tasks/artifacts/task-artifact-tray.tsx`
 >
 > 状态：统一交互、回答后引申问题、消息内失败、运行解释、内容 Operation 聚合与混合方案跨重启验收已实现，最终内容存储仍处于探索阶段。所有任务共用 AI SDK `ToolLoopAgent`、
 > `callOptionsSchema` / `prepareCall`、受信任 RunPolicy、当前文档附件、联网、Skill、动态资源关系、Artifact、

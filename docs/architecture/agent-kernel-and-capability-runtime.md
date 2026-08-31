@@ -1,7 +1,7 @@
 # 轻量 Agent Kernel 与能力运行时
 
 > 代码源头：`packages/ai/src/server/task-agent.ts`、`packages/ai/src/server/agent-runtime.ts`、
-> `packages/ai/src/run-policy.ts`、`packages/ai/src/server/context-budget.ts`、
+> `packages/ai/src/routing/run-policy.ts`、`packages/ai/src/server/context-budget.ts`、
 > `packages/ai/src/server/skill-instructions.ts`、`packages/skills/src/index.ts`、
 > `apps/desktop/src/main/index.ts`、`apps/desktop/src/main/content-library-service.ts`、
 > `apps/desktop/src/main/mcp-service.ts`、`packages/database/task-run-repository.ts`

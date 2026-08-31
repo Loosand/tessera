@@ -13,7 +13,7 @@
 import type { AppInfo } from "@tessera/contracts"
 import { LazyMotion, MotionConfig, domAnimation } from "motion/react"
 import { useEffect, useState } from "react"
-import { AppShell } from "./components/app-shell"
+import { AppShell } from "./components/app/app-shell"
 
 export function App() {
   const [appInfo, setAppInfo] = useState<AppInfo>()

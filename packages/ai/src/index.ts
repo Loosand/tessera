@@ -24,19 +24,19 @@ export {
   matchesAiProvider,
   mergeDiscoveredAiProviderModels,
   updateAiProviderModelProfile,
-} from "./provider-catalog"
-export { createUnknownAiModelCapabilities, resolveAiModelCapabilities } from "./model-capabilities"
+} from "./catalog/provider-catalog"
+export { createUnknownAiModelCapabilities, resolveAiModelCapabilities } from "./catalog/model-capabilities"
 export {
   type AiModelExecution,
   type AiModelExecutionIssue,
   type AiModelSearchRoute,
   aiModelExecutionIssueMessage,
   resolveAiModelExecution,
-} from "./model-routing"
+} from "./routing/model-routing"
 export {
   type TaskRunPolicyIssue,
   type TaskRunPolicyResolution,
   resolveTaskRunPolicy,
   taskRunPolicyIssueMessage,
-} from "./run-policy"
-export { inferAutomaticTaskSkill } from "./intent-routing"
+} from "./routing/run-policy"
+export { inferAutomaticTaskSkill } from "./routing/intent-routing"

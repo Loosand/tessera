@@ -1,8 +1,8 @@
 # AI 供应商与模型发现
 
-> 代码源头：`packages/ai/src/provider-catalog.ts`、`packages/ai/src/server/provider-config-service.ts`、
-> `packages/ai/src/model-capabilities.ts`、`packages/ai/src/server/model-discovery.ts`、
-> `packages/ai/src/model-routing.ts`、
+> 代码源头：`packages/ai/src/catalog/provider-catalog.ts`、`packages/ai/src/server/provider-config-service.ts`、
+> `packages/ai/src/catalog/model-capabilities.ts`、`packages/ai/src/server/model-discovery.ts`、
+> `packages/ai/src/routing/model-routing.ts`、
 > `packages/ai/src/server/ai-sdk-runtime.ts`、`packages/ai/src/server/chat-runtime.ts`、
 > `packages/database/ai-provider-config-repository.ts`、`packages/contracts/src/index.ts`、
 > `apps/desktop/src/main/ai-service.ts`、`apps/desktop/src/main/index.ts`、
