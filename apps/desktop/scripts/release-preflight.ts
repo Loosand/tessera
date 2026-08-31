@@ -10,8 +10,8 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import { assertAlphaReleaseContract } from "./release-contract"
 import { builtinModules } from "node:module"
+import { assertAlphaReleaseContract } from "./release-contract"
 
 const mainEntry = Bun.file(new URL("../out/main/index.js", import.meta.url))
 if (!(await mainEntry.exists())) throw new Error("缺少主进程构建产物，请先运行 bun run build。")

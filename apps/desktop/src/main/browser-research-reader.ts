@@ -10,8 +10,8 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import { BrowserWindow, type Session, session } from "electron"
 import type { ResearchNetworkMode } from "@tessera/contracts"
+import { BrowserWindow, type Session, session } from "electron"
 import {
   ResearchReadError,
   type RestrictedWebRead,

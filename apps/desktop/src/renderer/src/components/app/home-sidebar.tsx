@@ -29,11 +29,11 @@ import { Icon } from "@tessera/design-system/components/ui/icon"
 import React, { useMemo } from "react"
 import { useTaskFeed } from "../../hooks/use-task-feed"
 import type { TaskPageLoader } from "../../hooks/use-task-page"
-import { SpaceFilesSection } from "../workspace/space-files-section"
-import { SpaceSwitcher } from "../workspace/space-switcher"
 import { TaskContextMenu } from "../tasks/navigation/task-context-menu"
 import { TaskNavigationRow } from "../tasks/navigation/task-navigation-row"
 import { TaskRowActions } from "../tasks/navigation/task-row-actions"
+import { SpaceFilesSection } from "../workspace/space-files-section"
+import { SpaceSwitcher } from "../workspace/space-switcher"
 
 const TASK_LOADING_PLACEHOLDERS = ["first", "second", "third"] as const
 const TASK_FEED_PAGE_SIZE = 20

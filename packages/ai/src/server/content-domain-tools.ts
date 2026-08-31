@@ -16,7 +16,7 @@ import type {
   InspectProjectInput,
   MoveDocumentsInput,
 } from "@tessera/contracts"
-import { tool, type ToolSet } from "ai"
+import { type ToolSet, tool } from "ai"
 import { z } from "zod"
 
 type ContentToolContext = Readonly<{ signal: AbortSignal; toolCallId: string }>

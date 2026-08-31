@@ -10,7 +10,7 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import { upsertAppSetting, openDatabase } from "@tessera/database"
+import { openDatabase, upsertAppSetting } from "@tessera/database"
 import { describe, expect, test } from "vitest"
 import {
   DEFAULT_RESEARCH_NETWORK_MODE,

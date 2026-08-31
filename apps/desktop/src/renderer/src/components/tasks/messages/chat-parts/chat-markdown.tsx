@@ -16,14 +16,14 @@ import { math } from "@streamdown/math"
 import { mermaid } from "@streamdown/mermaid"
 import React from "react"
 import {
-  Streamdown,
-  defaultRehypePlugins,
   type ControlsConfig,
   type LinkSafetyConfig,
   type MermaidErrorComponentProps,
   type MermaidOptions,
   type PluginConfig,
+  Streamdown,
   type StreamdownTranslations,
+  defaultRehypePlugins,
 } from "streamdown"
 import { useTailStreamText } from "./tail-stream-text"
 

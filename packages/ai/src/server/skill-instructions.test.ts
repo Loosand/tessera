@@ -10,8 +10,8 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import { describe, expect, it } from "vitest"
 import { createUserSkillDescriptor } from "@tessera/skills"
+import { describe, expect, it } from "vitest"
 import { buildTaskSkillInstructions } from "./skill-instructions"
 
 describe("buildTaskSkillInstructions", () => {

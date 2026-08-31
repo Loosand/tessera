@@ -31,7 +31,6 @@
         "@tessera/agent-runtime": "workspace:*",
         "@tessera/ai": "workspace:*",
         "@tessera/contracts": "workspace:*",
-        "@tessera/core": "workspace:*",
         "@tessera/database": "workspace:*",
         "@tessera/design-system": "workspace:*",
         "@tessera/desktop-bridge": "workspace:*",
@@ -122,13 +121,6 @@
       "version": "0.0.1",
       "devDependencies": {
         "vitest": "^4.1.11",
-      },
-    },
-    "packages/core": {
-      "name": "@tessera/core",
-      "version": "0.0.1",
-      "dependencies": {
-        "@tessera/contracts": "workspace:*",
       },
     },
     "packages/database": {
@@ -823,8 +815,6 @@
     "@tessera/ai": ["@tessera/ai@workspace:packages/ai"],
 
     "@tessera/contracts": ["@tessera/contracts@workspace:packages/contracts"],
-
-    "@tessera/core": ["@tessera/core@workspace:packages/core"],
 
     "@tessera/database": ["@tessera/database@workspace:packages/database"],
 

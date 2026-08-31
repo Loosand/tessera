@@ -13,6 +13,7 @@
 import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import type { TaskMessage } from "@tessera/contracts"
 import {
   type DatabaseClient,
   listWorkspaceOperations,
@@ -20,7 +21,6 @@ import {
   saveTaskSession,
   startTaskRun,
 } from "@tessera/database"
-import type { TaskMessage } from "@tessera/contracts"
 import { afterEach, describe, expect, it } from "vitest"
 import { ContentLibraryError, createContentLibraryService } from "./content-library-service"
 import { createDesktopTaskService } from "./task-service"

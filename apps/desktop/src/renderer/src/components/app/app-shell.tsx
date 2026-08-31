@@ -17,16 +17,16 @@ import { type DefaultEditorMode, useAppPreferences } from "../../hooks/use-app-p
 import { useTasks } from "../../hooks/use-tasks"
 import { useWorkspace } from "../../hooks/use-workspace"
 import { motionSprings } from "../../motion"
-import { AgentSidebar } from "./agent-sidebar"
-import { AllTasksPage } from "../tasks/navigation/all-tasks-page"
 import { DocumentEditor } from "../documents/document-editor"
 import { DocumentHeader } from "../documents/document-header"
 import { getRichTextEditorGuard } from "../documents/editor/editor-mode-policy"
 import { requestSourceEditorLine } from "../documents/editor/source-code-editor-state"
-import { HomeSidebar } from "./home-sidebar"
 import { SettingsPage } from "../settings/settings-page"
 import { SkillManagementPage } from "../skills/skill-management-page"
 import { TaskPage } from "../tasks/conversation/task-page"
+import { AllTasksPage } from "../tasks/navigation/all-tasks-page"
+import { AgentSidebar } from "./agent-sidebar"
+import { HomeSidebar } from "./home-sidebar"
 
 type AppShellProps = Readonly<{
   appInfo: AppInfo | undefined

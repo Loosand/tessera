@@ -41,7 +41,6 @@
     "@tessera/agent-runtime": "workspace:*",
     "@tessera/ai": "workspace:*",
     "@tessera/contracts": "workspace:*",
-    "@tessera/core": "workspace:*",
     "@tessera/database": "workspace:*",
     "@tessera/design-system": "workspace:*",
     "@tessera/desktop-bridge": "workspace:*",

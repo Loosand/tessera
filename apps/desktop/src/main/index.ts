@@ -1,5 +1,5 @@
 /**
- * [INPUT]: Electron 生命周期、共享 IPC 契约、主进程工作区文件服务、AI Chat/Agent/Skill 配置、AI SDK 开发期日志、用户 Skill 扫描安装服务、研究网络偏好、可信研究服务、混合内容库、Agent 变更服务、模型服务、safeStorage 与 Tessera 核心服务
+ * [INPUT]: Electron 生命周期、共享 IPC 契约、主进程工作区文件服务、AI Chat/Agent/Skill 配置、AI SDK 开发期日志、用户 Skill 扫描安装服务、研究网络偏好、可信研究服务、混合内容库、Agent 变更服务、模型服务与 safeStorage
  * [OUTPUT]: 可选系统代理/直连的受限研究 Reader、显式研究续跑/已完成工具结果续跑与来源保存、研究到 Writing Artifact 交接、逐步 ContextManifest 持久化、顺序安全的流增量合并、默认空间/工作区恢复与任务分页、工作区/MCP Agent 工具、托管内容库/Artifact 查询、内置/用户 Skill 校验后的 SQLite 可恢复后台 AI 运行、版本化公开错误与脱敏运行解释、官方 AI SDK 日志入口、Diff/MCP 审批、持久化研究/AI/MCP/用户 Skill 配置与扫描会话、关闭保存握手和满高桌面窗口
  * [POS]: Electron 主进程入口与平台安全边界
  * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/ai-observability.md、docs/architecture/database.md、docs/architecture/mcp.md、docs/architecture/research-workflow.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md、docs/architecture/unified-creation-agent.md
@@ -39,7 +39,6 @@ import {
   type WorkspaceInfo,
   isAiProviderId,
 } from "@tessera/contracts"
-import { createAppInfo } from "@tessera/core"
 import {
   type DatabaseClient,
   appendTaskRunEvent,
@@ -629,13 +628,12 @@ async function deleteWorkspaceEntry(
 }
 
 function registerIpcHandlers() {
-  const getAppInfo = async () =>
-    createAppInfo({
-      name: app.getName(),
-      version: app.getVersion(),
-      platform: process.platform,
-      runtime: "electron",
-    })
+  const getAppInfo = async () => ({
+    name: app.getName(),
+    version: app.getVersion(),
+    platform: process.platform,
+    runtime: "electron" as const,
+  })
 
   handleDesktopInvoke(IPC_CHANNELS.appInfo, getAppInfo)
   handleDesktopInvoke(IPC_CHANNELS.aiDevtoolsOpen, async () => {

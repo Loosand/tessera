@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 具体 Agent 适配器定义的可序列化请求、取消信号、运行事件与工作区文件能力契约
- * [OUTPUT]: 支持按事件类型和工具输出收窄的 Agent 运行时端口，以及与 AI SDK/桌面平台解耦的工作区文件 capability contract
+ * [INPUT]: 具体 Agent 适配器定义的请求、事件流、取消信号与工作区文件能力契约
+ * [OUTPUT]: 可由具体适配器收窄的 Agent 运行时端口，以及与 AI SDK/桌面平台解耦的工作区文件 capability contract
  * [POS]: Tessera 核心与具体 Agent 适配器之间的稳定端口
  * [DOC]: docs/architecture.md、docs/architecture/agent-file-capabilities.md
  *
@@ -12,34 +12,7 @@
 
 export type PermissionEffect = "allow" | "ask" | "deny"
 
-export type AgentRequest = {
-  readonly sessionId: string
-  readonly prompt: string
-  readonly workspaceRoot: string
-}
-
-export type AgentEventMap<ToolOutput = unknown> = {
-  readonly "text.delta": { readonly type: "text.delta"; readonly text: string }
-  readonly "tool.started": { readonly type: "tool.started"; readonly tool: string }
-  readonly "tool.completed": {
-    readonly type: "tool.completed"
-    readonly tool: string
-    readonly output: ToolOutput
-  }
-  readonly "permission.asked": {
-    readonly type: "permission.asked"
-    readonly action: string
-    readonly resources: readonly string[]
-  }
-  readonly "session.completed": { readonly type: "session.completed" }
-  readonly "session.failed": { readonly type: "session.failed"; readonly message: string }
-}
-
-export type AgentEventType = keyof AgentEventMap
-export type AgentEvent<ToolOutput = unknown> = AgentEventMap<ToolOutput>[AgentEventType]
-export type AgentEventOf<Type extends AgentEventType, ToolOutput = unknown> = AgentEventMap<ToolOutput>[Type]
-
-export type AgentRuntime<Request = AgentRequest, Event = AgentEvent> = {
+export type AgentRuntime<Request, Event> = {
   readonly id: string
   run(request: Request, signal: AbortSignal): AsyncIterable<Event>
 }

@@ -42,15 +42,6 @@ import {
   hasRequestedUserInputSinceLastUserMessage,
 } from "./task-interaction-tools"
 
-export type {
-  ListWorkspaceFilesInput,
-  ReadonlyWorkspaceAgentTools,
-  ReadWorkspaceFileInput,
-  SearchWorkspaceTextInput,
-  WorkspaceAgentTools,
-  WorkspaceDocumentChangeInput,
-} from "@tessera/agent-runtime"
-
 export const workspaceDocumentChangeInputSchema = z
   .strictObject({
     operation: z.enum(["create", "update"]).describe("创建新文档或更新已有文档"),

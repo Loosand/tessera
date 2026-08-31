@@ -59,10 +59,10 @@ import {
   useAiModels,
 } from "../../../hooks/use-ai-models"
 import type { ActiveTask } from "../../../hooks/use-tasks"
+import { TaskArtifactTray } from "../artifacts/task-artifact-tray"
 import { ChatMessage } from "../messages/chat-message"
 import type { TaskRunTiming } from "../messages/chat-parts/task-run-activity"
 import { aiModelKey } from "./model-picker"
-import { TaskArtifactTray } from "../artifacts/task-artifact-tray"
 import { type ComposerImage, TaskComposer } from "./task-composer"
 
 const ACCEPTED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"])

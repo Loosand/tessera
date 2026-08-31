@@ -131,7 +131,6 @@ apps/desktop            Electron 主进程、预加载脚本和 React 渲染层
 apps/desktop-tauri      复用同一 renderer 的实验性 Tauri v2 对照壳
 packages/contracts      IPC 与跨进程共享契约
 packages/desktop-bridge Electron/Tauri 共用的 DesktopApi 组装层
-packages/core           平台无关的应用核心
 packages/agent-runtime  可替换 Agent 运行时契约
 packages/ai             模型事实、供应商适配、Agent 运行时与 AI 设置界面
 packages/database       SQLite 本地索引与运行状态

@@ -11,7 +11,6 @@ export default defineConfig({
           "@tessera/agent-runtime",
           "@tessera/ai",
           "@tessera/contracts",
-          "@tessera/core",
           "@tessera/database",
           "@tessera/skills",
           "parse5",
