@@ -2,7 +2,7 @@
  * [INPUT]: AI SDK UIMessage、当前回复状态/计时、客户端问答结果、reasoning 生命周期/摘要、变更预览/审批、文件跳转、引申问题带入、本地反馈、运行解释读取与重新生成回调
  * [OUTPUT]: 用户文本/附件、正式回答前统一“已工作”过程、问答/审批/失败边界、回答后引申问题、可持久化赞踩、工具审查及按需运行解释等轻量消息操作
  * [POS]: task-page 的 Chat/Agent 消息协调层
- * [DOC]: design.md、docs/architecture/ai-observability.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
+ * [DOC]: design.md、docs/architecture/agent-product-feedback-layer.md、docs/architecture/ai-observability.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -10,7 +10,7 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import type { UIMessage } from "@tessera/ai/react"
+import { type UIMessage, uiMessageToolName } from "@tessera/ai/react"
 import type {
   AgentChangePreview,
   TaskMessageFeedbackRating,
@@ -39,7 +39,7 @@ import { SourcePart } from "./chat-parts/source-part"
 import { TaskErrorPart, isTaskErrorPart } from "./chat-parts/task-error-part"
 import { type TaskRunTiming, TaskWorkTrace } from "./chat-parts/task-run-activity"
 import { TextPart } from "./chat-parts/text-part"
-import { ToolPart, isToolPart } from "./chat-parts/tool-part"
+import { ToolPart, isToolPart, toolDisplayLabel } from "./chat-parts/tool-part"
 import { UserInputPart, isUserInputToolPart } from "./chat-parts/user-input-part"
 import { WebSearchPart, isWebSearchToolPart } from "./chat-parts/web-search-part"
 import { RunInspectionPopover } from "./run-inspection-popover"
@@ -139,6 +139,46 @@ export function resolveAssistantPartLayout(parts: readonly MessagePart[]): Assis
   return { answerStartIndex, workPartIndexes }
 }
 
+export function taskWorkProgress(
+  parts: readonly MessagePart[],
+  workPartIndexes: readonly number[],
+  running: boolean,
+) {
+  const toolCallIds = new Set<string>()
+  let hasCompletedTool = false
+  let activityLabel: string | undefined
+  for (const index of workPartIndexes) {
+    const part = parts[index]
+    if (!part) continue
+    if (isToolPart(part)) {
+      toolCallIds.add(part.toolCallId)
+      if (
+        part.state === "output-available" ||
+        part.state === "output-error" ||
+        part.state === "output-denied"
+      ) {
+        hasCompletedTool = true
+      }
+    }
+  }
+  if (running) {
+    for (const index of [...workPartIndexes].reverse()) {
+      const part = parts[index]
+      if (!part) continue
+      if (isToolPart(part) && (part.state === "input-streaming" || part.state === "input-available")) {
+        activityLabel = `正在${toolDisplayLabel(uiMessageToolName(part))}`
+        break
+      }
+      if (part.type === "reasoning" && part.state !== "done") {
+        activityLabel = "正在分析"
+        break
+      }
+    }
+    activityLabel ??= hasCompletedTool ? "正在整理结果" : "正在工作"
+  }
+  return { actionCount: toolCallIds.size, activityLabel }
+}
+
 export function ChatMessage({
   isLast,
   loadAgentChangePreview,
@@ -176,6 +216,7 @@ export function ChatMessage({
     const part = message.parts[index]
     return part?.type !== "reasoning" || shouldRenderReasoningBody(part)
   })
+  const workProgress = taskWorkProgress(message.parts, workPartIndexes, assistantStreaming)
   const [persistedRunTiming, setPersistedRunTiming] = React.useState<TaskRunTiming | null>(null)
   let lastTextPartIndex = -1
   let lastReasoningPartIndex = -1
@@ -360,6 +401,8 @@ export function ChatMessage({
           return (
             <TaskWorkTrace
               key={`${message.id}-work-trace`}
+              actionCount={workProgress.actionCount}
+              activityLabel={workProgress.activityLabel}
               hasDetails={workHasDetails}
               running={assistantStreaming}
               timing={workTiming}

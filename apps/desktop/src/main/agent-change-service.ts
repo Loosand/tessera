@@ -1,8 +1,8 @@
 /**
- * [INPUT]: SQLite Agent 变更仓储、当前工作区根目录、AI SDK 工具输入/审批 Part、文件变更队列与中止信号
- * [OUTPUT]: 冻结工作区 Markdown 候选内容、只对账本领域工具审批、同文件串行的版本复核/原子写入、Diff 预览和审计结果
- * [POS]: Electron 主进程中可写 Agent 的人工审批与文件落盘领域边界
- * [DOC]: docs/architecture/agent-file-capabilities.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md、docs/architecture/database.md
+ * [INPUT]: SQLite 中已有的旧 Agent 变更提案与历史审批 Tool Part
+ * [OUTPUT]: 旧提案 Diff 预览、审批对账和不再执行旧写入的失效终态
+ * [POS]: read/edit/write 上线后旧工作区审批数据的只读兼容边界
+ * [DOC]: docs/architecture/agent-file-capabilities.md、docs/architecture/agent-simplification-roadmap.md、docs/architecture/database.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -10,7 +10,6 @@
  * 3. 行为变化时同步 [DOC] 指向的文档。
  */
 
-import type { WorkspaceDocumentWriteResult } from "@tessera/agent-runtime"
 import type { AgentChangePreview, TaskMessage, TaskToolMessagePart } from "@tessera/contracts"
 import {
   type AgentChangeProposal,
@@ -18,18 +17,8 @@ import {
   completeAgentChangeProposal,
   decideAgentChangeProposal,
   findAgentChangeProposal,
-  findAgentChangeProposalByToolCall,
-  saveAgentChangeProposal,
 } from "@tessera/database"
-import {
-  MAX_AGENT_MARKDOWN_BYTES,
-  agentContentHash,
-  readAgentMarkdownFile,
-  resolveAgentCreatePath,
-  resolveAgentPath,
-  writeAgentMarkdownFile,
-} from "./read-only-agent-tools"
-import { withWorkspaceFileMutation } from "./workspace-file-mutation-queue"
+import { MAX_AGENT_MARKDOWN_BYTES, agentContentHash } from "./read-only-agent-tools"
 
 const MAX_REASON_CHARACTERS = 2_000
 
@@ -54,17 +43,6 @@ export type WorkspaceDocumentChangeInput =
       readonly baseModifiedAt: number
       readonly operation: "update"
     })
-
-type RegisterAgentChangeInput = {
-  readonly approvalId: string
-  readonly change: unknown
-  readonly modelId: string
-  readonly providerId: string
-  readonly requestId: string
-  readonly rootPath: string
-  readonly taskId: string
-  readonly toolCallId: string
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value))
@@ -130,60 +108,12 @@ function toolParts(messages: readonly TaskMessage[]) {
 }
 
 export type AgentChangeService = {
-  execute(
-    taskId: string,
-    toolCallId: string,
-    value: unknown,
-    rootPath: string,
-    signal: AbortSignal,
-  ): Promise<WorkspaceDocumentWriteResult>
   preview(taskId: string, approvalId: string): AgentChangePreview
   reconcileDecisions(taskId: string, messages: readonly TaskMessage[]): void
-  register(input: RegisterAgentChangeInput): Promise<void>
 }
 
 export function createAgentChangeService(client: DatabaseClient): AgentChangeService {
   return {
-    register: async (input) => {
-      let change = parseWorkspaceDocumentChange(input.change)
-      let baseContent: string | null = null
-      let baseModifiedAt: Date | null = null
-      let baseContentHash: string | null = null
-
-      if (change.operation === "update") {
-        const current = await readAgentMarkdownFile(input.rootPath, change.path, new AbortController().signal)
-        if (current.modifiedAt !== change.baseModifiedAt || current.contentHash !== change.baseContentHash) {
-          throw new AgentChangeError(`文档「${current.path}」已发生变化，请重新读取后再提出修改。`)
-        }
-        baseContent = current.content
-        baseModifiedAt = new Date(current.modifiedAt)
-        baseContentHash = current.contentHash
-      } else {
-        const target = await resolveAgentCreatePath(input.rootPath, change.path)
-        change = { ...change, path: target.relativePath }
-      }
-
-      const proposal = saveAgentChangeProposal(client, {
-        approvalId: input.approvalId,
-        taskId: input.taskId,
-        requestId: input.requestId,
-        toolCallId: input.toolCallId,
-        providerId: input.providerId,
-        modelId: input.modelId,
-        operation: change.operation,
-        relativePath: change.path,
-        reason: change.reason,
-        baseContent,
-        baseModifiedAt,
-        baseContentHash,
-        proposedContent: change.content,
-        proposedContentHash: agentContentHash(change.content),
-        createdAt: new Date(),
-      })
-      if (!proposal || !proposalMatchesChange(proposal, change)) {
-        throw new AgentChangeError("这个 Agent 审批请求与已冻结的候选内容不一致。")
-      }
-    },
     reconcileDecisions: (taskId, messages) => {
       for (const part of toolParts(messages)) {
         if (
@@ -202,75 +132,17 @@ export function createAgentChangeService(client: DatabaseClient): AgentChangeSer
           throw new AgentChangeError("Agent 变更提案在审批后发生了变化，已阻止执行。")
         }
         if (proposal.status === "pending") {
-          decideAgentChangeProposal(
-            client,
-            proposal.approvalId,
-            Boolean(part.approval.approved),
-            part.approval.reason,
-          )
-        }
-      }
-    },
-    execute: async (taskId, toolCallId, value, rootPath, signal) => {
-      if (signal.aborted) throw new AgentChangeError("Agent 运行已停止。")
-      const change = parseWorkspaceDocumentChange(value)
-      const proposal = findAgentChangeProposalByToolCall(client, taskId, toolCallId)
-      if (!proposal || proposal.status !== "approved" || !proposalMatchesChange(proposal, change)) {
-        throw new AgentChangeError("这个变更尚未获得有效批准。")
-      }
-
-      try {
-        const target =
-          change.operation === "create"
-            ? await resolveAgentCreatePath(rootPath, change.path)
-            : await resolveAgentPath(rootPath, change.path)
-        return await withWorkspaceFileMutation(target.absolutePath, async () => {
-          if (signal.aborted) throw new AgentChangeError("Agent 运行已停止。")
-          if (change.operation === "update") {
-            const current = await readAgentMarkdownFile(rootPath, change.path, signal)
-            if (
-              current.modifiedAt !== change.baseModifiedAt ||
-              current.contentHash !== change.baseContentHash
-            ) {
-              completeAgentChangeProposal(client, proposal.approvalId, "conflict", "磁盘版本已变化")
-              return {
-                status: "conflict",
-                path: current.path,
-                message: "审批期间磁盘版本已变化，未写入任何内容。请重新读取并生成新的候选修改。",
-              }
-            }
-          }
-          const document = await writeAgentMarkdownFile(
-            rootPath,
-            change.path,
-            change.content,
-            change.operation,
-          )
-          completeAgentChangeProposal(client, proposal.approvalId, "applied")
-          return {
-            status: "saved",
-            operation: change.operation,
-            path: document.path,
-            modifiedAt: document.modifiedAt,
-            contentHash: document.contentHash,
-          }
-        })
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "写入 Markdown 文档失败。"
-        const createConflict =
-          change.operation === "create" &&
-          ((error instanceof Error && "code" in error && error.code === "EEXIST") ||
-            message.includes("已经存在"))
-        if (createConflict) {
-          completeAgentChangeProposal(client, proposal.approvalId, "conflict", "目标文档已存在")
-          return {
-            status: "conflict",
-            path: change.path,
-            message: "审批期间目标文档已被创建，未覆盖任何内容。请重新选择路径或生成新的候选修改。",
+          const approved = Boolean(part.approval.approved)
+          decideAgentChangeProposal(client, proposal.approvalId, approved, part.approval.reason)
+          if (approved) {
+            completeAgentChangeProposal(
+              client,
+              proposal.approvalId,
+              "failed",
+              "旧版逐次文件审批已失效；未执行磁盘写入。",
+            )
           }
         }
-        completeAgentChangeProposal(client, proposal.approvalId, "failed", message)
-        throw new AgentChangeError(message)
       }
     },
     preview: (taskId, approvalId) => {

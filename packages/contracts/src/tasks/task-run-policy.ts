@@ -1,8 +1,8 @@
 /**
- * [INPUT]: 任务执行模式、逐轮 Skill、研究网络模式以及持久化运行策略/ContextManifest/资源摘要的未知载荷
- * [OUTPUT]: Task Run Policy、脱敏上下文预算、资源摘要及其依赖的稳定字面量契约与运行时守卫
+ * [INPUT]: 任务执行模式、逐轮 Skill、研究网络模式以及持久化运行策略/ContextManifest/压缩投影/资源摘要的未知载荷
+ * [OUTPUT]: Task Run Policy、脱敏上下文预算、压缩 marker、资源摘要及其依赖的稳定字面量契约与运行时守卫
  * [POS]: @tessera/contracts 中独立于 IPC 聚合入口的任务运行策略领域边界
- * [DOC]: docs/architecture/ai-observability.md、docs/architecture/research-workflow.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
+ * [DOC]: docs/architecture/agent-run-reliability.md、docs/architecture/ai-observability.md、docs/architecture/research-workflow.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -100,8 +100,21 @@ export const TASK_CONTEXT_SECTION_KINDS = [
 
 export type TaskContextSectionKind = (typeof TASK_CONTEXT_SECTION_KINDS)[number]
 
+export type TaskContextCompaction = {
+  estimatedTokensAfter: number
+  estimatedTokensBefore: number
+  firstRetainedMessageIndex: number
+  omittedMessageCount: number
+  reason: "threshold"
+  retainedMessageCount: number
+  sourceMessageCount: number
+  summaryCharacters: number
+  version: 1
+}
+
 export type TaskContextManifest = {
   availableInputTokens: number | null
+  compaction?: TaskContextCompaction
   estimatedInputTokens: number
   estimator: "heuristic-v1"
   modelContextWindow: number | null
@@ -121,6 +134,25 @@ function isNonNegativeSafeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
 }
 
+export function isTaskContextCompaction(value: unknown): value is TaskContextCompaction {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false
+  const compaction = value as Record<string, unknown>
+  return (
+    compaction.version === 1 &&
+    compaction.reason === "threshold" &&
+    isNonNegativeSafeInteger(compaction.estimatedTokensAfter) &&
+    isNonNegativeSafeInteger(compaction.estimatedTokensBefore) &&
+    isNonNegativeSafeInteger(compaction.firstRetainedMessageIndex) &&
+    isNonNegativeSafeInteger(compaction.omittedMessageCount) &&
+    isNonNegativeSafeInteger(compaction.retainedMessageCount) &&
+    isNonNegativeSafeInteger(compaction.sourceMessageCount) &&
+    isNonNegativeSafeInteger(compaction.summaryCharacters) &&
+    compaction.omittedMessageCount + compaction.retainedMessageCount === compaction.sourceMessageCount &&
+    compaction.firstRetainedMessageIndex <= compaction.sourceMessageCount &&
+    compaction.estimatedTokensAfter <= compaction.estimatedTokensBefore
+  )
+}
+
 export function isTaskContextManifest(value: unknown): value is TaskContextManifest {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false
   const manifest = value as Record<string, unknown>
@@ -128,6 +160,7 @@ export function isTaskContextManifest(value: unknown): value is TaskContextManif
   return (
     manifest.version === 1 &&
     manifest.estimator === "heuristic-v1" &&
+    (manifest.compaction === undefined || isTaskContextCompaction(manifest.compaction)) &&
     (manifest.status === "within-budget" ||
       manifest.status === "over-budget" ||
       manifest.status === "unknown") &&

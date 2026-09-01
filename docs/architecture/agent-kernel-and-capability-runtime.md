@@ -1,5 +1,9 @@
 # 轻量 Agent Kernel 与能力运行时
 
+> 决策更新（2026-09-01）：本文保留长期分层、Context Compiler 与能力运行时研究；一期不先建设完整 Capability
+> Registry，也不继续扩张领域工具。当前实施顺序、四核心工具目标和审批减法由
+> [Pi 参考下的 Agent 减法实施路线图](agent-simplification-roadmap.md)统一定义。
+
 > 代码源头：`packages/ai/src/server/task-agent.ts`、`packages/ai/src/server/agent-runtime.ts`、
 > `packages/ai/src/routing/run-policy.ts`、`packages/ai/src/server/context-budget.ts`、
 > `packages/ai/src/server/skill-instructions.ts`、`packages/skills/src/index.ts`、
@@ -7,7 +11,7 @@
 > `apps/desktop/src/main/mcp-service.ts`、`packages/database/task-run-repository.ts`
 >
 > 状态：部分实现。统一 `ToolLoopAgent`、逐轮 RunPolicy、Skill 正文按需加载、动态工具装配、
-> ContextManifest 预算估算、运行事件持久化、主进程权限边界和领域工具已经存在；统一能力注册表、
+> ContextManifest 预算估算、运行事件持久化、主进程权限边界和轻量 Web/文件能力已经存在；内容/研究领域工具已退出新 run；统一能力注册表、
 > Context Compiler、能力发现工具、Skill 附属资源路由、受控脚本执行和跨资源原子领域命令仍在规划。
 
 ## 地位
@@ -167,7 +171,7 @@ type CapabilityDescriptor = {
 描述符只服务发现、解释和策略，不自动授予权限。`load()` 返回的完整 instructions、工具 Schema 或资源路由只在
 能力被选中后进入运行准备阶段。
 
-当前能力分散在 RunPolicy、内置 Skill 注册表、内容领域工具、研究工具、工作区工具和 MCP 服务中。第一阶段不要求
+当前能力分散在 RunPolicy、内置 Skill 注册表、轻量 Web/工作区工具和 MCP 服务中。第一阶段不要求
 把实现搬到一个新包，而是先建立统一描述符和快照，让 Context Compiler 不必理解每个来源的内部结构。
 
 ## Capability Pack 与路由
@@ -177,20 +181,20 @@ type CapabilityDescriptor = {
 ```ts
 const packs = {
   conversation: ["request-user-input"],
-  research: ["web-search", "read-web-source", "record-evidence", "finalize-research"],
-  workspaceRead: ["list-files", "read-file", "search-files"],
-  workspaceWrite: ["create-file", "update-file"],
-  content: ["create-project", "create-document", "move-documents"],
+  web: ["web_search", "read-web-source"],
+  workspaceRead: ["read", "bash@read-only"],
+  workspaceWrite: ["edit", "write"],
+  workspaceExecute: ["bash@read-write"],
+  external: ["mcp__server__tool"],
 }
 ```
 
 选择优先级为：
 
 1. 用户显式选择的创作方式或 Skill。
-2. 当前领域状态要求的下一组合法动作，例如研究计划门禁。
-3. RunPolicy 对明确意图、当前资源和模型能力的确定性路由。
-4. 注册表检索返回的少量候选。
-5. 一个有界 `discover-capabilities` 兜底工具，允许模型在路由遗漏时请求最多若干候选。
+2. RunPolicy 对明确意图、当前资源和模型能力的确定性路由。
+3. 注册表检索返回的少量候选。
+4. 一个有界 `discover-capabilities` 兜底工具，允许模型在路由遗漏时请求最多若干候选。
 
 不允许把所有 MCP 工具、用户 Skill 和未来脚本入口的完整 Schema 常驻模型上下文。能力规模增长时，本轮工具数量
 应由任务复杂度决定，而不是由安装总量决定。
@@ -412,7 +416,7 @@ Pi 风格的轻量 Kernel
 
 - 增加受限 reference / asset 读取协议。
 - 设计脚本 manifest、Runtime 选择、沙箱、授权和产物协议。
-- 在没有稳定隔离与审批前，不开放通用 Shell。
+- Skill 脚本不能借用当前前台工作区 Bash 获得常驻、带 Secret 或未声明权限；脚本执行需独立 manifest、隔离和产物协议。
 
 ### 第五阶段：删除重复上下文
 

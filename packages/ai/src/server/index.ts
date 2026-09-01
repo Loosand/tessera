@@ -1,6 +1,6 @@
 /**
- * [INPUT]: AI SDK Chat/Agent 运行时适配器、受信任 RunPolicy、客户端交互/可信研究工具、内容领域、受限工作区/MCP 工具契约与模型目录发现服务
- * [OUTPUT]: @tessera/ai/server 的主进程安全公开入口、研究/内容领域工具集与统一策略解析能力
+ * [INPUT]: AI SDK Chat/Agent 运行时适配器、受信任 RunPolicy、客户端交互、可选 Web、受限工作区/MCP 工具契约与模型目录发现服务
+ * [OUTPUT]: @tessera/ai/server 的主进程安全公开入口、轻量 Agent 工具集与统一策略解析能力
  * [POS]: AI 包服务端子路径边界
  * [DOC]: docs/architecture/ai-providers.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/mcp.md、docs/architecture/research-workflow.md、docs/architecture/task-navigation.md、docs/architecture/unified-creation-agent.md
  *
@@ -27,7 +27,7 @@ export {
   resolveTaskRunPolicy,
   taskRunPolicyIssueMessage,
 } from "../routing/run-policy"
-export { inferAutomaticTaskSkill, inferCompletedResearchFollowUpSkill } from "../routing/intent-routing"
+export { inferAutomaticTaskSkill } from "../routing/intent-routing"
 export {
   ContextBudgetExceededError,
   assertTaskContextBudget,
@@ -39,29 +39,19 @@ export {
   type AiAgentRuntimeOptions,
   type AiSdkAgentRuntimeRequest,
   type ExternalAgentTool,
+  agentInstructions,
   aiSdkAgentRuntime,
   createExternalAgentToolSet,
   streamAiAgent,
 } from "./agent-runtime"
 export {
-  type ResearchAgentTools,
-  createResearchToolSet,
-  publicResearchToolOutput,
-  researchEvidenceBatchInputSchema,
-  researchEvidenceToolInputSchema,
-  researchEvidenceInputSchema,
-  researchFinalizeInputSchema,
-  researchRecommendSourcesInputSchema,
-  researchReadSourceInputSchema,
-} from "./research-tools"
-export {
-  type ContentDomainAgentTools,
-  createContentDomainToolSet,
-  createManagedDocumentInputSchema,
-  createManagedProjectInputSchema,
-  inspectManagedProjectInputSchema,
-  moveManagedDocumentsInputSchema,
-} from "./content-domain-tools"
+  READ_WEB_SOURCE_TOOL_NAME,
+  type WebAgentTools,
+  type WebSourceReadResult,
+  createWebToolSet,
+  publicWebToolOutput,
+  webSourceReadInputSchema,
+} from "./web-tools"
 export type { AiChatRuntimeInput } from "./chat-runtime"
 export { PublicAgentToolError, classifyProviderStreamError } from "./chat-runtime"
 export {
@@ -82,10 +72,7 @@ export {
 export {
   createTaskInteractionTools,
   hasRequestedUserInputSinceLastUserMessage,
-  publishResearchPlanTool,
   requestUserInputTool,
-  taskResearchPlanInputSchema,
-  taskResearchPlanOutputSchema,
   taskUserInputRequestSchema,
   taskUserInputResultSchema,
 } from "./task-interaction-tools"

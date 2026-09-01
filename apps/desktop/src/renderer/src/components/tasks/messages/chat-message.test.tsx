@@ -1,8 +1,8 @@
 /**
  * [INPUT]: 用户消息与同一 Agent 消息内复用 provider reasoning ID 的多步骤 Part、正式回答前后的工具/文本、缺失/存在摘要的 reasoning Part，以及结构化研究/引申问题/本地反馈结果
- * [OUTPUT]: 用户/助手共享阅读栏、每个消息 Part 的稳定唯一 React key、“已工作”边界，以及 reasoning、搜索、研究笔记、正文、引申问题、用量审计与赞踩操作的回归验证
+ * [OUTPUT]: 用户/助手共享阅读栏、每个消息 Part 的稳定唯一 React key、事实 Progress 边界，以及 reasoning、搜索、研究笔记、正文、引申问题、运行详情与赞踩操作的回归验证
  * [POS]: chat-message 多步骤流式协调的单元测试
- * [DOC]: docs/architecture/ai-observability.md、docs/architecture/task-navigation.md
+ * [DOC]: docs/architecture/agent-product-feedback-layer.md、docs/architecture/ai-observability.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -19,6 +19,7 @@ import {
   chatMessagePartKey,
   resolveAssistantPartLayout,
   shouldRenderReasoningBody,
+  taskWorkProgress,
 } from "./chat-message"
 
 describe("ChatMessage Part key", () => {
@@ -108,7 +109,7 @@ describe("ChatMessage reasoning 正文可见性", () => {
       />,
     )
 
-    expect(markup).toContain('aria-label="查看本次用量与运行审计"')
+    expect(markup).toContain('aria-label="查看本次进度、执行上下文与诊断"')
     expect(markup).not.toContain("实际模型")
     expect(markup).not.toContain("工作区读写")
   })
@@ -140,7 +141,7 @@ describe("ChatMessage reasoning 正文可见性", () => {
     expect(markup).toContain("仅保存在本机")
   })
 
-  it("把同一回复中的空 reasoning 与搜索统一折叠到一个已工作区块", () => {
+  it("把同一回复中的空 reasoning 与搜索统一折叠到一个完成进度区块", () => {
     const message = {
       id: "assistant-1",
       role: "assistant",
@@ -181,11 +182,28 @@ describe("ChatMessage reasoning 正文可见性", () => {
       />,
     )
 
-    expect(markup).toContain("已工作 2m 25s")
+    expect(markup).toContain("已完成 2 个动作 · 2m 25s")
     expect(markup).toContain('aria-expanded="false"')
     expect(markup).not.toContain("Celeste Madeline character")
     expect(markup).not.toContain("example.com")
     expect(markup).toContain("最终回答")
+  })
+
+  it("只用工具状态生成当前活动，不读取 reasoning 正文", () => {
+    const parts = [
+      { type: "reasoning", text: "不应进入进度标签", state: "done" },
+      {
+        type: "tool-read",
+        toolCallId: "read-progress",
+        state: "input-available",
+        input: { path: "draft.md" },
+      },
+    ] as UIMessage["parts"]
+
+    expect(taskWorkProgress(parts, [0, 1], true)).toEqual({
+      actionCount: 1,
+      activityLabel: "正在读取文件",
+    })
   })
 
   it("运行期间展开工作过程并保留现有结构化搜索明细", () => {

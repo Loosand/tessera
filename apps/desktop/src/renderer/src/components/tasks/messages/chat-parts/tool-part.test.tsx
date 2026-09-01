@@ -36,6 +36,24 @@ describe("通用工具调用", () => {
     expect(markup).toContain("工具输入")
   })
 
+  it("以稳定名称呈现 read/edit/write 核心工具", () => {
+    for (const [toolName, label] of [
+      ["read", "读取文件"],
+      ["edit", "精确编辑文件"],
+      ["write", "写入文件"],
+    ] as const) {
+      const part = {
+        type: `tool-${toolName}`,
+        toolCallId: `${toolName}-1`,
+        state: "output-available",
+        input: { path: "docs/readme.md" },
+        output: { path: "docs/readme.md", status: "saved" },
+      } as ToolMessagePart
+
+      expect(renderToStaticMarkup(<ToolPart part={part} />)).toContain(label)
+    }
+  })
+
   it("失败时展开并同时呈现状态与错误原因", () => {
     const part = {
       type: "dynamic-tool",

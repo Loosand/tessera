@@ -1,6 +1,6 @@
 /**
  * [INPUT]: AI SDK UI 工具增量、Markdown 上下文附件、供应商错误与 Tessera 公开流式协议
- * [OUTPUT]: 文档材料边界、稳定模型历史投影、工具/引申问题增量裁剪、错误归类脱敏和 Skill 搜索额度策略的回归验证
+ * [OUTPUT]: 文档材料边界、按当前工具集隔离的模型历史投影、工具/引申问题增量裁剪、错误归类与供应商响应凭据剔除、Skill 搜索额度策略的回归验证
  * [POS]: Chat/Agent 共用 UIMessageChunk 裁剪边界的单元测试
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
  *
@@ -192,6 +192,36 @@ describe("Chat 运行时边界", () => {
     })
   })
 
+  it("在运行记录中保留供应商原始错误正文但剔除凭据", () => {
+    expect(
+      classifyProviderStreamError(
+        {
+          name: "AI_RetryError",
+          errors: [
+            {
+              name: "AI_APICallError",
+              statusCode: 400,
+              message: "The `content[].thinking` in the thinking mode must be passed back to the API.",
+              responseBody:
+                '{"type":"error","error":{"type":"invalid_request_error","message":"thinking must be passed back"},"authorization":"Bearer secret-key","x-api-key":"secret-key"}',
+            },
+          ],
+        },
+        "secret-key",
+      ),
+    ).toEqual({
+      code: "invalid-request",
+      httpStatus: 400,
+      message:
+        "供应商拒绝了当前请求。失败或不完整的历史已自动隔离；若重试仍失败，请检查模型与端点配置。（HTTP 400）",
+      phase: "stream",
+      providerError:
+        '{"type":"error","error":{"type":"invalid_request_error","message":"thinking must be passed back"},"authorization":"Bearer [已隐藏]","x-api-key":"[已隐藏]"}',
+      retryable: false,
+      version: 1,
+    })
+  })
+
   it("把 402 映射为不会无效重试的余额错误", () => {
     expect(
       classifyProviderStreamError(
@@ -292,6 +322,40 @@ describe("Chat 运行时边界", () => {
     expect(taskMessagesForModel([continuation], continuation.id)).toEqual([
       { ...continuation, parts: continuation.parts.slice(0, 2) },
     ])
+  })
+
+  it("旧文件审批保留在可见历史但不会进入新工具集的模型续轮", () => {
+    const continuation: TaskMessage = {
+      id: "assistant-legacy-approval",
+      role: "assistant",
+      parts: [
+        { type: "step-start" },
+        {
+          type: "tool-write-workspace-document",
+          toolCallId: "legacy-write",
+          state: "approval-responded",
+          input: { operation: "update", path: "README.md", content: "旧候选" },
+          approval: { id: "legacy-approval", approved: true },
+        },
+        {
+          type: "tool-read",
+          toolCallId: "current-read",
+          state: "output-available",
+          input: { path: "README.md" },
+          output: { content: "当前内容" },
+        },
+      ],
+    }
+
+    expect(taskMessagesForModel([continuation], continuation.id, new Set(["read", "edit", "write"]))).toEqual(
+      [
+        {
+          ...continuation,
+          parts: [continuation.parts[0], continuation.parts[2]],
+        },
+      ],
+    )
+    expect(continuation.parts).toHaveLength(3)
   })
 
   it("仅为研究 Skill 提升有界搜索额度", () => {

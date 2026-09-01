@@ -1,7 +1,7 @@
 /**
- * [INPUT]: Drizzle 数据库实例、冻结的 Agent Markdown 候选内容、审批决定与写入结果
- * [OUTPUT]: Agent 变更提案的幂等创建、定位、决策和结果审计
- * [POS]: 可写 Agent 人工审批与崩溃恢复的数据库事实边界
+ * [INPUT]: Drizzle 数据库实例、旧 Agent Markdown 审批决定与兼容终态
+ * [OUTPUT]: 历史 Agent 变更提案的定位、决策和失效结果审计
+ * [POS]: read/edit/write 上线后旧逐次审批数据的兼容仓储边界
  * [DOC]: docs/architecture/database.md、docs/architecture/ai-chat-agent-todo.md
  *
  * [PROTOCOL]:
@@ -16,51 +16,11 @@ import { type AgentChangeProposal, agentChangeProposals } from "./schema"
 
 export type AgentChangeStatus = AgentChangeProposal["status"]
 
-export type AgentChangeProposalInput = Pick<
-  AgentChangeProposal,
-  | "approvalId"
-  | "taskId"
-  | "requestId"
-  | "toolCallId"
-  | "providerId"
-  | "modelId"
-  | "operation"
-  | "relativePath"
-  | "reason"
-  | "baseContent"
-  | "baseModifiedAt"
-  | "baseContentHash"
-  | "proposedContent"
-  | "proposedContentHash"
-  | "createdAt"
->
-
-export function saveAgentChangeProposal(client: DatabaseClient, input: AgentChangeProposalInput) {
-  client.db
-    .insert(agentChangeProposals)
-    .values({ ...input, status: "pending" })
-    .onConflictDoNothing()
-    .run()
-  return findAgentChangeProposal(client, input.approvalId)
-}
-
 export function findAgentChangeProposal(client: DatabaseClient, approvalId: string) {
   return client.db
     .select()
     .from(agentChangeProposals)
     .where(eq(agentChangeProposals.approvalId, approvalId))
-    .get()
-}
-
-export function findAgentChangeProposalByToolCall(
-  client: DatabaseClient,
-  taskId: string,
-  toolCallId: string,
-) {
-  return client.db
-    .select()
-    .from(agentChangeProposals)
-    .where(and(eq(agentChangeProposals.taskId, taskId), eq(agentChangeProposals.toolCallId, toolCallId)))
     .get()
 }
 

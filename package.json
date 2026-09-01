@@ -22,6 +22,7 @@
     "benchmark:editor:check": "bun --cwd apps/desktop benchmark:editor:check",
     "benchmark:editor:parser": "bun --cwd apps/desktop benchmark:editor:parser",
     "benchmark:editor:parser:cpu": "bun --cwd apps/desktop benchmark:editor:parser:cpu",
+    "eval:agent": "bun packages/agent-evals/src/cli.ts",
     "format": "biome format --write .",
     "lint": "biome lint .",
     "test": "turbo run test",

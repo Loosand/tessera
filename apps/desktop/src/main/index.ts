@@ -1,8 +1,8 @@
 /**
- * [INPUT]: Electron 生命周期、共享 IPC 契约、主进程工作区文件服务、AI Chat/Agent/Skill 配置、AI SDK 开发期日志、用户 Skill 扫描安装服务、研究网络偏好、可信研究服务、混合内容库、Agent 变更服务、模型服务与 safeStorage
- * [OUTPUT]: 可选系统代理/直连的受限研究 Reader、显式研究续跑/已完成工具结果续跑与来源保存、研究到 Writing Artifact 交接、逐步 ContextManifest 持久化、顺序安全的流增量合并、默认空间/工作区恢复与任务分页、工作区/MCP Agent 工具、托管内容库/Artifact 查询、内置/用户 Skill 校验后的 SQLite 可恢复后台 AI 运行、版本化公开错误与脱敏运行解释、官方 AI SDK 日志入口、Diff/MCP 审批、持久化研究/AI/MCP/用户 Skill 配置与扫描会话、关闭保存握手和满高桌面窗口
+ * [INPUT]: Electron 生命周期、共享 IPC 契约、主进程工作区文件服务、AI Chat/Agent/Skill 配置、AI SDK 开发期日志、用户 Skill 扫描安装服务、研究网络偏好、历史研究数据、混合内容库、旧 Agent 变更兼容服务、模型服务与 safeStorage
+ * [OUTPUT]: 可选系统代理/直连的无状态 Web Reader、历史研究笔记与来源保存、直接文件/Bash 事件后的 Artifact 登记、带压缩 marker 的 ContextManifest 持久化、工具唯一终态与 run terminal 后无迟到事件、顺序安全的流增量合并、默认空间/工作区恢复与任务分页、read/edit/write/受控 bash 工作区与 MCP Agent 工具、托管内容库/Artifact 查询、内置/用户 Skill 校验后的 SQLite 可恢复后台 AI 运行、版本化公开错误与脱敏运行解释、官方 AI SDK 日志入口、旧 Diff 兼容/MCP 审批、持久化研究/AI/MCP/用户 Skill 配置与扫描会话、关闭保存握手和满高桌面窗口
  * [POS]: Electron 主进程入口与平台安全边界
- * [DOC]: docs/architecture.md、docs/architecture/ai-providers.md、docs/architecture/ai-observability.md、docs/architecture/database.md、docs/architecture/mcp.md、docs/architecture/research-workflow.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md、docs/architecture/unified-creation-agent.md
+ * [DOC]: docs/architecture.md、docs/architecture/agent-run-reliability.md、docs/architecture/agent-simplification-roadmap.md、docs/architecture/ai-providers.md、docs/architecture/ai-observability.md、docs/architecture/database.md、docs/architecture/mcp.md、docs/architecture/research-workflow.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md、docs/architecture/unified-creation-agent.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -18,10 +18,9 @@ import { fileURLToPath } from "node:url"
 import {
   AiProviderConfigError,
   AiProviderConnectionError,
-  type ContentDomainAgentTools,
-  type ResearchAgentTools,
+  PublicAgentToolError,
   type TaskAgentRunMetrics,
-  inferCompletedResearchFollowUpSkill,
+  type WebAgentTools,
   listAiProviderModels,
   streamAiAgent,
 } from "@tessera/ai/server"
@@ -43,17 +42,14 @@ import {
   type DatabaseClient,
   appendTaskRunEvent,
   findAppSetting,
-  findLatestCompletedResearchRun,
   findTaskRun,
   findWorkspaceById,
   finishTaskRun,
   hideRecentWorkspace,
   listRecentWorkspaces,
   openDatabase,
-  resumeResearchRun,
   saveTaskResourceBinding,
   saveWorkspace,
-  startResearchRun,
   startTaskRun,
   updateTaskRunResourceSummary,
   upsertAppSetting,
@@ -70,9 +66,10 @@ import {
   screen,
   shell,
 } from "electron"
-import { type AgentChangeService, createAgentChangeService } from "./agent-change-service"
+import { AgentChangeError, type AgentChangeService, createAgentChangeService } from "./agent-change-service"
+import { AgentRunEventLedger } from "./agent-run-event-ledger"
 import { AiChatChunkCoalescer, coalesceAiChatEvents } from "./ai-chat-chunk-coalescer"
-import { classifyTaskRunError, classifyTaskToolError, taskRunError } from "./ai-chat-error"
+import { classifyTaskRunError, classifyTaskToolError } from "./ai-chat-error"
 import { parseAiChatStreamEvent } from "./ai-chat-event"
 import { registerAiSdkDevtools, startAiSdkDevtoolsViewer, stopAiSdkDevtoolsViewer } from "./ai-devtools"
 import { type DesktopAiService, createDesktopAiService } from "./ai-service"
@@ -84,24 +81,19 @@ import {
 } from "./content-library-service"
 import { handleDesktopInvoke, onDesktopSend } from "./ipc-contract"
 import { McpConfigError, type McpService, createMcpService } from "./mcp-service"
-import { createReadonlyWorkspaceAgentTools } from "./read-only-agent-tools"
 import {
   DEFAULT_RESEARCH_NETWORK_MODE,
   readResearchNetworkMode,
   saveResearchNetworkMode,
 } from "./research-network-settings"
-import {
-  type DesktopResearchService,
-  createDesktopResearchService,
-  readResearchNotebook,
-  researchContinuationContext,
-  researchFinishIssue,
-  researchWritingContext,
-} from "./research-service"
+import { readResearchNotebook } from "./research-service"
 import { saveResearchSourceSelection } from "./research-source-save-service"
+import { readAgentMarkdownFile } from "./read-only-agent-tools"
 import { inspectTaskRun } from "./task-run-inspection"
 import { findUnpersistedLatestTaskRun, recoverInterruptedTaskRuns } from "./task-run-recovery"
 import { type DesktopTaskService, createDesktopTaskService } from "./task-service"
+import { createWorkspaceAgentTools } from "./workspace-agent-tools"
+import { createWorkspaceExecutionEnvironment } from "./workspace-execution-environment"
 import { UserSkillError, type UserSkillService, createUserSkillService } from "./user-skill-service"
 import {
   createDirectory,
@@ -239,11 +231,12 @@ function resolveAiChatInput(input: AiChatStartInput) {
     const retryableFailure = continuation?.parts.some(
       (part) => part.type === "data-task-error" && part.data.retryable,
     )
+    const isRegenerationContinuation = input.regenerateMessageId === input.continueFromMessageId
     if (
       continuation?.id !== input.continueFromMessageId ||
       continuation.role !== "assistant" ||
       !completedToolCount ||
-      !retryableFailure
+      (!retryableFailure && !isRegenerationContinuation)
     ) {
       throw new AiProviderConfigError("续跑消息没有可复用的已完成工具结果。")
     }
@@ -289,16 +282,6 @@ function summarizeTaskRunResources(
     workspaceId: workspace?.id ?? null,
     workspaceName: workspace?.name ?? null,
   }
-}
-
-function researchSearchQuery(value: unknown): string | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
-  const input = value as Record<string, unknown>
-  for (const key of ["query", "search_query", "q"]) {
-    const candidate = input[key]
-    if (typeof candidate === "string" && candidate.trim()) return candidate.trim().slice(0, 1_000)
-  }
-  return undefined
 }
 
 function recordTaskRunResourceBindings(
@@ -372,69 +355,59 @@ async function streamAiTask(
   workspace: WorkspaceInfo | null,
   options: Pick<
     Parameters<typeof streamAiAgent>[1],
-    | "abortSignal"
-    | "onChunk"
-    | "onContextManifest"
-    | "onRunMetrics"
-    | "researchContext"
-    | "researchTools"
-    | "skill"
+    "abortSignal" | "onChunk" | "onContextManifest" | "onRunMetrics" | "skill" | "webTools"
   >,
 ) {
+  const contentService = requireContentLibraryService()
+  const executionEnvironment = workspace
+    ? await createWorkspaceExecutionEnvironment(workspace.rootPath)
+    : null
   const workspaceTools = workspace
-    ? createReadonlyWorkspaceAgentTools({
+    ? createWorkspaceAgentTools({
+        ...(executionEnvironment ? { executionEnvironment } : {}),
         rootPath: workspace.rootPath,
-        ...(input.currentDocumentPath ? { currentDocumentPath: input.currentDocumentPath } : {}),
+        onMutation: (mutation) => {
+          contentService.recordWorkspaceFileArtifact(
+            { taskId: input.taskId, runId: input.requestId },
+            workspace.id,
+            mutation,
+          )
+        },
+        onCommandFilesChanged: async (paths) => {
+          for (const path of paths) {
+            if (!isMarkdownPath(path)) continue
+            try {
+              const document = await readAgentMarkdownFile(
+                workspace.rootPath,
+                path,
+                new AbortController().signal,
+              )
+              contentService.recordWorkspaceFileArtifact(
+                { taskId: input.taskId, runId: input.requestId },
+                workspace.id,
+                {
+                  contentHash: document.contentHash,
+                  modifiedAt: document.modifiedAt,
+                  operation: "update",
+                  path: document.path,
+                  status: "saved",
+                },
+              )
+            } catch {
+              // 只从真实文件事件登记可读 Markdown；删除、超限或瞬时路径不猜测为 Artifact。
+            }
+          }
+        },
       })
     : null
   const externalTools = await requireMcpService().createAgentTools(options.abortSignal)
-  const contentService = requireContentLibraryService()
-  const contentTools: ContentDomainAgentTools | undefined = contentService.current()
-    ? {
-        listProjects: async (signal: AbortSignal) => {
-          signal.throwIfAborted()
-          return contentService.listProjects()
-        },
-        listArtifacts: async (signal: AbortSignal) => {
-          signal.throwIfAborted()
-          return contentService.listArtifacts(input.taskId)
-        },
-        inspectProject: async ({ projectId }, context) => {
-          context.signal.throwIfAborted()
-          return contentService.inspectProject({ taskId: input.taskId, runId: input.requestId }, projectId)
-        },
-        createDocument: async (document, context) => {
-          context.signal.throwIfAborted()
-          return contentService.createDocument({ taskId: input.taskId, runId: input.requestId }, document)
-        },
-        createProject: async (project, context) => {
-          context.signal.throwIfAborted()
-          return contentService.createProject({ taskId: input.taskId, runId: input.requestId }, project)
-        },
-        moveDocuments: async (move, context) => {
-          context.signal.throwIfAborted()
-          return contentService.moveDocuments({ taskId: input.taskId, runId: input.requestId }, move)
-        },
-      }
-    : undefined
   return streamAiAgent(input, {
     ...options,
-    ...(contentTools ? { contentTools } : {}),
     externalTools,
     ...(workspace && workspaceTools
       ? {
           workspaceName: workspace.name,
-          tools: {
-            ...workspaceTools,
-            writeWorkspaceDocument: (change, context) =>
-              requireAgentChangeService().execute(
-                input.taskId,
-                context.toolCallId,
-                change,
-                workspace.rootPath,
-                context.signal,
-              ),
-          },
+          tools: workspaceTools,
         }
       : {}),
   })
@@ -828,40 +801,31 @@ function registerIpcHandlers() {
       if (previousRun) releaseAiChatRun(previousRun)
       const workspace = activeWorkspaces.get(event.sender.id)?.workspace ?? null
       requireDesktopTaskService().authorizeTurn(input.taskId, input.mode, workspace, input.skillId)
+      const hasLegacyWorkspaceApproval = input.messages.some((message) =>
+        message.parts.some(
+          (part) =>
+            part.type === "tool-write-workspace-document" &&
+            part.state === "approval-responded" &&
+            Boolean(part.approval),
+        ),
+      )
       if (workspace) {
         requireAgentChangeService().reconcileDecisions(input.taskId, input.messages)
+      }
+      if (hasLegacyWorkspaceApproval) {
+        throw new AgentChangeError(
+          "这条旧版文件审批已失效，未执行磁盘写入。请发送一条新消息，Agent 将使用 read/edit/write 重新完成修改。",
+        )
       }
       if (!databaseClient) throw new AiProviderConfigError("本地任务数据库尚未就绪。")
       const runDatabase = databaseClient
       const requestedMode = workspace ? "agent" : "chat"
-      let runtimeInput = resolveAiChatInput({ ...input, mode: requestedMode })
-      const latestUserText = [...input.messages]
-        .reverse()
-        .find((message) => message.role === "user")
-        ?.parts.filter((part) => part.type === "text")
-        .map((part) => part.text)
-        .join("\n")
-      const followUpSkillId = inferCompletedResearchFollowUpSkill(
-        runtimeInput.runPolicy.skillId,
-        latestUserText ?? "",
-        runtimeInput.runPolicy.skillId === "research" &&
-          !input.resumeResearchRequestId &&
-          !input.regenerateMessageId &&
-          Boolean(findLatestCompletedResearchRun(runDatabase, input.taskId)),
-      )
-      if (followUpSkillId !== runtimeInput.runPolicy.skillId) {
-        runtimeInput = resolveAiChatInput({ ...input, mode: requestedMode, skillId: followUpSkillId })
-      }
+      const runtimeInput = resolveAiChatInput({ ...input, mode: requestedMode })
       const loadedSkill = await requireUserSkillService().load(runtimeInput.skillId)
-      const regeneratedMessageRequestId =
-        runtimeInput.runPolicy.skillId === "research" && input.regenerateMessageId
-          ? requireDesktopTaskService()
-              .readIfExists(input.taskId)
-              ?.messages.find((message) => message.id === input.regenerateMessageId)?.metadata?.requestId
-          : undefined
-      const resumedResearchRequestId = input.resumeResearchRequestId ?? regeneratedMessageRequestId ?? null
-      const researchNetworkMode =
-        runtimeInput.runPolicy.skillId === "research" ? readResearchNetworkMode(runDatabase) : null
+      const resumedResearchRequestId = null
+      const researchNetworkMode = runtimeInput.runPolicy.webSearch
+        ? readResearchNetworkMode(runDatabase)
+        : null
       const abortController = new AbortController()
       const runStartedAt = new Date()
       const webContentsId = event.sender.id
@@ -906,111 +870,45 @@ function registerIpcHandlers() {
       })
       taskRunStarted = true
       requireDesktopTaskService().setRunStatus(input.taskId, "running")
-      let researchService: DesktopResearchService | null = null
-      let continuedResearchContext: string | null = null
-      if (runtimeInput.runPolicy.skillId === "research") {
-        startResearchRun(runDatabase, {
-          requestId: input.requestId,
-          taskId: input.taskId,
-          startedAt: runStartedAt,
-        })
-        if (resumedResearchRequestId) {
-          const previousRun = findTaskRun(runDatabase, resumedResearchRequestId)
-          if (
-            !previousRun ||
-            previousRun.taskId !== input.taskId ||
-            previousRun.skillId !== "research" ||
-            previousRun.status === "running"
-          ) {
-            throw new AiProviderConfigError("找不到可续研的上一轮研究运行。")
+      const webTools: WebAgentTools | undefined = runtimeInput.runPolicy.webSearch
+        ? {
+            readSource: async ({ url }, context) => {
+              try {
+                return await createElectronResearchReader(
+                  researchNetworkMode ?? DEFAULT_RESEARCH_NETWORK_MODE,
+                )(url, context.signal)
+              } catch (error) {
+                if (context.signal.aborted) throw error
+                throw new PublicAgentToolError(error instanceof Error ? error.message : "网页读取失败。", {
+                  cause: error,
+                })
+              }
+            },
           }
-          resumeResearchRun(runDatabase, {
-            fromRequestId: resumedResearchRequestId,
-            taskId: input.taskId,
-            toRequestId: input.requestId,
-          })
-          continuedResearchContext = researchContinuationContext(runDatabase, input.taskId, input.requestId)
-        }
-        researchService = createDesktopResearchService(runDatabase, {
-          requestId: input.requestId,
-          reader: createElectronResearchReader(researchNetworkMode ?? DEFAULT_RESEARCH_NETWORK_MODE),
-        })
-      }
-      const writingResearchContext =
-        runtimeInput.runPolicy.skillId === "writing"
-          ? researchWritingContext(runDatabase, input.taskId)
-          : null
+        : undefined
       recordTaskRunResourceBindings(runDatabase, input, workspace)
 
       const pendingToolInputs = new Map<string, { input: unknown; toolName: string }>()
-      let latestSearchQuery: string | undefined
-      let researchFinalTextCharacters = 0
+      const eventLedger = new AgentRunEventLedger()
 
-      const emit = async (incomingChunk: AiChatStreamChunk) => {
-        const awaitingUserInput = [...pendingToolInputs.values()].some(
-          (pending) => pending.toolName === "request-user-input",
-        )
-        const researchOutcome = researchService?.getProgress().outcome ?? null
-        if (incomingChunk.type === "text-delta" && researchOutcome) {
-          researchFinalTextCharacters += incomingChunk.delta.trim().length
-        }
-        const researchIssue =
-          incomingChunk.type === "finish" && researchService
-            ? researchFinishIssue({
-                awaitingUserInput,
-                finalTextCharacters: researchFinalTextCharacters,
-                outcome: researchOutcome,
-                progress: researchService.getProgress(),
-              })
-            : null
+      const persistChunk = async (incomingChunk: AiChatStreamChunk) => {
         const normalizedRunChunk = normalizeAiChatErrorChunk(incomingChunk)
-        const chunk = researchIssue
-          ? aiChatErrorChunk(taskRunError("tool-failed", "stream", researchIssue))
-          : normalizeAiChatToolErrorChunk(
-              normalizedRunChunk,
-              normalizedRunChunk.type === "tool-output-error"
-                ? pendingToolInputs.get(normalizedRunChunk.toolCallId)?.toolName
-                : undefined,
-            )
+        const chunk = normalizeAiChatToolErrorChunk(
+          normalizedRunChunk,
+          normalizedRunChunk.type === "tool-output-error"
+            ? pendingToolInputs.get(normalizedRunChunk.toolCallId)?.toolName
+            : undefined,
+        )
         if (chunk.type === "tool-input-available") {
           pendingToolInputs.set(chunk.toolCallId, { input: chunk.input, toolName: chunk.toolName })
-          if (chunk.toolName.includes("web_search") || chunk.toolName.includes("web-search")) {
-            latestSearchQuery = researchSearchQuery(chunk.input)
-          }
         }
         if (
+          chunk.type === "tool-input-error" ||
           chunk.type === "tool-output-available" ||
           chunk.type === "tool-output-error" ||
           chunk.type === "tool-output-denied"
         ) {
           pendingToolInputs.delete(chunk.toolCallId)
-        }
-        if (chunk.type === "source-url" && researchService) {
-          try {
-            researchService.recordDiscoveredSource({
-              url: chunk.url,
-              ...(chunk.title ? { title: chunk.title } : {}),
-              ...(latestSearchQuery ? { query: latestSearchQuery } : {}),
-            })
-          } catch {
-            // 供应商可能发出非 http(s) 来源或计划前的辅助来源；不让来源归一化失败中断模型流。
-          }
-        }
-        if (chunk.type === "tool-approval-request") {
-          const pending = pendingToolInputs.get(chunk.toolCallId)
-          if (pending?.toolName === "write-workspace-document") {
-            if (!workspace) throw new Error("Agent 变更提案缺少工作区。")
-            await requireAgentChangeService().register({
-              approvalId: chunk.approvalId,
-              taskId: input.taskId,
-              requestId: input.requestId,
-              toolCallId: chunk.toolCallId,
-              providerId: input.providerId,
-              modelId: input.modelId,
-              rootPath: workspace.rootPath,
-              change: pending.input,
-            })
-          }
         }
         sequence += 1
         const streamEvent: AiChatStreamEvent = {
@@ -1027,8 +925,10 @@ function registerIpcHandlers() {
         })
         if (!event.sender.isDestroyed()) event.sender.send(IPC_CHANNELS.aiChatEvent, streamEvent)
       }
+      const emit = async (incomingChunk: AiChatStreamChunk) => {
+        for (const chunk of eventLedger.accept(incomingChunk)) await persistChunk(chunk)
+      }
 
-      const activeResearchContext = writingResearchContext ?? continuedResearchContext
       const chunkCoalescer = new AiChatChunkCoalescer(emit)
       void streamAiTask(runtimeInput, workspace, {
         abortSignal: abortController.signal,
@@ -1040,9 +940,8 @@ function registerIpcHandlers() {
         onRunMetrics: (metrics) => {
           runMetrics = metrics
         },
-        ...(activeResearchContext ? { researchContext: activeResearchContext } : {}),
-        ...(researchService ? { researchTools: researchService satisfies ResearchAgentTools } : {}),
         ...(loadedSkill ? { skill: loadedSkill } : {}),
+        ...(webTools ? { webTools } : {}),
       })
         .catch(async (error) => {
           await chunkCoalescer.flush()

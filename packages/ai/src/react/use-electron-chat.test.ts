@@ -1,8 +1,8 @@
 /**
  * [INPUT]: 合成 Electron IPC 正文/工具增量事件与 AI SDK React Chat 状态机
- * [OUTPUT]: Transport 按连续序号消费与恢复 reasoning、正文、引申问题、工具和失败 Part，覆盖重复/乱序/缺口、断开/取消和草稿跳过恢复的回归验证
+ * [OUTPUT]: Transport 按连续序号消费与恢复 reasoning、正文、引申问题、工具和失败 Part，覆盖副作用工具结果续跑、重复/乱序/缺口、断开/取消和草稿跳过恢复的回归验证
  * [POS]: use-electron-chat Transport 的流式集成测试
- * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
+ * [DOC]: docs/architecture/agent-run-reliability.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -145,6 +145,85 @@ describe("ElectronChatTransport", () => {
           parts: expect.arrayContaining([
             expect.objectContaining({ type: "tool-web_search", providerExecuted: true }),
           ]),
+        },
+      ],
+    })
+    await stream.cancel()
+  })
+
+  it("正常完成后重新生成也复用可能已提交的写入结果", async () => {
+    let request: AiChatStartInput | undefined
+    const bridge: ElectronChatBridge = {
+      cancelAiChat: vi.fn(),
+      onAiChatEvent: () => () => {},
+      resumeAiChat: async () => ({ ok: true, run: null }),
+      startAiChat: async (input) => {
+        request = input
+        return { ok: true }
+      },
+    }
+    const completedMessage = {
+      id: "assistant-write-complete",
+      role: "assistant" as const,
+      parts: [
+        { type: "text" as const, text: "已完成" },
+        {
+          type: "tool-write" as const,
+          toolCallId: "write-1",
+          state: "output-available" as const,
+          input: { path: "draft.md" },
+          output: { status: "saved", path: "draft.md" },
+        },
+      ],
+    }
+
+    expect(completedToolContinuationMessage(completedMessage)).toMatchObject({
+      id: "assistant-write-complete",
+      parts: [{ type: "tool-write", state: "output-available" }],
+    })
+    expect(
+      completedToolContinuationMessage({
+        ...completedMessage,
+        parts: [
+          {
+            type: "tool-read" as const,
+            toolCallId: "read-1",
+            state: "output-available" as const,
+            input: { path: "draft.md" },
+            output: { content: "正文" },
+          },
+        ],
+      }),
+    ).toBeNull()
+
+    const transport = new ElectronChatTransport(() => ({
+      bridge,
+      chatId: "chat-write-regeneration",
+      configId: "deepseek",
+      mode: "agent",
+      skillId: null,
+      providerId: "deepseek",
+      modelId: "deepseek-v4-flash",
+    }))
+    transport.stageRegenerationMessage(completedMessage)
+    const stream = await transport.sendMessages({
+      chatId: "chat-write-regeneration",
+      messageId: completedMessage.id,
+      messages: [{ id: "user-write", role: "user", parts: [{ type: "text", text: "写文档" }] }],
+      trigger: "regenerate-message",
+      abortSignal: undefined,
+    })
+
+    await vi.waitFor(() => expect(request).toBeDefined())
+    expect(request).toMatchObject({
+      continueFromMessageId: completedMessage.id,
+      regenerateMessageId: completedMessage.id,
+      messages: [
+        { id: "user-write", role: "user" },
+        {
+          id: completedMessage.id,
+          role: "assistant",
+          parts: [{ type: "tool-write", state: "output-available" }],
         },
       ],
     })

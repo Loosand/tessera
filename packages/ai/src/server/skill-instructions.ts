@@ -26,7 +26,7 @@ export async function buildTaskSkillInstructions(
   if (!skill) return undefined
 
   return `当前任务已由用户显式选择${isUserSkill ? "用户" : "内置"} Skill「${skill.displayName}」（$${skill.name}）。
-Skill 只扩展完成任务的方法，不授予新工具、文件、网络或写入权限；所有操作仍受当前工具可用性、工作区授权和人工审批约束。
+Skill 只扩展完成任务的方法，不授予新工具、文件、网络或写入权限；所有操作仍受当前工具可用性、工作区授权和执行器边界约束。
 
 <skill name="${skill.name}">
 ${skill.instructions}

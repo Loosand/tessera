@@ -1,8 +1,8 @@
 /**
- * [INPUT]: 当前任务运行状态、可选的本轮单调时钟区间、是否存在可展开过程与现有结构化过程 UI
- * [OUTPUT]: 以像素网格与文字 shimmer 表达运行态、完成后默认折叠的“已工作”统一过程区块
+ * [INPUT]: 当前任务运行状态、事实活动标签、已收口动作数、可选的本轮单调时钟区间、是否存在可展开过程与现有结构化过程 UI
+ * [OUTPUT]: 不读取 reasoning 正文的当前 Progress、像素网格与完成后默认折叠的统一过程区块
  * [POS]: ChatMessage 使用的整轮工作过程反馈模式
- * [DOC]: design.md、docs/architecture/ai-observability.md
+ * [DOC]: design.md、docs/architecture/agent-product-feedback-layer.md、docs/architecture/ai-observability.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -21,6 +21,8 @@ export type TaskRunTiming = Readonly<{
 }>
 
 type TaskWorkTraceProps = Readonly<{
+  actionCount?: number
+  activityLabel?: string | undefined
   children: ReactNode
   hasDetails: boolean
   running: boolean
@@ -54,7 +56,14 @@ function useElapsed(timing: TaskRunTiming | null, active: boolean) {
   return Math.max(0, (completedAt ?? now) - startedAt)
 }
 
-export function TaskWorkTrace({ children, hasDetails, running, timing }: TaskWorkTraceProps) {
+export function TaskWorkTrace({
+  actionCount = 0,
+  activityLabel,
+  children,
+  hasDetails,
+  running,
+  timing,
+}: TaskWorkTraceProps) {
   const [expanded, setExpanded] = useState(running && hasDetails)
   const wasRunningRef = useRef(running)
   const elapsed = useElapsed(timing, running)
@@ -65,7 +74,10 @@ export function TaskWorkTrace({ children, hasDetails, running, timing }: TaskWor
     wasRunningRef.current = running
   }, [hasDetails, running])
 
-  const label = timing ? `已工作 ${formatElapsed(elapsed)}` : "工作过程"
+  const elapsedLabel = timing ? ` · ${formatElapsed(elapsed)}` : ""
+  const label = running
+    ? `${activityLabel ?? "正在工作"}${elapsedLabel}`
+    : `${actionCount > 0 ? `已完成 ${actionCount} 个动作` : "已完成工作"}${elapsedLabel}`
   const header = (
     <>
       <LoadingStateGrid active={running} />

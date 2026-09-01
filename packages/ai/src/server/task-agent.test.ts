@@ -2,7 +2,7 @@
  * [INPUT]: 含内置/用户 Skill 的类型化 Task Agent call options 与会话/工作区/MCP 工具分组
  * [OUTPUT]: AI SDK 动态配置 Schema、用户 Skill ID 守卫、逐轮工具收窄和原生生命周期指标归一化的回归验证
  * [POS]: 统一 ToolLoopAgent 配置工厂的纯逻辑单元测试
- * [DOC]: docs/architecture/unified-creation-agent.md、docs/architecture/ai-observability.md
+ * [DOC]: docs/architecture/agent-simplification-roadmap.md、docs/architecture/ai-observability.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -19,8 +19,6 @@ import {
   activeTaskAgentTools,
   createTaskAgent,
   createTaskToolCallRepair,
-  researchRunShouldStopAfterStep,
-  researchStepPolicy,
   taskAgentCallOptionsSchema,
 } from "./task-agent"
 
@@ -98,134 +96,6 @@ describe("统一 Task Agent 动态配置", () => {
     expect(activeTaskAgentTools(toolNames, "workspace-write", groups)).toEqual(toolNames)
   })
 
-  it("显式研究在计划前只允许计划或核心消歧，并强制工具调用", () => {
-    expect(
-      researchStepPolicy({
-        activeTools: ["web_search", "request-user-input", "publish-research-plan", "read-web-source"],
-        maxSteps: 10,
-        progress: {
-          phase: "preparing",
-          planPublished: false,
-          outcome: null,
-          questionCounts: { pending: 0, covered: 0, partial: 0, uncovered: 0 },
-          sourceCounts: { discovered: 0, shortlisted: 0, reading: 0, read: 0, unusable: 0 },
-          evidenceCount: 0,
-          recommendationCount: 0,
-        },
-        stepNumber: 0,
-      }),
-    ).toEqual({
-      activeTools: ["request-user-input", "publish-research-plan"],
-      mode: "plan",
-      toolChoice: "required",
-    })
-  })
-
-  it("研究接近应急循环保险丝时只允许完成检查，通过后释放最终文本步骤", () => {
-    const progress = {
-      phase: "verifying" as const,
-      planPublished: true,
-      outcome: null,
-      questionCounts: { pending: 2, covered: 1, partial: 0, uncovered: 0 },
-      sourceCounts: { discovered: 3, shortlisted: 0, reading: 0, read: 2, unusable: 1 },
-      evidenceCount: 2,
-      recommendationCount: 0,
-    }
-    expect(
-      researchStepPolicy({
-        activeTools: ["web_search", "read-web-source", "finalize-research"],
-        maxSteps: 10,
-        progress,
-        stepNumber: 8,
-      }),
-    ).toEqual({ activeTools: ["finalize-research"], mode: "finalize-partial", toolChoice: "required" })
-    expect(
-      researchStepPolicy({
-        activeTools: ["finalize-research"],
-        maxSteps: 10,
-        progress: { ...progress, phase: "completed", outcome: "partial" },
-        stepNumber: 9,
-      }),
-    ).toEqual({ activeTools: [], mode: "final-answer", toolChoice: "none" })
-  })
-
-  it("深读后优先登记证据，同时保留重新深读和部分完成的逃生路径", () => {
-    expect(
-      researchStepPolicy({
-        activeTools: ["web_search", "read-web-source", "record-research-evidence", "finalize-research"],
-        maxSteps: 8,
-        progress: {
-          phase: "reading",
-          planPublished: true,
-          outcome: null,
-          questionCounts: { pending: 4, covered: 0, partial: 0, uncovered: 0 },
-          sourceCounts: { discovered: 4, shortlisted: 0, reading: 0, read: 2, unusable: 1 },
-          evidenceCount: 0,
-          recommendationCount: 0,
-        },
-        stepNumber: 3,
-      }),
-    ).toEqual({
-      activeTools: ["read-web-source", "record-research-evidence", "finalize-research"],
-      mode: "evidence",
-      toolChoice: "required",
-    })
-    expect(
-      researchStepPolicy({
-        activeTools: ["web_search", "read-web-source", "record-research-evidence", "finalize-research"],
-        maxSteps: 8,
-        progress: {
-          phase: "reading",
-          planPublished: true,
-          outcome: null,
-          questionCounts: { pending: 4, covered: 0, partial: 0, uncovered: 0 },
-          sourceCounts: { discovered: 4, shortlisted: 0, reading: 0, read: 2, unusable: 1 },
-          evidenceCount: 0,
-          recommendationCount: 0,
-        },
-        stepNumber: 6,
-      }),
-    ).toEqual({
-      activeTools: ["finalize-research"],
-      mode: "finalize-partial",
-      toolChoice: "required",
-    })
-    expect(researchRunShouldStopAfterStep({ finalAnswerStarted: false, maxSteps: 8, stepCount: 8 })).toBe(
-      false,
-    )
-    expect(researchRunShouldStopAfterStep({ finalAnswerStarted: true, maxSteps: 8, stepCount: 9 })).toBe(true)
-  })
-
-  it("完成检查满足证据门槛后先推荐来源，再冻结研究结果", () => {
-    const progress = {
-      phase: "synthesizing" as const,
-      planPublished: true,
-      outcome: null,
-      questionCounts: { pending: 2, covered: 0, partial: 0, uncovered: 0 },
-      sourceCounts: { discovered: 1, shortlisted: 0, reading: 0, read: 2, unusable: 0 },
-      evidenceCount: 4,
-      recommendationCount: 0,
-    }
-    const activeTools = ["web_search", "recommend-research-sources", "finalize-research"]
-    expect(researchStepPolicy({ activeTools, maxSteps: 32, progress, stepNumber: 8 })).toEqual({
-      activeTools: ["recommend-research-sources"],
-      mode: "curation",
-      toolChoice: "required",
-    })
-    expect(
-      researchStepPolicy({
-        activeTools,
-        maxSteps: 32,
-        progress: { ...progress, recommendationCount: 2 },
-        stepNumber: 9,
-      }),
-    ).toEqual({
-      activeTools: ["finalize-research"],
-      mode: "finalize",
-      toolChoice: "required",
-    })
-  })
-
   it("把端点专属 provider options 与本轮推理强度一起传给模型", async () => {
     const metricSnapshots: TaskAgentRunMetrics[] = []
     const model = new MockLanguageModelV4({
@@ -290,14 +160,14 @@ describe("统一 Task Agent 动态配置", () => {
     expect(metrics?.toolDurationMs).toBe(0)
   })
 
-  it("用单工具短调用修复被截断的研究工具参数", async () => {
+  it("用单工具短调用修复被截断的工具参数", async () => {
     const model = new MockLanguageModelV4({
       doGenerate: {
         content: [
           {
             type: "tool-call",
             toolCallId: "repair-call",
-            toolName: "record-research-evidence",
+            toolName: "write-note",
             input: '{"claim":"已修复"}',
           },
         ],
@@ -317,31 +187,31 @@ describe("统一 Task Agent 动态配置", () => {
     const repaired = await repair({
       error: new InvalidToolInputError({
         toolInput: '{"claim":',
-        toolName: "record-research-evidence",
+        toolName: "write-note",
         cause: new Error("JSON 被截断"),
       }),
-      instructions: "只登记已读来源证据。",
-      system: "只登记已读来源证据。",
-      messages: [{ role: "user", content: "登记证据" }],
+      instructions: "只修复当前工具输入。",
+      system: "只修复当前工具输入。",
+      messages: [{ role: "user", content: "写入笔记" }],
       toolCall: {
         type: "tool-call",
         toolCallId: "broken-call",
-        toolName: "record-research-evidence",
+        toolName: "write-note",
         input: '{"claim":',
       },
-      tools: { "record-research-evidence": evidenceTool },
+      tools: { "write-note": evidenceTool },
       inputSchema: async () => ({ type: "object" }),
     })
 
     expect(repaired).toMatchObject({
       toolCallId: "broken-call",
-      toolName: "record-research-evidence",
+      toolName: "write-note",
       input: '{"claim":"已修复"}',
     })
     expect(model.doGenerateCalls[0]).toMatchObject({
       maxOutputTokens: 4_096,
       reasoning: "none",
-      toolChoice: { type: "tool", toolName: "record-research-evidence" },
+      toolChoice: { type: "tool", toolName: "write-note" },
     })
   })
 })

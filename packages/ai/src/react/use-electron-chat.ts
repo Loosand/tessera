@@ -1,8 +1,8 @@
 /**
  * [INPUT]: Electron 窄桥、任务是否已持久化、内部任务执行作用域/创作方式、显式当前文档、模型选择、版本化历史消息与 AI SDK React 状态机
- * [OUTPUT]: 不传递能力开关、只为已持久化任务恢复且支持断开重连的 ElectronChatTransport、显式重新生成到研究续跑 provenance 与已完成工具结果续跑的映射、重复过滤/乱序缓冲/缺口失败、取消流安全收口、带 requestId 的版本化消息内引申问题/运行失败、基于 AI SDK 标准 Tool Part 守卫的等待输入识别、完整 UIMessage 往返、问答/审批后自动续轮与类型化 IPC 增量消费
+ * [OUTPUT]: 不传递能力开关、只为已持久化任务恢复且支持断开重连的 ElectronChatTransport、失败或副作用回复重生成的已完成 Tool Part 续跑、重复过滤/乱序缓冲/缺口失败、取消流安全收口、带 requestId 的版本化消息内引申问题/运行失败、完整 UIMessage 往返、问答/审批后自动续轮与类型化 IPC 增量消费
  * [POS]: @tessera/ai/react 中连接桌面渲染层与主进程 Chat/Agent 运行时的 Transport
- * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
+ * [DOC]: docs/architecture/agent-run-reliability.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -237,11 +237,36 @@ function isCompletedTaskToolPart(part: TaskMessage["parts"][number]): part is Ta
   return toolPart.state === "output-available" && toolPart.preliminary !== true
 }
 
-/** 只保留失败回复中已经完成的工具调用，供下一次模型调用从工具结果之后继续。 */
+const READ_ONLY_TOOL_NAMES = new Set([
+  "read",
+  "list-workspace-files",
+  "search-workspace-text",
+  "read-web-source",
+  "web_search",
+  "read-workspace-file",
+  "read-current-document",
+  "list-projects",
+  "list-task-artifacts",
+  "inspect-project",
+  "request-user-input",
+])
+
+function taskToolPartName(part: TaskToolMessagePart) {
+  return part.type === "dynamic-tool" ? part.toolName : part.type.slice("tool-".length)
+}
+
+function mayHaveCommittedSideEffect(part: TaskMessage["parts"][number]) {
+  if (!isCompletedTaskToolPart(part)) return false
+  const toolName = taskToolPartName(part)
+  return toolName === undefined || !READ_ONLY_TOOL_NAMES.has(toolName)
+}
+
+/** 只保留已完成的工具调用，供失败重试或副作用回复重生成从工具结果之后继续。 */
 export function completedToolContinuationMessage(message: TaskMessage | undefined): TaskMessage | null {
   if (!message || message.role !== "assistant") return null
   const failure = message.parts.find((part) => part.type === "data-task-error")
-  if (failure?.type !== "data-task-error" || !failure.data.retryable) return null
+  const isFailureContinuation = failure?.type === "data-task-error" && failure.data.retryable
+  if (!isFailureContinuation && !message.parts.some(mayHaveCommittedSideEffect)) return null
   const parts = message.parts.filter(
     (part): part is TaskMessage["parts"][number] =>
       part.type === "step-start" || part.type === "data-task-error" || isCompletedTaskToolPart(part),

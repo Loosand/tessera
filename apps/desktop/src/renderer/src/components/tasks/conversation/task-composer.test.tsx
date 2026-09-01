@@ -114,7 +114,8 @@ describe("任务输入框密度", () => {
   })
 
   it("把上下文与权限范围收进图标浮层，不在输入框中常驻显示长文", () => {
-    const scope = "范围：工作区「未归档」中的 Markdown；写入必须先看 Diff 并批准。"
+    const scope =
+      "范围：工作区「未归档」；文件工具只读写 Markdown，受控 Bash 可直接读写工作区且不逐次审批。Bash 无网络且不继承宿主 Secret。"
     const markup = renderComposer({ scope })
 
     expect(markup).toContain('aria-label="查看上下文与权限"')

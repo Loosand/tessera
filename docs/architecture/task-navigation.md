@@ -3,7 +3,7 @@
 > 代码源头：`packages/contracts/src/index.ts`、`packages/database/schema.ts`、
 > `packages/database/task-session-repository.ts`、`apps/desktop/src/main/task-service.ts`、
 > `apps/desktop/src/main/ai-chat-error.ts`、
-> `apps/desktop/src/main/read-only-agent-tools.ts`、`apps/desktop/src/main/workspace-file-service.ts`、
+> `apps/desktop/src/main/read-only-agent-tools.ts`、`apps/desktop/src/main/workspace-execution-environment.ts`、`apps/desktop/src/main/workspace-file-service.ts`、
 > `apps/desktop/src/main/mcp-service.ts`、`packages/skills/src/index.ts`、`packages/ai/src/server/agent-runtime.ts`、
 > `packages/ai/src/server/task-interaction-tools.ts`、`packages/ai/src/react/use-electron-chat.ts`、`apps/desktop/src/main/index.ts`、
 > `apps/desktop/src/renderer/src/hooks/use-tasks.ts`、`apps/desktop/src/renderer/src/components/app/app-shell.tsx`、
@@ -12,7 +12,7 @@
 > `apps/desktop/src/renderer/src/components/tasks/conversation/task-capability-picker.tsx`、
 > `apps/desktop/src/renderer/src/components/tasks/messages/chat-parts/`
 >
-> 状态：部分实现。不可删除默认空间、上次 Space 恢复、作用域任务导航、任务置顶/归档，以及无工作区与工作区任务共用的 AI SDK `ToolLoopAgent` 和类型化 call options / `prepareCall` 已实现；逐轮 Skill、保守自动意图、受信任 RunPolicy、动态资源、Artifact、内容项目工具、问题暂停/续跑、研究计划、研究状态续跑、回答后引申问题、本地消息赞踩、Markdown Diff、MCP 审批、运行恢复和消息历史已实现。Shell、通用步骤级 durable replay 与多窗口接管尚未实现。
+> 状态：部分实现。不可删除默认空间、上次 Space 恢复、作用域任务导航、任务置顶/归档，以及无工作区与工作区任务共用的 AI SDK `ToolLoopAgent` 和类型化 call options / `prepareCall` 已实现；逐轮 Skill、保守自动意图、受信任 RunPolicy、动态资源、Artifact、问题暂停/续跑、回答后引申问题、本地消息赞踩、事实 Progress、脱敏 Execution Context、历史 Diff 兼容、MCP 审批、运行恢复、工具唯一终态、确定性上下文压缩与 macOS 受控 Bash 已实现。新运行已退出内容项目/研究状态工具；运行中 steering/follow-up、通用步骤级 durable replay 与多窗口接管尚未实现。
 
 ## 地位
 
@@ -40,8 +40,8 @@
 - `agent` 必须绑定工作区；文件工作区打开流程和文档 AI 侧栏创建的草稿默认使用 Agent。renderer 显式提交预期工作区 ID，主进程与当前窗口会话重新核对；工作区根路径只留在主进程闭包内。
 - 内部 mode 由任务来源自动确定，任务首次保存后不可切换。旧任务继续保留原 mode，不做破坏性迁移。
 - 创作方式与内部 mode 正交：`null` 表示自动，`research` / `writing` 对应两份内置 Skill，`question-answering` 是不加载 Skill 的问答行为标记。四个快捷项集中在创作方式浮层，运行前后均可切换；进行中的 run 保持冻结策略，会话保存之后运行的默认值，运行记录保存本轮实际值。
-- 能力策略由创作方式与请求期模型事实自动派生：自动和写作优先使用可用的深度推理与原生联网，不支持时安全回落；研究必须同时具备深度推理与原生联网，否则阻止发送，并获得更高搜索额度与计划工具；问答固定关闭联网并使用供应商默认推理。工作区 Agent 把原生联网工具与受限工作区工具放入同一个工具循环。图片、视频等专用生成能力接入后使用独立工具或模型路由，不扩张为任务模式。
-- Skill 仍不授予权限。自动启用能力只注册当前模型/端点已经验证、且当前内部 mode 允许的工具；写作不能绕过 Markdown Diff 审批。
+- 能力策略由创作方式与请求期模型事实自动派生：自动和写作优先使用可用的深度推理与原生联网，不支持时安全回落；研究必须同时具备深度推理与原生联网，否则阻止发送，并获得更高搜索额度，但不再获得研究领域状态工具；问答固定关闭联网并使用供应商默认推理。工作区 Agent 把原生联网工具与受限工作区工具放入同一个工具循环。图片、视频等专用生成能力接入后使用独立工具或模型路由，不扩张为任务模式。
+- Skill 仍不授予权限。自动启用能力只注册当前模型/端点已经验证、且当前内部 mode 允许的工具；文件修改/Bash 必须经过主进程的路径、版本或 ExecutionEnvironment 边界。
 - Agent 仅允许使用已声明支持工具调用的模型；缺少工作区或工具能力时必须阻止发送并明确说明，禁止降级到普通 Chat。
 - 恢复 Agent 任务或开始运行前，主进程重新核对任务绑定与窗口当前工作区。
 
@@ -50,7 +50,7 @@
 ## 持久化
 
 `task_sessions` 保存兼容 mode、下一轮可选 `skill_id` 默认值、可选工作区、标题、状态、等待输入标记、`pinned_at`、`archived_at` 与时间；`task_messages` 按序保存应用自有的版本化消息 JSON。由于已发布迁移中的旧状态列带固定 `CHECK`，`waiting-input` 在物理层兼容编码为 `status = running` 加 `waiting_for_input = 1`，仓储读写时统一映射为公开状态；`0018-task-placement` 只追加置顶/归档列及作用域索引，不重写用户已有表。
-消息契约保留正文、reasoning、来源、附件、工具状态、审批状态、版本化 `data-follow-up-questions`，以及助手消息使用的供应商、模型、本轮 `requestId` 和可选本地反馈。正常完成回答后的 2–4 个引申问题随助手消息持久化，刷新或重启后仍恢复为“继续探索”；用户点击只把完整问题带入输入框，不自动提交。赞踩以 `positive` / `negative` 和更新时间写入对应助手消息 metadata，支持改投与撤销；它不作为 prompt 内容发送，不上传供应商，也不宣称参与训练。完成消息可通过轻量图标按需读取归属校验后的脱敏用量/运行审计，其中区分总、输入、输出、推理与缓存读写 Token，步骤/工具数、分项耗时和不含正文的 ContextManifest 预算估算；同一份记录也为历史消息的“已工作”区块恢复准确耗时，模型、Skill、资源、工具和结束/失败原因不会以常驻诊断文字挤占对话正文。当前 Markdown 草稿以 `text/markdown` Data URL 作为可见用户附件持久化，单份限制 256 KiB；服务端在模型转换前解码并包入明确的“材料而非系统指令”边界，避免依赖供应商对文本文件的兼容性。图片继续保留原文件 Part。
+消息契约保留正文、reasoning、来源、附件、工具状态、审批状态、版本化 `data-follow-up-questions`，以及助手消息使用的供应商、模型、本轮 `requestId` 和可选本地反馈。正常完成回答后的 2–4 个引申问题随助手消息持久化，刷新或重启后仍恢复为“继续探索”；用户点击只把完整问题带入输入框，不自动提交。赞踩以 `positive` / `negative` 和更新时间写入对应助手消息 metadata，支持改投与撤销；它不作为 prompt 内容发送，不上传供应商，也不宣称参与训练。完成消息可通过轻量图标按需读取归属校验后的运行投影：Progress 从工具和终态事件显示当前活动、等待、完成动作数与终态，Execution Context 只归因实际模型、Skill、策略、工具和成功事件证明的安全文件/Web hostname/MCP，诊断区再显示 Token、ContextManifest、步骤/工具数、耗时与失败原因；三层均不读取 reasoning 正文、命令、完整 URL、工具输入输出或 Secret。同一份记录也为历史消息的工作过程恢复准确耗时，不以常驻诊断文字挤占对话正文。当前 Markdown 草稿以 `text/markdown` Data URL 作为可见用户附件持久化，单份限制 256 KiB；服务端在模型转换前解码并包入明确的“材料而非系统指令”边界，避免依赖供应商对文本文件的兼容性。图片继续保留原文件 Part。
 模型运行输入先由主进程将完整 `UIMessage` 持久化历史投影为可稳定重放的上下文，再由 AI SDK `validateUIMessages` / `convertToModelMessages` 校验和转换。旧助手轮次只重放可见正文，避免缺少供应商私有元数据的 reasoning、失败或未完成工具协议使后续请求持续 400；只有当前审批/自动续轮或显式失败续跑的已终止工具结果会进入模型输入。应用元数据不会自动变成模型正文，投影也不改写 SQLite 原始消息。
 主进程校验 IPC 请求中的本轮 Skill，但不再要求它等于会话默认值；当前 Skill 正文通过 AI SDK call options 注入 `instructions`，不伪装为用户消息，也不把未选中 Skill 放入模型上下文。renderer 不再发送联网/推理开关，主进程按持久化模型事实生成实际 RunPolicy；`0009-task-run-policy` 保留可查询兼容列，`0010-task-run-context` 保存完整策略与不含正文/绝对路径的资源摘要，旧 run 的新增字段保持未知而不伪造历史。
 
@@ -156,39 +156,36 @@ Space 落地页 / 侧栏最近任务
   -> 恢复到实时流，完成后持久化完整消息
 ```
 
-运行元数据和每个有序事件同时写入 SQLite。页面切换优先从主进程内存续接；应用意外退出后，启动恢复会把未结束运行标记为 `interrupted`，追加带稳定 code、phase 与 retryable 的可见错误事件并重放中断前进度，同时把非等待中的 task session 收口到对应终态。若最新运行已经结束、但 renderer 尚未来得及把对应 `requestId` 写入助手消息，恢复接口仍会重放这次终态运行；renderer 保存完整助手消息后，同一运行不再被识别为待恢复，避免重复注入。读取历史事件时只在返回快照中临时合并连续 delta 并重新生成连续序号，SQLite 原始审计序列不改写。启动、流式和恢复阶段的异常都先在 AI SDK 字符串化前分类，嵌套 RetryError 的稳定类别与安全 HTTP 状态进入 `data-task-error`，具名且文案安全的配置、内容库、用户 Skill、MCP 与工作区变更领域错误保留可操作提示，未知供应商载荷使用脱敏公开文案；初始化在 `task_run` 建立后失败时也先持久化同一失败事件。工具输入或执行失败继续使用 AI SDK 标准 Tool Part 状态，并额外写入可恢复的 `data-tool-error`（稳定 code、retryable、`toolCallId`、`toolName`）；消息 UI 不重复渲染第二张失败卡，诊断与审计仍可读取结构化 Part。
+运行元数据和每个有序事件同时写入 SQLite。页面切换优先从主进程内存续接；应用意外退出后，启动恢复会把未结束运行标记为 `interrupted`，追加带稳定 code、phase 与 retryable 的可见错误事件并重放中断前进度，同时把非等待中的 task session 收口到对应终态。若最新运行已经结束、但 renderer 尚未来得及把对应 `requestId` 写入助手消息，恢复接口仍会重放这次终态运行；renderer 保存完整助手消息后，同一运行不再被识别为待恢复，避免重复注入。读取历史事件时只在返回快照中临时合并连续 delta 并重新生成连续序号，SQLite 原始审计序列不改写。启动、流式和恢复阶段的异常都先在 AI SDK 字符串化前分类，嵌套 RetryError 的稳定类别、安全 HTTP 状态与最多 16,000 字符的供应商错误响应正文进入 `data-task-error`；正文只剔除 API Key / Authorization 凭据，并在按需 Run Inspector 中展示。具名且文案安全的配置、内容库、用户 Skill、MCP 与工作区变更领域错误保留可操作提示；请求正文、响应 Header、堆栈与工具载荷不进入 renderer。初始化在 `task_run` 建立后失败时也先持久化同一失败事件。工具输入或执行失败继续使用 AI SDK 标准 Tool Part 状态，并额外写入可恢复的 `data-tool-error`（稳定 code、retryable、`toolCallId`、`toolName`）；消息 UI 不重复渲染第二张失败卡，诊断与审计仍可读取结构化 Part。
 
 模型供应商的原始网络流和内存 `ToolLoopAgent` 不能跨进程继续，因此恢复不会自动重放写工具。消息级续跑先覆盖最常见
-断点：用户重试失败助手消息时，Transport 在 AI SDK 删除该消息前暂存非 preliminary 的成功 Tool Part；新 request 把
-它们补到输入末尾，主进程复核消息 ID、可重试失败和成功结果，再把 `continuedFromMessageId` 写入资源摘要。模型因此从
-已完成工具结果之后继续，未完成工具、写入和审批不会重放。研究方式在此基础上再提交 `regenerateMessageId`，主进程从
-持久化 metadata 解析旧 `requestId`，把 `resumedResearchRequestId` 写入资源摘要，并克隆计划、来源元数据、证据、推荐
-和覆盖状态；网页正文仍不复制。这仍不是自动步骤级 durable runtime，多窗口接管和无用户动作的后台 checkpoint 续跑
-尚未实现。
+断点：用户重试失败助手消息，或重新生成已包含写入/MCP/未知工具成功结果的回复时，Transport 在 AI SDK
+删除该消息前暂存非 preliminary 的已完成 Tool Part；新 request 只把这些结果补到输入末尾。主进程复核消息 ID、
+成功结果和失败/重生成来源，再把 `continuedFromMessageId` 写入资源摘要。模型因此从已完成工具结果之后继续，
+未完成工具与已提交副作用不会重放。这仍不是自动步骤级 durable runtime，多窗口接管和无用户动作的后台 checkpoint 续跑尚未实现。
 
 ## 工作区 Agent 运行时
 
-- AI SDK `ToolLoopAgent` 通过 `@tessera/agent-runtime` 的泛型 `AgentRuntime` 端口运行；主 Agent 获得共享客户端问题工具；只有当前请求明确涉及工作区/文档、显式携带 Markdown 材料，或确实承接上一轮工作区工具结果时，才组合四个只读 Markdown 工具、一个需要审批的写工具和一个只读研究子 Agent 工具。MCP 动态工具仍由主进程按配置注入，研究 Skill 额外获得无副作用的计划展示工具。根路径和 MCP 秘密不进入 IPC、renderer 或模型提示词，结构化交互工具也不扩大文件或网络权限。
-- 工具只遍历可见的 `.md` / `.markdown`，忽略隐藏目录、`.git`、`.tessera`、`node_modules` 和遍历时遇到的符号链接。
-- 每次直接读取都会重新执行相对路径、真实路径与扩展名校验；`../`、绝对路径、隐藏路径和指向工作区外部的符号链接均不可用。当前文档只作为相对路径提示传入，读取时执行相同校验。
-- 单文件读取上限为 256 KiB；文件列表最多返回 500 项、最多扫描 2,000 项；搜索最多扫描 8 MiB 并返回 100 个匹配，触顶时返回结构化 `truncated`、上限和跳过文件信息。
+- AI SDK `ToolLoopAgent` 通过 `@tessera/agent-runtime` 的泛型 `AgentRuntime` 端口运行；主 Agent 获得共享客户端问题工具；只有当前请求明确涉及工作区/文档、显式携带 Markdown 材料，或确实承接上一轮工作区工具结果时，才组合 `read/edit/write`，并在 macOS Seatbelt 探针通过时增加 `bash`。MCP 动态工具仍由主进程按配置注入，Research Skill 只描述搜索、深读与交叉核验方法，不获得研究状态工具。根路径和 MCP 秘密不进入 IPC、renderer 或模型提示词，结构化交互工具也不扩大文件或网络权限。
+- `read/edit/write` 只操作可见的 `.md` / `.markdown`；每次直接读取都会重新执行相对路径、真实路径与扩展名校验，`../`、绝对路径、隐藏路径和工作区外符号链接均不可用。当前文档只作为相对路径提示传入，读取时执行相同校验。
+- 直接文件工具的单文件上限为 256 KiB，单次 `read` 默认 400 行、最多 1,000 行并另受 50 KiB 结果预算；文件发现由受控 Bash 的 `ls/rg/find` 完成，不再注册独立列表/搜索模型工具。
+- Bash 按本轮 Tool scope 获得工作区只读或读写，清空宿主环境并拒绝网络和工作区外访问；默认 30 秒、最长 120 秒，每条输出流最多保留 65,536 字节。它只支持前台命令，平台探针失败时不注册，也不回退裸 Shell。
 - 普通问答/写作总运行护栏为 5 分钟，首块和块间静默窗口分别放宽到 2/3 分钟；显式研究不设置累计 Token 预算，并显式采用模型档案声明的原生最大输出，
   防止兼容 SDK 回落到 4096。研究按模型上下文窗口使用 32/48/64 步的异常循环保险丝并允许最长 30 分钟。保险丝只
   防止失控，不替代证据完成检查；渲染层停止操作复用现有中止信号。
 - 工具输入、资源相对路径、完成或失败状态通过版本化消息 Part 展示并持久化，不把冗长工具结果直接展开成消息正文。
 - 回答中的相对 Markdown 链接可跳转到文档和源码行；路径仍由主进程在真正读取时复核。
 - provider 的 reasoning ID 只保证步骤内有效，渲染层按消息内 Part 位置生成唯一 React key，避免多步骤流式追加时复用或复制旧思考节点。
-- `write-workspace-document` 使用 AI SDK `toolApproval`。工具 `inputSchema` 保持供应商兼容的顶层 `type: object`，并在运行时继续要求 update 携带读取时的版本与内容哈希；审批请求到达 renderer 前，主进程把路径、基准内容/版本、完整候选内容、模型与工具调用冻结到 SQLite；聊天内可切换渲染后文档和源码 Diff。
-- 批准后的新 turn 携带完整审批 Part；工作区变更服务只对账 `write-workspace-document` 的冻结提案，不消费内容库或 MCP 的标准审批；各领域工具在自己的审计边界内继续执行。工作区工具再次校验真实路径、内容哈希和磁盘版本并原子替换。拒绝不执行，冲突不覆盖，应用重启不会自动执行待审批写入。
-- `delegate-workspace-research` 按 AI SDK 子 Agent 模式运行独立只读上下文，只把摘要返回主 Agent；子 Agent 没有写工具或审批能力。
+- `edit` 接受同一原文上唯一、互不重叠的精确替换；`write create` 不覆盖，`edit/write update` 必须携带最近一次 `read` 的完整内容 hash。同文件队列内重新复核版本后才原子提交，普通文件操作不再请求 AI SDK approval。
+- 旧 `write-workspace-document` Tool Part 和 Diff 继续可见，但旧 proposal 只能对账为拒绝或失效失败，不能写盘；历史投影会按当前 active tool names 隔离旧工具。`delegate-workspace-research` 和 `read-current-document` 不再注册。
 - MCP 工具只来自显式信任且启用的服务器，并经过逐工具禁用清单；每个工具固定使用 AI SDK 标准人工审批，批准后的下一轮再次核对服务器与工具仍启用。MCP annotations 只提示风险，不能自动批准；秘密和输出限制由主进程边界处理，完整设计见 [MCP 服务器与 Agent 工具边界](mcp.md)。
-- 删除、重命名和 Shell 仍未注册；它们需要独立权限与配置面，不能借用 Markdown 写审批或 MCP 信任扩大能力。
+- 删除和重命名仍不是独立模型工具；Bash 的工作区读写级别不能从 MCP 信任或 Skill 声明扩大，完整边界见 [Bash ExecutionEnvironment](bash-execution-environment.md)。
 
 ## 后续
 
 - 在现有共用 `task-agent.ts` 与受信任 RunPolicy 上增加自动意图识别和规范化动态资源关联；任何扩展继续通过 AI SDK call options / `prepareCall` 收窄，不复制 Agent loop。
 - 以托管内容库 Inbox 作为当前实验实现 Artifact、项目创建和跨工作区文档移动，同时保持领域协议可替换，以便评估数据库与完全外部工作区方案。
 - 记录完成原因、token 用量和每轮耗时。
-- 为长会话增加上下文裁剪或摘要，但不改写持久化的用户原文。
+- 评估确定性 compaction 在真实长会话中的语义保真度；任何后续摘要仍不得改写持久化的用户原文或伪造工具效果。
 - 在已实现消息级工具结果续跑与研究语义续跑之外，为通用 Agent 增加桌面 durable 步骤检查点，在不重放已执行副作用的前提下自动后台续跑。
-- 把 MCP Resources / Prompts / OAuth、按任务绑定与运行策略快照接入现有权限网关；建设 Shell 独立审批面，默认保持关闭。
+- 把 MCP Resources / Prompts / OAuth、按任务绑定与运行策略快照接入现有权限网关；Windows/Linux/远端 Bash 只有在提供与 macOS 同等级的能力声明和真实隔离测试后才开放。

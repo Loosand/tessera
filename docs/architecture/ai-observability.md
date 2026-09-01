@@ -6,11 +6,13 @@
 > `apps/desktop/src/renderer/src/components/tasks/messages/run-inspection-popover.tsx`、
 > `apps/desktop/src/renderer/src/components/tasks/messages/chat-parts/reasoning-part.tsx`、
 > `apps/desktop/src/main/task-run-inspection.ts`、
+> `apps/desktop/src/main/agent-run-event-ledger.ts`、
 > `apps/desktop/src/main/ai-chat-chunk-coalescer.ts`、
-> `packages/ai/src/server/task-agent.ts`、`packages/ai/src/server/context-budget.ts`、`packages/ai/src/server/follow-up-questions.ts`、`packages/database/schema.ts`、
+> `packages/ai/src/server/task-agent.ts`、`packages/ai/src/server/context-budget.ts`、
+> `packages/ai/src/server/context-compaction.ts`、`packages/ai/src/server/follow-up-questions.ts`、`packages/database/schema.ts`、
 > `packages/database/task-run-repository.ts`、`packages/contracts/src/index.ts`
 >
-> 状态：部分实现。开发环境的 AI SDK 官方 DevTools、统一 Agent 观测标识、正式回答前统一工作过程反馈、版本化运行/工具错误、SQLite 脱敏运行汇总及消息级按需运行解释已实现；有限保留的生产诊断事件与历史列表仍在规划。
+> 状态：部分实现。开发环境的 AI SDK 官方 DevTools、统一 Agent 观测标识、正式回答前事实 Progress、版本化运行/工具错误、SQLite 数值运行汇总，以及消息级按需 Progress/Execution Context/诊断分层已实现；失败事件可附带有界且剔除凭据的供应商错误响应正文，有限保留的生产诊断历史列表仍在规划。
 
 ## 决策
 
@@ -21,9 +23,20 @@
 Viewer 按需启动，不阻塞 Tessera 首屏。设置页只在开发构建显示「开发者 → AI 运行日志」，点击后由窄 IPC 请求主进程启动官方本地 Viewer，并在系统浏览器打开 `http://localhost:4983`。渲染层不获得 Node.js、进程路径或日志文件读写权限。
 
 用户可解释性不依赖开发者 Viewer。每个助手回复在 metadata 中保存对应 `requestId`；完成态消息操作栏只显示一个
-“用量与运行信息”图标，打开后经 `task-run:read(taskId, requestId)` 按需读取脱敏投影。主进程先验证任务归属，再返回
-供应商/AI SDK 上报的总、输入、输出、推理与缓存读写 Token，步骤/工具数、首次输出/模型/工具/总耗时、实际模型、RunPolicy/Skill、资源摘要、按 `toolCallId` 去重的工具归因和结束/失败原因。每个模型步骤前还生成不含正文的 `ContextManifest`，按 instructions、会话、工具结果、工具定义和协议 framing 展示预计输入、安全预算、预留输出及观测步骤；这是本地确定性估算，不伪装成供应商计费值。已知模型在预计输入超过安全预算时于出站前终止，并给出新建任务、缩小材料或切换模型的恢复建议。未上报数值显示为“未返回”，不伪造为 0；缓存和推理可能已包含在供应商的其他口径中，界面不重复求和。运行审计不返回 prompt、
-正文、完整工具输入输出、绝对路径或密钥。初始化阶段在 `task_run` 建立后失败时也先追加类型化错误事件，再结束运行，
+“运行详情”图标，打开后经 `task-run:read(taskId, requestId)` 按需读取脱敏投影。顶部 Progress 以持久化工具与终态事件
+显示 working/waiting/final、当前工具和动作数，不读取 reasoning 正文；Execution Context 展示实际模型、Skill、工具，
+以及成功事件能够证明的安全相对文件、Web hostname 和 MCP 工具。文件/Web/MCP 引用分别有界为 32/16/16，query、
+完整 URL、命令、工具输入输出和 Secret 不进入投影。输入资源与实际成功使用分开显示。
+
+诊断层返回供应商/AI SDK 上报的总、输入、输出、推理与缓存读写 Token，步骤/工具数、首次输出/模型/工具/总耗时、
+RunPolicy、资源摘要、按 `toolCallId` 去重的工具归因和结束/失败原因。每个模型步骤前还生成不含正文的
+`ContextManifest`，按 instructions、会话、工具结果、工具定义和协议 framing 展示预计输入、安全预算、预留输出及观测步骤；
+这是本地确定性估算，不伪装成供应商计费值。已知模型在预计输入超过安全预算时于出站前终止，并给出新建任务、缩小材料
+或切换模型的恢复建议。未上报数值显示为“未返回”，不伪造为 0；缓存和推理可能已包含在供应商的其他口径中，界面不重复
+求和。失败时诊断层还可展示供应商返回的原始错误响应正文，最多 16,000 字符，只剔除 API Key / Authorization 凭据；
+运行详情不返回 prompt、请求正文、响应 Header、堆栈、完整工具输入输出、绝对路径或密钥。P3 后同一投影还展示 model turn、等待中工具数、
+run terminal 与 compaction 的省略/保留消息数；这些数据只来自持久化事件和脱敏 ContextManifest。初始化阶段在
+`task_run` 建立后失败时也先追加类型化错误事件，再结束运行，
 因此不会出现“前端看见失败但运行历史没有原因”的断层。
 
 公开流事件用于恢复和 UI，而不是 Token 级追踪。主进程在分配 `sequence`、写 SQLite 和广播 IPC 前，把同一 ID 的连续
@@ -42,7 +55,7 @@ ToolLoopAgent / generateText / streamText
   |    -> 设置页窄 IPC 只负责“启动并打开”
   +-> onStepEnd / onEnd
        -> 主进程关联 requestId
-       -> SQLite task_runs 脱敏运行汇总
+       -> SQLite task_runs 数值运行汇总
        -> task-run:read 只读投影
        -> 消息操作栏按需 popover
   +-> UIMessageChunk delta 合并
@@ -58,11 +71,12 @@ ToolLoopAgent / generateText / streamText
 - **已实现**：IPC 只返回成功或脱敏后的启动错误，不把 API Key、Node 能力或任意日志路径暴露给 renderer。
 - **已实现**：`task_runs` 只保存模型/策略、资源摘要和数值型运行汇总，不保存 prompt、正文、完整工具输入输出或密钥；缓存读/写 Token 分列，避免把供应商缓存命中误判为界面模型目录缓存。
 - **已实现**：`ContextManifest` 只持久化分项 Token 估算、模型上限与状态，不保存对应正文；每个 ToolLoop step 重算，工具结果增长会在下一次模型调用前进入预算检查。
+- **已实现**：超预算历史只在模型投影中收缩；保留最新用户 turn，不摘要工具正文或推断副作用，并在 ContextManifest 记录压缩前后估算、省略/保留消息数和摘要长度。
+- **已实现**：入库前事件账本按 `toolCallId` 强制单一工具终态，对截断/取消悬空调用产生稳定失败，并丢弃 run terminal 之后的迟到 chunk。
 - **已实现**：正常正文后的引申问题短调用使用同一模型且无工具权限；实际 Token、缓存、步骤和模型耗时并入同一
   run，短调用失败不覆盖主回答的完成状态，也不伪造零用量。
-- **已实现**：产品运行解释按 task/request 双重归属读取，UI 仅在用户点击图标后加载；损坏历史事件降级为安全的公开失败，不把原始 JSON 或内部异常交给 renderer。
-- **已实现**：供应商流错误在 AI SDK 压成公开字符串前遍历有限深度的 `cause/error/errors` 链，保留稳定错误码与可安全
-  公开的 HTTP 状态；响应体、请求 Header、API Key 和任意供应商原始载荷仍不进入消息。重试复用成功 Tool Part 时，
+- **已实现**：产品运行解释按 task/request 双重归属读取，UI 仅在用户点击图标后加载；损坏历史事件降级为安全的公开失败，不把无法通过契约守卫的 JSON 或内部异常交给 renderer。
+- **已实现**：供应商流错误在 AI SDK 压成公开字符串前遍历有限深度的 `cause/error/errors` 链，保留稳定错误码、HTTP 状态与第一个原始错误响应正文；正文最多 16,000 字符，只剔除 API Key / Authorization 凭据并作为版本化失败事件进入按需 Run Inspector。请求正文、响应 Header、堆栈和工具载荷仍不进入消息。重试复用成功 Tool Part 时，
   新 run 的资源摘要记录 `continuedFromMessageId`，可以区分“从工具结果继续”和“从头重新生成”。
 - **已实现**：流式正文、推理和工具参数 delta 在产品事件层按字符/延迟双阈值顺序安全合并；结束或异常前强制刷新，不用降低审计完整性换取 UI 性能。
 - **已实现**：最新运行即使已经进入终态，只要对应助手消息尚未保存，也会从事件账本恢复一次；消息关联该
@@ -74,10 +88,10 @@ ToolLoopAgent / generateText / streamText
 
 模型支持推理强度，不等于供应商一定返回可展示的推理摘要。部分 Responses 兼容端点只发送 `reasoning-start` / `reasoning-end`，没有任何 `reasoning-delta`。这类生命周期事件仍可用于 SDK 内部步骤和日志诊断，但不能生成真实界面内容。
 
-- **已实现**：以最后一次信息性自动执行划分正式回答；此前 reasoning、过程说明、联网搜索、研究计划与自动工具统一进入“已工作 x”区块。运行中展开，进入终态后折叠，并从脱敏运行记录恢复历史耗时。
+- **已实现**：以最后一次信息性自动执行划分正式回答；此前 reasoning、过程说明、联网搜索、历史研究计划与自动工具统一进入工作过程区块。运行中用公开 Part 状态显示当前工具活动，进入终态后显示已收口动作数与耗时并折叠。
 - **已实现**：请求用户回答、人工审批、拒绝、失败、正式产物与最终正文保留在统一过程之外；专用活动继续使用结构化 UI，通用自动工具只显示动作、目标和状态，不呈现原始输入 JSON。
 - **已实现**：只有 reasoning 文本非空时才出现可展开正文；空 reasoning 生命周期只参与整轮工作状态，不因每次搜索前后刷出重复节点。
-- **已实现**：运行中的“已工作 x”使用 3×3 像素网格和文字 shimmer 表达活动状态，结束后动效静止；展开过程不绘制左侧时间线，消息流末尾不再重复常驻“正在处理 x”。
+- **已实现**：运行中的事实 Progress 使用 3×3 像素网格和文字 shimmer 表达活动状态，结束后动效静止；展开过程不绘制左侧时间线，消息流末尾不再重复常驻状态。
 - **已实现**：工具活动由真实 Tool Part 表达，不根据 reasoning 文本或空生命周期伪造搜索、读取或执行记录。
 - **已实现**：provider-executed 联网工具按 AI SDK 标准 `output.action` / `output.sources` 恢复查询与打开页面；不能因工具 `input` 为空而只显示次数、不显示过程。
 - **约束**：阶段状态不等于推理正文；不得用占位文案冒充模型推理，不得把内部链式思维补写成可见内容。
@@ -90,7 +104,7 @@ ToolLoopAgent / generateText / streamText
 
 ## 与任务持久化的关系
 
-DevTools 不是任务事实源。`task_sessions` / `task_messages` 仍负责用户可见会话，`task_runs` 与主进程合并后的事件检查点负责运行恢复、产品状态和脱敏运行汇总；`.devtools/generations.json` 仅用于开发诊断，可以随时清空。当前产品内的单次运行解释只读取受控的 SQLite 汇总与领域审计，不能直接读取或迁移 DevTools 的明文调试数据库。
+DevTools 不是任务事实源。`task_sessions` / `task_messages` 仍负责用户可见会话，`task_runs` 保存数值运行汇总，主进程合并后的 `task_run_events` 检查点负责运行恢复、产品状态和有界供应商错误正文；`.devtools/generations.json` 仅用于开发诊断，可以随时清空。当前产品内的单次运行解释只读取受控的 SQLite 汇总与领域审计，不能直接读取或迁移 DevTools 的明文调试数据库。
 
 ## 后续验收
 

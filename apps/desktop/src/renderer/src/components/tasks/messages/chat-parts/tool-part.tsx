@@ -46,6 +46,10 @@ const stateLabels: Record<ToolMessagePart["state"], string> = {
 }
 
 const toolLabels: Record<string, string> = {
+  read: "读取文件",
+  edit: "精确编辑文件",
+  write: "写入文件",
+  bash: "运行工作区命令",
   "list-workspace-files": "列出工作区文件",
   "read-workspace-file": "读取工作区文件",
   "search-workspace-text": "搜索工作区文本",
@@ -63,6 +67,16 @@ const toolLabels: Record<string, string> = {
   "recommend-research-sources": "推荐研究来源",
   "finalize-research": "检查研究覆盖",
   web_search: "联网搜索",
+}
+
+export function toolDisplayLabel(toolName: string) {
+  const label = toolLabels[toolName]
+  if (label) return label
+  if (toolName.startsWith("mcp__")) {
+    const safeName = toolName.split("__")[2]?.replaceAll("_", " ").trim()
+    return safeName ? `MCP · ${safeName}` : "MCP 工具"
+  }
+  return toolName
 }
 
 const maxToolInputLength = 1_600
@@ -189,7 +203,7 @@ export function ToolPart({
               details,
               icon: <Icon icon={TaskAdd01Icon} size={14} />,
               id: part.toolCallId,
-              label: part.title || toolLabels[toolName] || toolName,
+              label: part.title || toolDisplayLabel(toolName),
               meta: resource || undefined,
               status: part.state,
               statusLabel: stateLabel(part),

@@ -1,8 +1,8 @@
 /**
- * [INPUT]: 运行状态、Skill、Token/耗时数值、上下文预算与工具摘要
- * [OUTPUT]: 对话内用量审计的稳定中文标签、精确数值格式、预算状态与紧凑工具归因测试
+ * [INPUT]: 运行 Progress、Skill、Token/耗时数值、上下文预算与工具摘要
+ * [OUTPUT]: 对话内进度/执行上下文/诊断的稳定中文标签、精确数值格式、预算状态与紧凑工具归因测试
  * [POS]: run-inspection-popover 的纯展示回归测试
- * [DOC]: docs/architecture/ai-observability.md、docs/architecture/task-navigation.md
+ * [DOC]: docs/architecture/agent-product-feedback-layer.md、docs/architecture/ai-observability.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -14,6 +14,8 @@ import { describe, expect, it } from "vitest"
 import {
   taskRunContextStatusLabel,
   taskRunMetricLabel,
+  taskRunProgressLabel,
+  taskRunProgressPhaseLabel,
   taskRunSkillLabel,
   taskRunStatusLabel,
   taskRunToolsLabel,
@@ -35,7 +37,7 @@ describe("运行解释标签", () => {
         { name: "web_search", callCount: 3, failureCount: 1, denialCount: 0 },
         { name: "create-document", callCount: 1, failureCount: 0, denialCount: 1 },
       ]),
-    ).toBe("web_search（3 次 · 1 次失败）、create-document（1 次拒绝）")
+    ).toBe("联网搜索（3 次 · 1 次失败）、创建正式文档（1 次拒绝）")
     expect(taskRunToolsLabel([])).toBe("未调用工具")
   })
 
@@ -51,5 +53,34 @@ describe("运行解释标签", () => {
     expect(taskRunContextStatusLabel("within-budget")).toBe("预算内")
     expect(taskRunContextStatusLabel("over-budget")).toBe("已超预算")
     expect(taskRunContextStatusLabel("unknown")).toBe("模型未声明上限")
+  })
+
+  it("用事件投影呈现当前或最终进度，不需要 reasoning 正文", () => {
+    const inspection = {
+      progress: {
+        completedActionCount: 1,
+        currentToolName: "bash",
+        phase: "working",
+        totalActionCount: 2,
+      },
+    } as Parameters<typeof taskRunProgressLabel>[0]
+    expect(taskRunProgressLabel(inspection)).toBe("正在运行工作区命令")
+    expect(
+      taskRunProgressLabel({
+        ...inspection,
+        progress: { ...inspection.progress, currentToolName: null, phase: "completed" },
+      }),
+    ).toBe("已完成")
+    expect(
+      taskRunProgressLabel({
+        ...inspection,
+        progress: {
+          ...inspection.progress,
+          currentToolName: "request-user-input",
+          phase: "waiting",
+        },
+      }),
+    ).toBe("等待用户回答")
+    expect(taskRunProgressPhaseLabel("waiting")).toBe("等待用户")
   })
 })

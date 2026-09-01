@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 类型化供应商连接、请求期模型端点、自动联网策略、搜索额度与 AI SDK 官方供应商适配器
- * [OUTPUT]: 经密钥、API 根地址和模型 ID 统一校验后可交给 AI SDK generateText/streamText 的 LanguageModel、端点专属 provider options、分层搜索额度与显式支持的原生联网工具
+ * [OUTPUT]: 经密钥、API 根地址和模型 ID 统一校验后可交给 AI SDK generateText/streamText 的 LanguageModel、端点专属 provider options、分层搜索额度与显式验证协议版本的原生联网工具
  * [POS]: @tessera/ai/server 的真实生成模型适配边界
  * [DOC]: docs/architecture/ai-providers.md
  *
@@ -128,7 +128,9 @@ export function createAiSdkChatRuntime(
         const anthropic = createAnthropic({ apiKey, baseURL: deepSeekAnthropicBaseUrl(baseURL) })
         return {
           model: anthropic(modelId),
-          ...(webSearch ? { tools: { web_search: anthropic.tools.webSearch_20260209({ maxUses }) } } : {}),
+          // DeepSeek 官方 Anthropic 兼容实现与 Harness 以 20250305 为稳定搜索协议；
+          // 不把 Anthropic 新版动态 Web Tools 方言直接外推给兼容端点。
+          ...(webSearch ? { tools: { web_search: anthropic.tools.webSearch_20250305({ maxUses }) } } : {}),
         }
       }
       if (endpointType !== "openai-chat-completions") {

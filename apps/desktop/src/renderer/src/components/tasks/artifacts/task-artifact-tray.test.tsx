@@ -1,8 +1,8 @@
 /**
  * [INPUT]: 当前任务 Artifact 摘要与打开回调
- * [OUTPUT]: 标题、所属项目和可操作产物卡片的静态呈现回归验证
+ * [OUTPUT]: 标题、所属项目、稳定关系和预览入口的静态呈现回归验证
  * [POS]: TaskArtifactTray 的产品级组件测试
- * [DOC]: design.md、docs/architecture/unified-creation-agent.md
+ * [DOC]: design.md、docs/architecture/agent-product-feedback-layer.md、docs/architecture/unified-creation-agent.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -16,7 +16,7 @@ import { describe, expect, it, vi } from "vitest"
 import { TaskArtifactTray } from "./task-artifact-tray"
 
 describe("任务 Artifact 卡片", () => {
-  it("显示正式文档标题、当前项目和打开入口", () => {
+  it("显示正式文档标题、当前项目、文件关系和预览入口", () => {
     const markup = renderToStaticMarkup(
       <TaskArtifactTray
         artifacts={[
@@ -44,6 +44,8 @@ describe("任务 Artifact 卡片", () => {
     expect(markup).toContain('aria-label="当前任务产物"')
     expect(markup).toContain("玛德琳：一座山，和她自己")
     expect(markup).toContain("《Celeste》玛德琳专题")
-    expect(markup).toContain("打开")
+    expect(markup).toContain("新建 · Markdown")
+    expect(markup).toContain("预览")
+    expect(markup).toContain("新建并预览产物")
   })
 })

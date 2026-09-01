@@ -1,8 +1,8 @@
 /**
- * [INPUT]: 主进程持有的工作区根路径、共享 Markdown/忽略目录策略、可选当前文档路径与类型化文件 capability 输入
- * [OUTPUT]: 仅限 Markdown 的列表、有界分页读取、全文检索、当前文档读取，以及可写 Agent 复用的路径/版本/原子写安全原语
- * [POS]: Electron 主进程中 Agent 工作区文件访问的底层安全边界
- * [DOC]: docs/architecture/agent-file-capabilities.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
+ * [INPUT]: 主进程持有的工作区根路径、共享 Markdown/忽略目录策略与类型化 read 输入
+ * [OUTPUT]: 支持超长单行续读的 Markdown 有界读取，以及提交前复核预期版本的路径、版本与原子写安全原语
+ * [POS]: Electron 主进程中 Agent Markdown 文件访问的底层安全边界；列表/检索已收敛到受控 bash
+ * [DOC]: docs/architecture/agent-file-capabilities.md、docs/architecture/bash-execution-environment.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -11,29 +11,24 @@
  */
 
 import { createHash, randomUUID } from "node:crypto"
-import { link, readFile, readdir, realpath, rename, stat, unlink, writeFile } from "node:fs/promises"
+import { link, readFile, realpath, rename, stat, unlink, writeFile } from "node:fs/promises"
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path"
-import type {
-  ListWorkspaceFilesInput,
-  ReadWorkspaceFileInput,
-  ReadonlyWorkspaceAgentTools,
-  SearchWorkspaceTextInput,
-  WorkspaceFileReadResult,
-} from "@tessera/agent-runtime"
+import type { ReadWorkspaceFileInput, WorkspaceFileReadResult } from "@tessera/agent-runtime"
 import { isIgnoredWorkspaceEntryName, isMarkdownPath } from "./workspace-file-service"
 
-const MAX_FILE_BYTES = 256 * 1024
-const MAX_LISTED_FILES = 500
-const MAX_SCANNED_FILES = 2_000
-const MAX_SEARCH_BYTES = 8 * 1024 * 1024
-const MAX_SEARCH_RESULTS = 100
-const MAX_MATCH_CHARACTERS = 400
 const DEFAULT_READ_LINE_LIMIT = 400
 const MAX_READ_LINE_LIMIT = 1_000
 const MAX_READ_RESULT_BYTES = 50 * 1024
 export const MAX_AGENT_MARKDOWN_BYTES = 256 * 1024
 
 class ReadonlyAgentToolError extends Error {}
+
+export class AgentFileConflictError extends Error {
+  constructor(readonly path: string) {
+    super(`文件「${path}」在提交前已经变化。`)
+    this.name = "AgentFileConflictError"
+  }
+}
 
 function throwIfAborted(signal: AbortSignal) {
   if (signal.aborted) throw new ReadonlyAgentToolError("Agent 运行已停止。")
@@ -99,73 +94,6 @@ export async function resolveAgentPath(rootPath: string, inputPath: string, allo
   return { absolutePath: canonicalTarget, relativePath: canonicalRelation }
 }
 
-type WorkspaceFileRecord = {
-  readonly absolutePath: string
-  readonly modifiedAt: number
-  readonly path: string
-  readonly size: number
-}
-
-async function collectMarkdownFiles(
-  rootPath: string,
-  directory: string,
-  signal: AbortSignal,
-): Promise<{ files: WorkspaceFileRecord[]; truncated: boolean }> {
-  const canonicalRoot = await canonicalWorkspaceRoot(rootPath)
-  const start = await resolveAgentPath(canonicalRoot, directory, true)
-  const startMetadata = await stat(start.absolutePath).catch(() => {
-    throw new ReadonlyAgentToolError("无法访问指定的工作区目录。")
-  })
-  if (!startMetadata.isDirectory()) throw new ReadonlyAgentToolError("列出文件的目标必须是工作区目录。")
-
-  const files: WorkspaceFileRecord[] = []
-  let scannedFiles = 0
-  let truncated = false
-
-  async function visit(directoryPath: string) {
-    throwIfAborted(signal)
-    if (truncated) return
-    const entries = await readdir(directoryPath, { withFileTypes: true })
-    entries.sort((left, right) => left.name.localeCompare(right.name, "zh-CN"))
-    for (const entry of entries) {
-      throwIfAborted(signal)
-      if (isIgnoredWorkspaceEntryName(entry.name) || entry.isSymbolicLink()) continue
-      const absolutePath = resolve(directoryPath, entry.name)
-      if (entry.isDirectory()) {
-        await visit(absolutePath)
-        if (truncated) return
-        continue
-      }
-      if (!entry.isFile()) continue
-      scannedFiles += 1
-      if (scannedFiles > MAX_SCANNED_FILES) {
-        truncated = true
-        return
-      }
-      if (!isAgentMarkdownPath(entry.name)) continue
-      if (files.length >= MAX_LISTED_FILES) {
-        truncated = true
-        return
-      }
-      const metadata = await stat(absolutePath)
-      files.push({
-        absolutePath,
-        path: relative(canonicalRoot, absolutePath).split("\\").join("/"),
-        size: metadata.size,
-        modifiedAt: metadata.mtimeMs,
-      })
-    }
-  }
-
-  try {
-    await visit(start.absolutePath)
-  } catch (error) {
-    if (error instanceof ReadonlyAgentToolError) throw error
-    throw new ReadonlyAgentToolError("无法列出工作区 Markdown 文件。")
-  }
-  return { files, truncated }
-}
-
 export async function readAgentMarkdownFile(rootPath: string, path: string, signal: AbortSignal) {
   throwIfAborted(signal)
   const target = await resolveAgentPath(rootPath, path)
@@ -196,28 +124,39 @@ export async function readAgentMarkdownFile(rootPath: string, path: string, sign
 function normalizeReadRange(input: ReadWorkspaceFileInput) {
   const offset = input.offset ?? 1
   const limit = input.limit ?? DEFAULT_READ_LINE_LIMIT
+  const lineByteOffset = input.lineByteOffset
   if (!Number.isSafeInteger(offset) || offset < 1) {
     throw new ReadonlyAgentToolError("读取起始行必须是从 1 开始的整数。")
   }
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_READ_LINE_LIMIT) {
     throw new ReadonlyAgentToolError(`单次读取行数必须在 1 到 ${MAX_READ_LINE_LIMIT} 之间。`)
   }
-  return { limit, offset }
+  if (
+    lineByteOffset !== undefined &&
+    (!Number.isSafeInteger(lineByteOffset) || lineByteOffset < 0 || lineByteOffset > MAX_AGENT_MARKDOWN_BYTES)
+  ) {
+    throw new ReadonlyAgentToolError("单行续读位置必须是有效的 UTF-8 字节位置。")
+  }
+  if (lineByteOffset !== undefined && input.offset === undefined) {
+    throw new ReadonlyAgentToolError("续读超长单行时必须同时提供起始行 offset。")
+  }
+  return { limit, lineByteOffset, offset }
 }
 
-function truncateUtf8Prefix(value: string, maxBytes: number) {
-  if (Buffer.byteLength(value, "utf8") <= maxBytes) return value
-  let low = 0
-  let high = value.length
-  while (low < high) {
-    const middle = Math.ceil((low + high) / 2)
-    if (Buffer.byteLength(value.slice(0, middle), "utf8") <= maxBytes) low = middle
-    else high = middle - 1
+function boundedUtf8End(bytes: Buffer, startByte: number, maxBytes: number) {
+  let endByte = Math.min(bytes.byteLength, startByte + maxBytes)
+  while (endByte < bytes.byteLength && endByte > startByte) {
+    const value = bytes[endByte]
+    if (value === undefined || (value & 0xc0) !== 0x80) break
+    endByte -= 1
   }
-  let end = low
-  const finalCodeUnit = value.charCodeAt(end - 1)
-  if (finalCodeUnit >= 0xd800 && finalCodeUnit <= 0xdbff) end -= 1
-  return value.slice(0, Math.max(0, end))
+  return endByte
+}
+
+function isUtf8Boundary(bytes: Buffer, offset: number) {
+  if (offset === 0 || offset === bytes.byteLength) return true
+  const value = bytes[offset]
+  return value !== undefined && (value & 0xc0) !== 0x80
 }
 
 type AgentMarkdownDocument = Awaited<ReturnType<typeof readAgentMarkdownFile>>
@@ -226,10 +165,48 @@ function workspaceFileReadResult(
   document: AgentMarkdownDocument,
   input: ReadWorkspaceFileInput,
 ): WorkspaceFileReadResult {
-  const { limit, offset } = normalizeReadRange(input)
+  const { limit, lineByteOffset, offset } = normalizeReadRange(input)
   const lines = document.content.split("\n")
   if (offset > lines.length) {
     throw new ReadonlyAgentToolError(`读取起始行 ${offset} 超出文件总行数 ${lines.length}。`)
+  }
+
+  if (lineByteOffset !== undefined) {
+    const line = lines[offset - 1] ?? ""
+    const lineBytes = Buffer.from(line, "utf8")
+    if (
+      lineByteOffset > lineBytes.byteLength ||
+      (lineByteOffset === lineBytes.byteLength && lineBytes.byteLength > 0) ||
+      !isUtf8Boundary(lineBytes, lineByteOffset)
+    ) {
+      throw new ReadonlyAgentToolError("单行续读位置不是当前行的有效 UTF-8 字节边界。")
+    }
+    const endByte = boundedUtf8End(lineBytes, lineByteOffset, MAX_READ_RESULT_BYTES)
+    const lineComplete = endByte === lineBytes.byteLength
+    const hasMoreLines = offset < lines.length
+    const reason = lineComplete ? (hasMoreLines ? "lines" : null) : "bytes"
+    return {
+      ...document,
+      content: lineBytes.subarray(lineByteOffset, endByte).toString("utf8"),
+      range: {
+        startLine: offset,
+        endLine: offset,
+        totalLines: lines.length,
+        lineByteRange: {
+          startByte: lineByteOffset,
+          endByte,
+          totalBytes: lineBytes.byteLength,
+        },
+      },
+      truncation: {
+        truncated: reason !== null,
+        reason,
+        maxBytes: MAX_READ_RESULT_BYTES,
+        lineTruncated: !lineComplete,
+        nextOffset: lineComplete ? (hasMoreLines ? offset + 1 : null) : offset,
+        nextLineByteOffset: lineComplete ? null : endByte,
+      },
+    }
   }
 
   const requestedLines = lines.slice(offset - 1, offset - 1 + limit)
@@ -237,6 +214,7 @@ function workspaceFileReadResult(
   let outputBytes = 0
   let byteLimitReached = false
   let lineTruncated = false
+  let lineByteRange: WorkspaceFileReadResult["range"]["lineByteRange"] = null
 
   for (const line of requestedLines) {
     const separator = outputLines.length > 0 ? "\n" : ""
@@ -248,8 +226,11 @@ function workspaceFileReadResult(
     }
     byteLimitReached = true
     if (outputLines.length === 0) {
-      outputLines.push(truncateUtf8Prefix(line, MAX_READ_RESULT_BYTES))
-      lineTruncated = true
+      const lineBytes = Buffer.from(line, "utf8")
+      const endByte = boundedUtf8End(lineBytes, 0, MAX_READ_RESULT_BYTES)
+      outputLines.push(lineBytes.subarray(0, endByte).toString("utf8"))
+      lineTruncated = endByte < lineBytes.byteLength
+      lineByteRange = { startByte: 0, endByte, totalBytes: lineBytes.byteLength }
     }
     break
   }
@@ -264,15 +245,25 @@ function workspaceFileReadResult(
       startLine: offset,
       endLine,
       totalLines: lines.length,
+      lineByteRange,
     },
     truncation: {
       truncated: reason !== null,
       reason,
       maxBytes: MAX_READ_RESULT_BYTES,
       lineTruncated,
-      nextOffset: lineTruncated || !hasMoreLines ? null : endLine + 1,
+      nextOffset: lineTruncated ? offset : !hasMoreLines ? null : endLine + 1,
+      nextLineByteOffset: lineTruncated ? (lineByteRange?.endByte ?? null) : null,
     },
   }
+}
+
+export async function readWorkspaceAgentFile(
+  rootPath: string,
+  input: ReadWorkspaceFileInput,
+  signal: AbortSignal,
+) {
+  return workspaceFileReadResult(await readAgentMarkdownFile(rootPath, input.path, signal), input)
 }
 
 export async function resolveAgentCreatePath(rootPath: string, inputPath: string) {
@@ -310,7 +301,13 @@ export async function writeAgentMarkdownFile(
   path: string,
   content: string,
   operation: "create" | "update",
+  options: Readonly<{
+    expectedContentHash?: string | undefined
+    signal?: AbortSignal | undefined
+  }> = {},
 ) {
+  const signal = options.signal ?? new AbortController().signal
+  throwIfAborted(signal)
   if (Buffer.byteLength(content, "utf8") > MAX_AGENT_MARKDOWN_BYTES) {
     throw new ReadonlyAgentToolError("候选文档超过 256 KiB 写入上限。")
   }
@@ -331,6 +328,9 @@ export async function writeAgentMarkdownFile(
   if (operation === "update" && !existingMetadata?.isFile()) {
     throw new ReadonlyAgentToolError("更新目标必须是 Markdown 文件。")
   }
+  if (operation === "update" && !options.expectedContentHash) {
+    throw new ReadonlyAgentToolError("更新目标必须携带预期内容版本。")
+  }
 
   const temporaryPath = join(
     dirname(target.absolutePath),
@@ -342,99 +342,26 @@ export async function writeAgentMarkdownFile(
       ...(existingMetadata ? { mode: existingMetadata.mode } : {}),
       flag: "wx",
     })
+    throwIfAborted(signal)
     if (operation === "create") {
       await link(temporaryPath, target.absolutePath)
       await unlink(temporaryPath)
     } else {
-      await rename(temporaryPath, target.absolutePath)
+      const commitTarget = await resolveAgentPath(rootPath, target.relativePath)
+      if (commitTarget.absolutePath !== target.absolutePath) {
+        throw new AgentFileConflictError(target.relativePath)
+      }
+      const currentContent = await readFile(commitTarget.absolutePath, "utf8")
+      if (agentContentHash(currentContent) !== options.expectedContentHash) {
+        throw new AgentFileConflictError(target.relativePath)
+      }
+      throwIfAborted(signal)
+      await rename(temporaryPath, commitTarget.absolutePath)
     }
   } catch (error) {
     await unlink(temporaryPath).catch(() => {})
     throw error
   }
+  // 提交成功后不再因迟到 Abort 把已落盘的副作用伪装成失败。
   return readAgentMarkdownFile(rootPath, target.relativePath, new AbortController().signal)
-}
-
-export type ReadonlyWorkspaceAgentToolOptions = {
-  readonly currentDocumentPath?: string
-  readonly rootPath: string
-}
-
-export function createReadonlyWorkspaceAgentTools({
-  currentDocumentPath,
-  rootPath,
-}: ReadonlyWorkspaceAgentToolOptions): ReadonlyWorkspaceAgentTools {
-  return {
-    listWorkspaceFiles: async (input: ListWorkspaceFilesInput, signal) => {
-      const result = await collectMarkdownFiles(rootPath, input.directory ?? "", signal)
-      return {
-        files: result.files.map(({ path, size, modifiedAt }) => ({ path, size, modifiedAt })),
-        truncated: result.truncated,
-        limit: MAX_LISTED_FILES,
-      }
-    },
-    readWorkspaceFile: async (input: ReadWorkspaceFileInput, signal) =>
-      workspaceFileReadResult(await readAgentMarkdownFile(rootPath, input.path, signal), input),
-    readCurrentDocument: async (signal) => {
-      if (!currentDocumentPath) {
-        return { available: false, reason: "用户当前没有在编辑器中打开 Markdown 文档。" }
-      }
-      const input = { path: currentDocumentPath }
-      return {
-        available: true,
-        ...workspaceFileReadResult(await readAgentMarkdownFile(rootPath, currentDocumentPath, signal), input),
-      }
-    },
-    searchWorkspaceText: async (input: SearchWorkspaceTextInput, signal) => {
-      const query = input.query.trim()
-      if (!query || query.length > 200) throw new ReadonlyAgentToolError("搜索词必须为 1 到 200 个字符。")
-      const collected = await collectMarkdownFiles(rootPath, input.directory ?? "", signal)
-      const normalizedQuery = query.toLocaleLowerCase()
-      const matches: Array<{ path: string; line: number; text: string }> = []
-      const skippedFiles: string[] = []
-      let scannedBytes = 0
-      let truncated = collected.truncated
-
-      for (const file of collected.files) {
-        throwIfAborted(signal)
-        if (file.size > MAX_FILE_BYTES || scannedBytes + file.size > MAX_SEARCH_BYTES) {
-          skippedFiles.push(file.path)
-          if (scannedBytes + file.size > MAX_SEARCH_BYTES) truncated = true
-          continue
-        }
-        scannedBytes += file.size
-        let content: string
-        try {
-          content = await readFile(file.absolutePath, "utf8")
-        } catch {
-          skippedFiles.push(file.path)
-          continue
-        }
-        const lines = content.split(/\r?\n/u)
-        for (let index = 0; index < lines.length; index += 1) {
-          const line = lines[index] ?? ""
-          if (!line.toLocaleLowerCase().includes(normalizedQuery)) continue
-          matches.push({
-            path: file.path,
-            line: index + 1,
-            text: line.slice(0, MAX_MATCH_CHARACTERS),
-          })
-          if (matches.length >= MAX_SEARCH_RESULTS) {
-            truncated = true
-            break
-          }
-        }
-        if (matches.length >= MAX_SEARCH_RESULTS) break
-      }
-
-      return {
-        query,
-        matches,
-        truncated,
-        scannedBytes,
-        skippedFiles: skippedFiles.slice(0, 20),
-        resultLimit: MAX_SEARCH_RESULTS,
-      }
-    },
-  }
 }

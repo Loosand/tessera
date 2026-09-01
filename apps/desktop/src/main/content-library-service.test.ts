@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 临时内容库、内存或文件 SQLite、任务/Run 与内容领域服务调用
- * [OUTPUT]: 未归档创建、Artifact 关系、独立项目、安全移动、重启恢复、冲突预检和撤销授权的回归验证
+ * [INPUT]: 临时内容库/工作区、内存或文件 SQLite、任务/Run、直接文件提交或 Bash 文件事件与内容 UI 服务调用
+ * [OUTPUT]: 文件成功事件 Artifact、Bash 新建/更新关系、未归档创建、独立项目、安全移动、重启恢复、冲突预检和撤销授权的回归验证
  * [POS]: 统一创作 Agent 混合内容领域服务的单元测试
  * [DOC]: docs/architecture/unified-creation-agent.md、docs/architecture/database.md
  *
@@ -19,6 +19,7 @@ import {
   listWorkspaceOperations,
   openDatabase,
   saveTaskSession,
+  saveWorkspace,
   startTaskRun,
 } from "@tessera/database"
 import { afterEach, describe, expect, it } from "vitest"
@@ -69,6 +70,67 @@ afterEach(async () => {
 })
 
 describe("托管内容库领域服务", () => {
+  it("把任意已授权工作区的成功文件提交登记为 Artifact", async () => {
+    const { client, rootPath, runId, service, taskId } = await createFixture()
+    saveWorkspace(client, {
+      id: "workspace-output",
+      rootPath,
+      displayName: "输出工作区",
+      lastOpenedAt: new Date(),
+    })
+    await writeFile(join(rootPath, "agent-output.md"), "# Agent 输出\n", "utf8")
+
+    const artifact = service.recordWorkspaceFileArtifact({ taskId, runId }, "workspace-output", {
+      contentHash: "a".repeat(64),
+      modifiedAt: Date.now(),
+      operation: "create",
+      path: "agent-output.md",
+      status: "saved",
+    })
+
+    expect(artifact).toMatchObject({
+      relation: "created",
+      relativePath: "agent-output.md",
+      project: { id: "workspace-output", name: "输出工作区" },
+    })
+    expect(service.listArtifacts(taskId)).toMatchObject([
+      { documentId: artifact.documentId, relation: "created" },
+    ])
+  })
+
+  it("把 Bash 观察到的新 Markdown 登记为 created，后续事件登记为 updated", async () => {
+    const { client, rootPath, runId, service, taskId } = await createFixture()
+    saveWorkspace(client, {
+      id: "workspace-bash-output",
+      rootPath,
+      displayName: "Bash 输出工作区",
+      lastOpenedAt: new Date(),
+    })
+    await writeFile(join(rootPath, "bash-output.md"), "# Bash 输出\n", "utf8")
+
+    const created = service.recordWorkspaceFileArtifact({ taskId, runId }, "workspace-bash-output", {
+      contentHash: "b".repeat(64),
+      modifiedAt: Date.now(),
+      operation: "update",
+      path: "bash-output.md",
+      status: "saved",
+    })
+    const updated = service.recordWorkspaceFileArtifact({ taskId, runId }, "workspace-bash-output", {
+      contentHash: "c".repeat(64),
+      modifiedAt: Date.now(),
+      operation: "update",
+      path: "bash-output.md",
+      status: "saved",
+    })
+
+    expect(created).toMatchObject({ relation: "created", relativePath: "bash-output.md" })
+    expect(updated).toMatchObject({
+      documentId: created.documentId,
+      relation: "updated",
+      relativePath: "bash-output.md",
+    })
+  })
+
   it("把正式文档创建到未归档，并在同一任务中创建项目后安全移动", async () => {
     const { client, rootPath, runId, service, taskId } = await createFixture()
     const library = await service.configure(rootPath)

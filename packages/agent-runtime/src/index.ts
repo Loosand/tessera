@@ -1,8 +1,8 @@
 /**
- * [INPUT]: 具体 Agent 适配器定义的请求、事件流、取消信号与工作区文件能力契约
- * [OUTPUT]: 可由具体适配器收窄的 Agent 运行时端口，以及与 AI SDK/桌面平台解耦的工作区文件 capability contract
+ * [INPUT]: 具体 Agent 适配器定义的请求、事件流、取消信号、工作区文件与前台命令能力契约
+ * [OUTPUT]: 可由具体适配器收窄的 Agent 运行时端口，以及与 AI SDK/桌面平台解耦的工作区 read/edit/write/bash capability contract
  * [POS]: Tessera 核心与具体 Agent 适配器之间的稳定端口
- * [DOC]: docs/architecture.md、docs/architecture/agent-file-capabilities.md
+ * [DOC]: docs/architecture.md、docs/architecture/agent-file-capabilities.md、docs/architecture/bash-execution-environment.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -17,4 +17,5 @@ export type AgentRuntime<Request, Event> = {
   run(request: Request, signal: AbortSignal): AsyncIterable<Event>
 }
 
+export * from "./execution-environment"
 export * from "./workspace-file-capabilities"

@@ -1,0 +1,47 @@
+{
+  "runs": [
+    {
+      "schemaVersion": 1,
+      "suiteId": "tessera-core",
+      "suiteVersion": 1,
+      "caseId": "direct-answer-side-effects-v1",
+      "runId": "example-direct-run",
+      "model": {
+        "providerId": "example-provider",
+        "modelId": "example-model"
+      },
+      "revision": {
+        "gitCommit": "example-revision",
+        "promptVersion": "example-prompt"
+      },
+      "observed": {
+        "answer": "工具可能已经产生副作用；最终回答失败时，重试不能盲目重复已经成功的工具调用。",
+        "appliedEventIds": [],
+        "files": {},
+        "safetyViolations": [],
+        "terminal": "finish",
+        "tools": []
+      },
+      "metrics": {
+        "turnCount": 1,
+        "toolCallCount": 0,
+        "toolFailureCount": 0,
+        "repeatedToolCallCount": 0,
+        "totalTokens": 300,
+        "durationMs": 5000,
+        "userCorrectionCount": 0
+      },
+      "humanAssessment": {
+        "evaluator": "example-reviewer",
+        "notes": "示例分数，不代表真实模型基线。",
+        "scores": {
+          "correctness": 5,
+          "completeness": 5,
+          "usability": 5,
+          "clarity": 5,
+          "trustworthiness": 5
+        }
+      }
+    }
+  ]
+}

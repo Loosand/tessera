@@ -1,7 +1,8 @@
 # Tessera 系统架构
 
 > 代码源头：`apps/desktop/src/main/index.ts`、`apps/desktop/src/preload/index.ts`、
-> `packages/agent-runtime/src/index.ts`、`packages/agent-runtime/src/workspace-file-capabilities.ts`、`packages/ai/src/index.ts`、`packages/ai/src/server/index.ts`、`packages/skills/src/index.ts`、
+> `packages/agent-runtime/src/index.ts`、`packages/agent-runtime/src/workspace-file-capabilities.ts`、
+> `packages/agent-runtime/src/execution-environment.ts`、`packages/ai/src/index.ts`、`packages/ai/src/server/index.ts`、`packages/skills/src/index.ts`、
 > `packages/database/client.ts`、`apps/desktop/src/main/user-skill-service.ts`
 >
 > 状态：部分实现。
@@ -60,14 +61,14 @@ SQLite 控制层”作为可逆实验基线，同时保留数据库正文和完�
 ### Agent 与 Skills
 
 - **已实现**：`AgentRuntime` 泛型端口已承载 AI SDK `ToolLoopAgent` 的类型化 `UIMessageChunk` 异步流、取消信号和审批事件；产品运行链路不再绕过独立端口。
-- **部分实现**：统一运行时遵守 AI SDK 标准优先：已使用 `ToolLoopAgent`、类型化 call options / `prepareCall`、`activeTools`、`stopWhen`、工具 `needsApproval` 与 `useChat`；`prepareStep`、`InferAgentUIMessage` 和完整生命周期观测仍待接入。Tessera 只维护 Electron transport、持久化恢复、领域资源和权限适配，`AgentRuntime` 保持薄端口。
-- **部分实现**：`@tessera/ai` 独立封装 OpenAI 兼容、Anthropic 兼容、DeepSeek、Grok 与 OpenRouter。已实现普通对话、供应商已验证的原生联网、受限工作区读写工具循环、AI SDK 标准工具审批、只读研究子 Agent，以及主进程注入的 MCP 动态工具；Shell 与 durable 自动续跑尚未接入。
+- **部分实现**：统一运行时遵守 AI SDK 标准优先：已使用 `ToolLoopAgent`、类型化 call options / `prepareCall`、`activeTools`、`stopWhen`、通用 `prepareStep`、`InferAgentUIMessage`、工具 `needsApproval` 与 `useChat`。Tessera 只维护 Electron transport、持久化恢复、领域资源、运行事件账本和权限适配，`AgentRuntime` 保持薄端口；durable step replay 仍未实现。
+- **部分实现**：`@tessera/ai` 独立封装 OpenAI 兼容、Anthropic 兼容、DeepSeek、Grok 与 OpenRouter。已实现普通对话、供应商已验证的原生联网、工作区 `read/edit/write`、macOS 探针后受控 `bash`，以及主进程注入且逐次审批的 MCP 动态工具；durable 自动续跑尚未接入。
 - **部分实现**：所有任务已收敛到 `ToolLoopAgent`，`toolChoice = auto` 允许零工具直接回答；主进程 RunPolicy 已按显式创作方式、内部作用域和已验证模型能力决定 Skill、联网、推理、工具作用域与预算，用户 turn 自动意图、规范化资源关系和更细权限输入仍待实现。
-- **部分实现**：研究方式的 P0 可信闭环已实现：运行时强制先发布结构化计划，供应商搜索只登记候选来源，主进程受限 Reader 深读公开网页，来源/证据/覆盖状态绑定 run 持久化，完成检查决定完整或部分结果，消息按真实 Tool Part 显示进度；来源推荐/保存、研究工作文档与隔离浏览器后备仍待实现，详见[研究工作流与证据链](architecture/research-workflow.md)。
-- **已实现**：Agent 工作区根目录只存在于主进程闭包；Markdown 列表、有界分页读取、搜索、当前文档和经批准写入通过 `@tessera/agent-runtime` 的类型化文件 capability contract 注入，统一执行真实路径、符号链接、文件类型、版本冲突与资源上限校验；同文件并发更新在复核与原子写入之间串行。Agent 只能获得请求期路由验证通过的供应商原生搜索，以及用户显式信任、启用并逐次批准的 MCP 工具；删除、重命名和 Shell 保持不可达。
+- **部分实现**：Research/Writing 已收敛为方法型 Skill；新运行使用供应商搜索与无状态受限 Reader，不再通过计划、证据、推荐和完成检查工具维护研究领域状态。历史研究数据和 UI 继续只读兼容，详见[研究工作流与证据链](architecture/research-workflow.md)。
+- **已实现**：Agent 工作区根目录只存在于主进程闭包；新运行通过 `@tessera/agent-runtime` 注入 `read/edit/write`，并在 macOS Seatbelt 能力探针通过时增加 `bash`。直接文件工具统一执行真实路径、符号链接、Markdown 类型、结果预算、精确多 edit、版本冲突与原子提交；Bash 另由无网络、无宿主 Secret 的 ExecutionEnvironment 限制在当前工作区，并按 RunPolicy 只读或读写。普通文件/Bash 不逐次审批，旧审批保持只读历史且不能写盘；MCP 仍由用户显式信任、启用并逐次批准。删除和重命名仍不是独立模型工具。
 - **部分实现**：`packages/skills` 已实现标准 `SKILL.md` 校验、内置/用户级/工作区级描述、权限声明和内置渐进式加载注册表；研究、写作及已启用用户 Skill 的正文按本轮选择经 call options 注入并固化到 `task_run`。用户目录手动扫描已实现，用户 turn 自动选择、工作区级自动发现、更新与版本仍待实现。
 - **已实现**：Skill 只描述工作流和所需资源，不提升任务权限；具体工具由运行策略、显式资源、模型能力、主进程边界与人工审批共同决定。
-- **规划**：Agent 对文件的修改以文本补丁提出，批准后由核心层写入。
+- **已实现**：Agent 以精确 `oldText → newText` 列表编辑已有文件；每项必须唯一且互不重叠，提交前复核读取 hash。
 
 ## 已实现的数据流
 
@@ -119,6 +120,10 @@ SQLite 控制层”作为可逆实验基线，同时保留数据库正文和完�
 
 - [产品边界](product.md)
 - [轻量 Agent Kernel 与能力运行时](architecture/agent-kernel-and-capability-runtime.md)
+- [Pi 参考下的 Agent 减法实施路线图](architecture/agent-simplification-roadmap.md)
+- [Agent Run 可靠性契约](architecture/agent-run-reliability.md)
+- [Bash ExecutionEnvironment](architecture/bash-execution-environment.md)
+- [Agent 产品反馈层](architecture/agent-product-feedback-layer.md)
 - [Agent 本地文件能力评估与收敛设计](architecture/agent-file-capabilities.md)
 - [统一创作 Agent 与内容存储探索](architecture/unified-creation-agent.md)
 - [任务会话与导航](architecture/task-navigation.md)

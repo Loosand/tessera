@@ -1,8 +1,8 @@
 /**
- * [INPUT]: 临时 Markdown 工作区、内存 SQLite、冻结提案、人工批准/拒绝与外部磁盘变化
- * [OUTPUT]: Agent 变更预览、批准后原子写入、领域审批隔离、拒绝不写入、版本冲突与同文件并发保护的回归验证
- * [POS]: 可写 Agent 人工审批主进程边界的集成测试
- * [DOC]: docs/architecture/agent-file-capabilities.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/task-navigation.md
+ * [INPUT]: 内存 SQLite 中的旧 Agent 变更提案与历史审批 Tool Part
+ * [OUTPUT]: 旧提案可预览、拒绝可审计、批准失效且绝不写盘的兼容回归验证
+ * [POS]: read/edit/write 上线后旧逐次文件审批边界的集成测试
+ * [DOC]: docs/architecture/agent-file-capabilities.md、docs/architecture/agent-simplification-roadmap.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -14,12 +14,20 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { TaskMessage } from "@tessera/contracts"
-import { openDatabase, saveTaskSession, saveWorkspace, startTaskRun } from "@tessera/database"
+import {
+  agentChangeProposals,
+  findAgentChangeProposal,
+  openDatabase,
+  saveTaskSession,
+  saveWorkspace,
+  startTaskRun,
+} from "@tessera/database"
 import { afterEach, describe, expect, test } from "vitest"
 import { createAgentChangeService } from "./agent-change-service"
-import { agentContentHash, readAgentMarkdownFile } from "./read-only-agent-tools"
+import { agentContentHash } from "./read-only-agent-tools"
 
 const temporaryDirectories: string[] = []
+const LEGACY_APPROVAL_ERROR = "旧版逐次文件审批已失效；未执行磁盘写入。"
 
 afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true })))
@@ -28,7 +36,10 @@ afterEach(async () => {
 async function fixture() {
   const rootPath = await mkdtemp(join(tmpdir(), "tessera-agent-change-"))
   temporaryDirectories.push(rootPath)
-  await writeFile(join(rootPath, "README.md"), "# 原文\n\n旧内容。\n", "utf8")
+  const originalContent = "# 原文\n\n旧内容。\n"
+  const proposedContent = "# 新文\n\n不应由旧审批写入。\n"
+  await writeFile(join(rootPath, "README.md"), originalContent, "utf8")
+
   const client = openDatabase({ path: ":memory:" })
   saveWorkspace(client, {
     id: "workspace-agent-change",
@@ -40,7 +51,7 @@ async function fixture() {
     id: "agent-change-task",
     mode: "agent",
     workspaceId: "workspace-agent-change",
-    title: "修改 README",
+    title: "历史审批",
     status: "running",
     updatedAt: new Date(),
     messagePayloads: [],
@@ -59,33 +70,110 @@ async function fixture() {
     resourceSummaryJson: null,
     startedAt: new Date(),
   })
-  const service = createAgentChangeService(client)
-  const base = await readAgentMarkdownFile(rootPath, "README.md", new AbortController().signal)
-  return { base, client, rootPath, service }
+
+  const baseModifiedAt = new Date("2026-01-01T00:00:00.000Z")
+  const change = {
+    operation: "update" as const,
+    path: "README.md",
+    content: proposedContent,
+    reason: "历史测试",
+    baseModifiedAt: baseModifiedAt.getTime(),
+    baseContentHash: agentContentHash(originalContent),
+  }
+  client.db
+    .insert(agentChangeProposals)
+    .values({
+      approvalId: "approval-update",
+      taskId: "agent-change-task",
+      requestId: "request-change",
+      toolCallId: "tool-update",
+      providerId: "deepseek",
+      modelId: "deepseek-chat",
+      operation: "update",
+      relativePath: "README.md",
+      reason: change.reason,
+      baseContent: originalContent,
+      baseModifiedAt,
+      baseContentHash: change.baseContentHash,
+      proposedContent,
+      proposedContentHash: agentContentHash(proposedContent),
+      status: "pending",
+      createdAt: new Date(),
+    })
+    .run()
+
+  return {
+    change,
+    client,
+    originalContent,
+    rootPath,
+    service: createAgentChangeService(client),
+  }
 }
 
-function approvedMessage(
-  approvalId: string,
-  toolCallId: string,
-  input: Record<string, unknown>,
-  approved: boolean,
-): TaskMessage {
+function approvalMessage(input: Record<string, unknown>, approved: boolean): TaskMessage {
   return {
-    id: `message-${approvalId}`,
+    id: `message-${approved ? "approved" : "rejected"}`,
     role: "assistant",
     parts: [
       {
         type: "tool-write-workspace-document",
-        toolCallId,
+        toolCallId: "tool-update",
         state: "approval-responded",
         input,
-        approval: { id: approvalId, approved },
+        approval: { id: "approval-update", approved },
       },
     ],
   }
 }
 
-describe("Agent Markdown 变更审批", () => {
+describe("旧 Agent 文件审批兼容", () => {
+  test("历史提案仍可读取 Diff 预览", async () => {
+    const { client, originalContent, service } = await fixture()
+
+    expect(service.preview("agent-change-task", "approval-update")).toMatchObject({
+      path: "README.md",
+      baseContent: originalContent,
+      status: "pending",
+    })
+    client.close()
+  })
+
+  test("拒绝只记录决定且不写入磁盘", async () => {
+    const { change, client, originalContent, rootPath, service } = await fixture()
+
+    service.reconcileDecisions("agent-change-task", [approvalMessage(change, false)])
+
+    expect(findAgentChangeProposal(client, "approval-update")?.status).toBe("rejected")
+    expect(await readFile(join(rootPath, "README.md"), "utf8")).toBe(originalContent)
+    client.close()
+  })
+
+  test("批准立即进入明确失败终态且不写入磁盘", async () => {
+    const { change, client, originalContent, rootPath, service } = await fixture()
+
+    service.reconcileDecisions("agent-change-task", [approvalMessage(change, true)])
+
+    expect(findAgentChangeProposal(client, "approval-update")).toMatchObject({
+      status: "failed",
+      errorMessage: LEGACY_APPROVAL_ERROR,
+    })
+    expect(await readFile(join(rootPath, "README.md"), "utf8")).toBe(originalContent)
+    client.close()
+  })
+
+  test("审批输入被篡改时阻止对账并保留 pending", async () => {
+    const { change, client, service } = await fixture()
+
+    expect(() =>
+      service.reconcileDecisions("agent-change-task", [
+        approvalMessage({ ...change, content: "# 被替换的候选\n" }, true),
+      ]),
+    ).toThrow("提案在审批后发生了变化")
+    expect(findAgentChangeProposal(client, "approval-update")?.status).toBe("pending")
+    client.close()
+  })
+
   test("忽略其他领域工具的标准审批结果", async () => {
     const { client, service } = await fixture()
     const contentApprovalMessage = {
@@ -96,218 +184,13 @@ describe("Agent Markdown 变更审批", () => {
           type: "tool-create-document",
           toolCallId: "tool-create-document",
           state: "approval-responded",
-          input: {
-            title: "Madeline：与自己和解的攀登",
-            content: "# Madeline：与自己和解的攀登\n",
-          },
+          input: { title: "测试文档", content: "# 测试文档\n" },
           approval: { id: "approval-create-document", approved: true },
         },
       ],
     } as TaskMessage
 
     expect(() => service.reconcileDecisions("agent-change-task", [contentApprovalMessage])).not.toThrow()
-    client.close()
-  })
-
-  test("冻结候选内容并在批准后复核版本和原子写入", async () => {
-    const { base, client, rootPath, service } = await fixture()
-    const change = {
-      operation: "update" as const,
-      path: "README.md",
-      content: "# 新文\n\n已经批准。\n",
-      reason: "更新说明",
-      baseModifiedAt: base.modifiedAt,
-      baseContentHash: base.contentHash,
-    }
-    await service.register({
-      approvalId: "approval-update",
-      taskId: "agent-change-task",
-      requestId: "request-change",
-      toolCallId: "tool-update",
-      providerId: "deepseek",
-      modelId: "deepseek-chat",
-      rootPath,
-      change,
-    })
-
-    expect(service.preview("agent-change-task", "approval-update")).toMatchObject({
-      path: "README.md",
-      baseContent: base.content,
-      proposedContent: change.content,
-      status: "pending",
-    })
-    service.reconcileDecisions("agent-change-task", [
-      approvedMessage("approval-update", "tool-update", change, true),
-    ])
-    await expect(
-      service.execute("agent-change-task", "tool-update", change, rootPath, new AbortController().signal),
-    ).resolves.toMatchObject({ status: "saved", path: "README.md" })
-    expect(await readFile(join(rootPath, "README.md"), "utf8")).toBe(change.content)
-    expect(service.preview("agent-change-task", "approval-update").status).toBe("applied")
-    client.close()
-  })
-
-  test("拒绝后不写入，审批期间外部变化会返回冲突", async () => {
-    const { base, client, rootPath, service } = await fixture()
-    const rejectedChange = {
-      operation: "create" as const,
-      path: "notes.md",
-      content: "# 不应创建\n",
-      reason: "测试拒绝",
-    }
-    await service.register({
-      approvalId: "approval-reject",
-      taskId: "agent-change-task",
-      requestId: "request-change",
-      toolCallId: "tool-reject",
-      providerId: "deepseek",
-      modelId: "deepseek-chat",
-      rootPath,
-      change: rejectedChange,
-    })
-    service.reconcileDecisions("agent-change-task", [
-      approvedMessage("approval-reject", "tool-reject", rejectedChange, false),
-    ])
-    await expect(
-      service.execute(
-        "agent-change-task",
-        "tool-reject",
-        rejectedChange,
-        rootPath,
-        new AbortController().signal,
-      ),
-    ).rejects.toThrow("尚未获得有效批准")
-
-    const conflictChange = {
-      operation: "update" as const,
-      path: "README.md",
-      content: "# 候选版本\n",
-      reason: "测试冲突",
-      baseModifiedAt: base.modifiedAt,
-      baseContentHash: agentContentHash(base.content),
-    }
-    await service.register({
-      approvalId: "approval-conflict",
-      taskId: "agent-change-task",
-      requestId: "request-change",
-      toolCallId: "tool-conflict",
-      providerId: "deepseek",
-      modelId: "deepseek-chat",
-      rootPath,
-      change: conflictChange,
-    })
-    service.reconcileDecisions("agent-change-task", [
-      approvedMessage("approval-conflict", "tool-conflict", conflictChange, true),
-    ])
-    await new Promise((resolve) => setTimeout(resolve, 4))
-    await writeFile(join(rootPath, "README.md"), "# 外部版本\n", "utf8")
-    await expect(
-      service.execute(
-        "agent-change-task",
-        "tool-conflict",
-        conflictChange,
-        rootPath,
-        new AbortController().signal,
-      ),
-    ).resolves.toMatchObject({ status: "conflict" })
-    expect(await readFile(join(rootPath, "README.md"), "utf8")).toBe("# 外部版本\n")
-
-    const createRaceChange = {
-      operation: "create" as const,
-      path: "race.md",
-      content: "# Agent 候选\n",
-      reason: "测试创建竞态",
-    }
-    await service.register({
-      approvalId: "approval-create-race",
-      taskId: "agent-change-task",
-      requestId: "request-change",
-      toolCallId: "tool-create-race",
-      providerId: "deepseek",
-      modelId: "deepseek-chat",
-      rootPath,
-      change: createRaceChange,
-    })
-    service.reconcileDecisions("agent-change-task", [
-      approvedMessage("approval-create-race", "tool-create-race", createRaceChange, true),
-    ])
-    await writeFile(join(rootPath, "race.md"), "# 外部创建\n", "utf8")
-    await expect(
-      service.execute(
-        "agent-change-task",
-        "tool-create-race",
-        createRaceChange,
-        rootPath,
-        new AbortController().signal,
-      ),
-    ).resolves.toMatchObject({ status: "conflict", path: "race.md" })
-    expect(await readFile(join(rootPath, "race.md"), "utf8")).toBe("# 外部创建\n")
-    client.close()
-  })
-
-  test("同一基准版本的并发批准更新串行复核并阻止后写覆盖", async () => {
-    const { base, client, rootPath, service } = await fixture()
-    const changes = [
-      {
-        operation: "update" as const,
-        path: "README.md",
-        content: "# 并发候选 A\n",
-        reason: "并发测试 A",
-        baseModifiedAt: base.modifiedAt,
-        baseContentHash: base.contentHash,
-      },
-      {
-        operation: "update" as const,
-        path: "README.md",
-        content: "# 并发候选 B\n",
-        reason: "并发测试 B",
-        baseModifiedAt: base.modifiedAt,
-        baseContentHash: base.contentHash,
-      },
-    ]
-
-    await Promise.all(
-      changes.map((change, index) =>
-        service.register({
-          approvalId: `approval-concurrent-${index}`,
-          taskId: "agent-change-task",
-          requestId: "request-change",
-          toolCallId: `tool-concurrent-${index}`,
-          providerId: "deepseek",
-          modelId: "deepseek-chat",
-          rootPath,
-          change,
-        }),
-      ),
-    )
-    service.reconcileDecisions(
-      "agent-change-task",
-      changes.map((change, index) =>
-        approvedMessage(`approval-concurrent-${index}`, `tool-concurrent-${index}`, change, true),
-      ),
-    )
-
-    const results = await Promise.all(
-      changes.map((change, index) =>
-        service.execute(
-          "agent-change-task",
-          `tool-concurrent-${index}`,
-          change,
-          rootPath,
-          new AbortController().signal,
-        ),
-      ),
-    )
-    const statuses = results.map((result) => (result as { status: string }).status).sort()
-    expect(statuses).toEqual(["conflict", "saved"])
-    expect(changes.map((change) => change.content)).toContain(
-      await readFile(join(rootPath, "README.md"), "utf8"),
-    )
-    expect(
-      changes
-        .map((_change, index) => service.preview("agent-change-task", `approval-concurrent-${index}`).status)
-        .sort(),
-    ).toEqual(["applied", "conflict"])
     client.close()
   })
 })

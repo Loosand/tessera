@@ -1,10 +1,12 @@
 # ADR-0001：内容存储实验基线与评审门槛
 
 > 代码源头：`apps/desktop/src/main/content-library-service.ts`、
-> `packages/database/content-domain-repository.ts`、`packages/ai/src/server/content-domain-tools.ts`
+> `packages/database/content-domain-repository.ts`、`apps/desktop/src/main/workspace-agent-tools.ts`、
+> `apps/desktop/src/main/workspace-execution-environment.ts`
 >
 > 状态：**提议 / 实验中，不是最终存储决策**。2026-08-22 暂以托管内容库混合方案验证统一创作流程；
-> 数据库正文与完全开放外部工作区仍是平等候选。
+> 数据库正文与完全开放外部工作区仍是平等候选。2026-09-01 起内容领域工具退出新 Agent，文件提交成功后由应用层
+> 登记 Artifact，项目创建和移动保留给 UI。
 
 ## 背景
 
@@ -17,8 +19,9 @@
 
 - 用户显式选择一个可撤销授权的内容库根目录；应用建立可见的“未归档”和普通项目子目录。
 - 已批准正文只写入 Markdown；SQLite 保存内容库授权、工作区来源、索引、资源关系、Artifact 和操作审计。
-- 模型只调用稳定 ID 驱动的领域工具，不获得绝对路径、任意文件系统、覆盖、删除或 Shell。
-- 创建文档、创建项目和移动文档使用 AI SDK 标准工具审批；移动在执行前检查全部冲突，失败时恢复磁盘动作。
+- 模型通过当前授权工作区的 `read/edit/write` 操作 Markdown 相对路径；macOS 隔离探针通过时可使用受控 Bash，
+  但不获得工作区外路径、网络、宿主 Secret 或后台任务授权。直接提交和 Bash Markdown 文件事件均由应用层登记 Artifact。
+- 创建项目和移动文档由 UI 调用主进程内容服务；移动在执行前检查全部冲突，失败时恢复磁盘动作。
 - 撤销内容库授权不删除任何用户文件；更换最终适配器不得改写核心对话和工具 Part 协议。
 
 这只是实验基线。它不授权把数据库正文或完全外部工作区标记为淘汰，也不授权建立 Markdown/数据库正文双写。

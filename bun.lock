@@ -87,6 +87,16 @@
         "vitest": "^4.1.11",
       },
     },
+    "packages/agent-evals": {
+      "name": "@tessera/agent-evals",
+      "version": "0.0.1",
+      "dependencies": {
+        "@tessera/contracts": "workspace:*",
+      },
+      "devDependencies": {
+        "vitest": "^4.1.11",
+      },
+    },
     "packages/agent-runtime": {
       "name": "@tessera/agent-runtime",
       "version": "0.0.1",
@@ -809,6 +819,8 @@
     "@tauri-apps/cli-win32-ia32-msvc": ["@tauri-apps/cli-win32-ia32-msvc@2.11.4", "", { "os": "win32", "cpu": "ia32" }, "sha512-12Hxi0XX/H5VFxO/bGgHkFWhml9VMgEOu9CidjeCeTNQ1l6fpUlbiGgSP7CLI3PFtW9/FfbeHieZ+kyWK5H7CA=="],
 
     "@tauri-apps/cli-win32-x64-msvc": ["@tauri-apps/cli-win32-x64-msvc@2.11.4", "", { "os": "win32", "cpu": "x64" }, "sha512-+vDiqBIU5dMISg/wNvX3sF+ZHfgJGJ5T0AcO+EHNXV9GGAG+P5fzodlDXD3QdKCRgZxMoCm5PPvj3BqLNjBthw=="],
+
+    "@tessera/agent-evals": ["@tessera/agent-evals@workspace:packages/agent-evals"],
 
     "@tessera/agent-runtime": ["@tessera/agent-runtime@workspace:packages/agent-runtime"],
 

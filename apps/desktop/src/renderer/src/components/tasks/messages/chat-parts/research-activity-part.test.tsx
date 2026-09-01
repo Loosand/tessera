@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 已读/不可用网页、证据登记与部分完成检查的标准 AI SDK Tool Parts
- * [OUTPUT]: 研究进度来源分层、覆盖数量、部分完成与公共正文隔离的渲染回归验证
+ * [INPUT]: 新版无状态与历史有状态的网页读取、证据登记与完成检查 Tool Parts
+ * [OUTPUT]: 两代研究工具的真实成功/失败、来源分层、覆盖数量和完成状态渲染回归验证
  * [POS]: research-activity-part 的纯适配和服务端渲染测试
  * [DOC]: design.md、docs/architecture/research-workflow.md
  *
@@ -19,6 +19,56 @@ import { ResearchActivityPart, collectResearchActivity } from "./research-activi
 type ToolMessagePart = Extract<UIMessage["parts"][number], { type: "dynamic-tool" | `tool-${string}` }>
 
 describe("研究领域进度", () => {
+  it("把新版无状态网页工具的完成和失败结果直接呈现，不伪造证据状态", () => {
+    const parts = [
+      {
+        type: "tool-read-web-source",
+        toolCallId: "read-stateless-success",
+        state: "output-available",
+        input: { url: "https://example.com/current" },
+        output: {
+          finalUrl: "https://example.com/current",
+          title: "Current source",
+          charCount: 1_234,
+          contentHash: "a".repeat(64),
+          contentType: "text/html",
+          truncated: false,
+        },
+      },
+      {
+        type: "tool-read-web-source",
+        toolCallId: "read-stateless-failure",
+        state: "output-error",
+        input: { url: "https://timeout.example.com" },
+        errorText: "页面读取超时",
+      },
+      {
+        type: "tool-read-web-source",
+        toolCallId: "read-protocol-failure",
+        state: "output-error",
+        input: { url: "https://example.com/not-attempted" },
+        errorText: "AI_NoSuchToolError",
+      },
+    ] as ToolMessagePart[]
+
+    expect(collectResearchActivity(parts)).toMatchObject({
+      evidenceCount: 0,
+      hasStructuredResearchState: false,
+      readCount: 1,
+      unusableCount: 1,
+      sources: [
+        { label: "Current source", status: "read" },
+        { label: "timeout.example.com", status: "failed", detail: "页面读取超时" },
+      ],
+    })
+    const markup = renderToStaticMarkup(<ResearchActivityPart parts={parts} streaming={false} />)
+    expect(markup).toContain("来源已处理")
+    expect(markup).toContain("已阅读 1 个来源 · 1 个不可用")
+    expect(markup).toContain("页面读取超时")
+    expect(markup).not.toContain("已登记")
+    expect(markup).not.toContain("not-attempted")
+  })
+
   it("区分已阅读、不可用、证据与问题覆盖，并呈现部分完成", () => {
     const parts = [
       {

@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 客户端问答、研究计划的合法与非法结构、用户请求消息边界与任务 Skill 选择
- * [OUTPUT]: 单问题 Schema、无执行暂停语义、每请求一次限制和 Research Skill 工具暴露边界的回归验证
+ * [INPUT]: 客户端问答的合法与非法结构、用户请求消息边界
+ * [OUTPUT]: 单问题 Schema、无执行暂停语义和每请求一次限制的回归验证
  * [POS]: task-interaction-tools 的协议单元测试
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/skill-system.md
  *
@@ -16,7 +16,6 @@ import {
   createTaskInteractionTools,
   hasRequestedUserInputSinceLastUserMessage,
   requestUserInputTool,
-  taskResearchPlanInputSchema,
   taskUserInputRequestSchema,
 } from "./task-interaction-tools"
 
@@ -56,28 +55,9 @@ describe("任务交互工具", () => {
     ).toBe(false)
   })
 
-  it("只在 Research Skill 中暴露研究计划工具", () => {
-    expect(Object.keys(createTaskInteractionTools(null))).toEqual(["request-user-input"])
-    expect(Object.keys(createTaskInteractionTools("research"))).toEqual([
-      "request-user-input",
-      "publish-research-plan",
-    ])
-    expect(Object.keys(createTaskInteractionTools("research", { allowUserInput: false }))).toEqual([
-      "publish-research-plan",
-    ])
-    expect(Object.keys(createTaskInteractionTools("research", { includeResearchPlan: false }))).toEqual([
-      "request-user-input",
-    ])
-    expect(
-      taskResearchPlanInputSchema.safeParse({
-        objective: "核对作品和改编之间的关系",
-        scope: "原著、音乐剧和电影",
-        questions: [
-          { id: "q1", title: "原著的核心主题是什么？" },
-          { id: "q2", title: "现代改编改变了什么？" },
-        ],
-      }).success,
-    ).toBe(true)
+  it("只暴露最小澄清工具", () => {
+    expect(Object.keys(createTaskInteractionTools())).toEqual(["request-user-input"])
+    expect(Object.keys(createTaskInteractionTools({ allowUserInput: false }))).toEqual([])
   })
 
   it("同一个用户请求询问一次后不再暴露问答工具", () => {

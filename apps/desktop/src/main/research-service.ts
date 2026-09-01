@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 绑定 task_run 的研究仓储、公开 http(s) URL、模型选定的问题/证据/来源推荐和可取消工具执行上下文
- * [OUTPUT]: 防 SSRF 的固定地址网页读取、正文与元数据提取、研究计划/来源/批量证据/推荐持久化、带稳定来源 ID 的续跑上下文、可重建研究笔记、受限写作交接和完整/部分完成门槛
- * [POS]: Electron 主进程持有网络与 SQLite 权限的可信研究领域服务
+ * [INPUT]: 历史研究仓储、公开 http(s) URL、旧计划/证据/来源数据和可取消读取上下文
+ * [OUTPUT]: 防 SSRF 网页读取原语，以及旧研究计划、来源、证据、推荐、笔记和续跑数据的维护兼容
+ * [POS]: Electron 主进程中供无状态 Web Reader 复用并服务历史 UI/回归的研究兼容层；不注入新 Agent
  * [DOC]: docs/architecture/research-workflow.md、docs/architecture/database.md
  *
  * [PROTOCOL]:
@@ -16,13 +16,21 @@ import { request as httpRequest } from "node:http"
 import type { IncomingHttpHeaders } from "node:http"
 import { request as httpsRequest } from "node:https"
 import { BlockList, isIP } from "node:net"
-import { PublicAgentToolError, type ResearchAgentTools } from "@tessera/ai/server"
+import { PublicAgentToolError } from "@tessera/ai/server"
 import type {
+  TaskResearchEvidenceBatchInput,
+  TaskResearchEvidenceBatchOutput,
   TaskResearchEvidenceInput,
+  TaskResearchEvidenceOutput,
   TaskResearchFinalizeInput,
+  TaskResearchFinalizeOutput,
   TaskResearchNotebook,
+  TaskResearchPlanInput,
+  TaskResearchPlanOutput,
   TaskResearchProgress,
+  TaskResearchReadSourceInput,
   TaskResearchReadSourceOutput,
+  TaskResearchRecommendSourcesInput,
   TaskResearchRecommendSourcesOutput,
 } from "@tessera/contracts"
 import {
@@ -103,10 +111,34 @@ export class ResearchReadError extends Error {
   }
 }
 
-export type DesktopResearchService = ResearchAgentTools &
-  Readonly<{
-    recordDiscoveredSource: (input: Readonly<{ query?: string; title?: string; url: string }>) => void
-  }>
+type ResearchToolContext = Readonly<{ signal: AbortSignal; toolCallId: string }>
+
+/** 仅供历史研究数据维护与回归；P2 后不再注入通用 Agent。 */
+export type DesktopResearchService = Readonly<{
+  finalize: (
+    input: TaskResearchFinalizeInput,
+    context: ResearchToolContext,
+  ) => Promise<TaskResearchFinalizeOutput>
+  getProgress: () => TaskResearchProgress
+  publishPlan: (input: TaskResearchPlanInput, context: ResearchToolContext) => Promise<TaskResearchPlanOutput>
+  readSource: (
+    input: TaskResearchReadSourceInput,
+    context: ResearchToolContext,
+  ) => Promise<TaskResearchReadSourceOutput>
+  recordDiscoveredSource: (input: Readonly<{ query?: string; title?: string; url: string }>) => void
+  recordEvidence: (
+    input: TaskResearchEvidenceInput,
+    context: ResearchToolContext,
+  ) => Promise<TaskResearchEvidenceOutput>
+  recordEvidenceBatch: (
+    input: TaskResearchEvidenceBatchInput,
+    context: ResearchToolContext,
+  ) => Promise<TaskResearchEvidenceBatchOutput>
+  recommendSources: (
+    input: TaskResearchRecommendSourcesInput,
+    context: ResearchToolContext,
+  ) => Promise<TaskResearchRecommendSourcesOutput>
+}>
 
 export function researchFinishIssue(
   input: Readonly<{
@@ -713,7 +745,10 @@ export function createDesktopResearchService(
 ): DesktopResearchService {
   const reader = input.reader ?? readRestrictedWebSource
   const sourceBodies = new Map<string, string>()
-  const recordEvidenceBatch: ResearchAgentTools["recordEvidenceBatch"] = async ({ evidence }, context) => {
+  const recordEvidenceBatch: DesktopResearchService["recordEvidenceBatch"] = async (
+    { evidence },
+    context,
+  ) => {
     context.signal.throwIfAborted()
     const run = requiredRun(client, input.requestId)
     const knownQuestionIds = new Set(run.questions.map((question) => question.questionId))

@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 已解析的供应商连接、模型上下文上限、受信任 RunPolicy、含图片/显式 Markdown 上下文的任务消息与 AI SDK UIMessageChunk
- * [OUTPUT]: 统一 Agent 复用的附件边界、模型历史投影、输入校验、嵌套供应商错误分类/状态码脱敏、搜索额度和含引申问题的公开增量裁剪
+ * [OUTPUT]: 统一 Agent 复用的附件边界、按当前工具集隔离的模型历史投影、输入校验、嵌套供应商错误分类/状态码与凭据安全的原始响应正文、搜索额度和含引申问题的公开增量裁剪
  * [POS]: Electron 主进程与统一 ToolLoopAgent 之间的共享流协议辅助层，不提供独立 Chat 运行时
  * [DOC]: docs/architecture/ai-chat-agent-todo.md、docs/architecture/ai-observability.md、docs/architecture/ai-providers.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
@@ -30,6 +30,7 @@ const MAX_TEXT_CHARACTERS = 2_000_000
 const MAX_FILE_DATA_URL_CHARACTERS = 12_000_000
 const MAX_MARKDOWN_CONTEXT_BYTES = 256 * 1024
 const MAX_ERROR_MESSAGE_LENGTH = 320
+const MAX_PROVIDER_ERROR_LENGTH = 16_000
 const DEFAULT_WEB_SEARCH_MAX_USES = 12
 const RESEARCH_WEB_SEARCH_MAX_USES = 30
 const publicAgentToolErrors = new WeakSet<object>()
@@ -55,11 +56,21 @@ function unknownRecord(value: unknown): UnknownRecord | null {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as UnknownRecord) : null
 }
 
+function credentialSafeProviderError(value: string, apiKey: string) {
+  return value
+    .split(apiKey || "\0")
+    .join("[已隐藏]")
+    .replace(/(authorization["']?\s*[:=]\s*["']?(?:bearer\s+)?)[^"'\s,}]+/giu, "$1[已隐藏]")
+    .replace(/((?:x-)?api-key["']?\s*[:=]\s*["']?)[^"'\s,}]+/giu, "$1[已隐藏]")
+    .slice(0, MAX_PROVIDER_ERROR_LENGTH)
+}
+
 function providerErrorSignals(error: unknown, apiKey: string) {
   const queue = [error]
   const visited = new Set<unknown>()
   const searchable: string[] = []
   let httpStatus: number | undefined
+  let providerError: string | undefined
 
   while (queue.length > 0 && visited.size < 24) {
     const current = queue.shift()
@@ -76,6 +87,9 @@ function providerErrorSignals(error: unknown, apiKey: string) {
             : ""
     const name = current instanceof Error ? current.name : typeof record?.name === "string" ? record.name : ""
     const code = typeof record?.code === "string" ? record.code : ""
+    if (providerError === undefined && typeof record?.responseBody === "string") {
+      providerError = credentialSafeProviderError(record.responseBody, apiKey)
+    }
     const safeText = [name, message, code]
       .filter(Boolean)
       .join(" ")
@@ -100,7 +114,7 @@ function providerErrorSignals(error: unknown, apiKey: string) {
     if (Array.isArray(record?.errors)) queue.push(...record.errors)
   }
 
-  return { httpStatus, searchable: searchable.join(" ").toLowerCase() }
+  return { httpStatus, providerError, searchable: searchable.join(" ").toLowerCase() }
 }
 
 /** 识别供应商原生搜索工具的逐轮预算耗尽，供 Agent 将其降级为可继续的工具结果。 */
@@ -145,7 +159,7 @@ export function classifyProviderStreamError(error: unknown, apiKey: string): Tas
       version: 1,
     }
   }
-  const { httpStatus, searchable } = providerErrorSignals(error, apiKey)
+  const { httpStatus, providerError, searchable } = providerErrorSignals(error, apiKey)
   let code: TaskRunErrorCode
   let message: string
 
@@ -215,6 +229,7 @@ export function classifyProviderStreamError(error: unknown, apiKey: string): Tas
     ...(httpStatus ? { httpStatus } : {}),
     message,
     phase: "stream",
+    ...(providerError !== undefined ? { providerError } : {}),
     retryable: RETRYABLE_STREAM_ERRORS.has(code),
     version: 1,
   }
@@ -255,6 +270,16 @@ function isReplayableToolPart(part: TaskToolMessagePart) {
   )
 }
 
+function taskToolName(part: TaskToolMessagePart) {
+  return part.type === "dynamic-tool" ? part.toolName : part.type.slice("tool-".length)
+}
+
+function isActiveToolPart(part: TaskToolMessagePart, activeToolNames?: ReadonlySet<string>) {
+  if (!activeToolNames) return true
+  const toolName = taskToolName(part)
+  return Boolean(toolName && activeToolNames.has(toolName))
+}
+
 function hasModelContent(parts: readonly TaskMessage["parts"][number][]) {
   return parts.some((part) => part.type === "text" || isTaskToolMessagePart(part))
 }
@@ -263,12 +288,13 @@ function hasModelContent(parts: readonly TaskMessage["parts"][number][]) {
  * 将可持久化 UIMessage 历史投影为供应商可稳定重放的模型上下文。
  *
  * 历史 reasoning 与工具私有元数据不进入公开持久化协议，因此旧助手轮次只重放可见正文。
- * 只有当前审批/自动续轮或显式失败续跑的最后助手消息保留已终止工具 Part。
+ * 只有当前审批/自动续轮或显式失败续跑的最后助手消息保留当前工具集内的已终止 Tool Part。
  * 可见历史与 SQLite 原始记录保持不变。
  */
 export function taskMessagesForModel(
   messages: readonly TaskMessage[],
   continueFromMessageId?: string,
+  activeToolNames?: ReadonlySet<string>,
 ): TaskMessage[] {
   const lastMessage = messages.at(-1)
 
@@ -284,7 +310,9 @@ export function taskMessagesForModel(
           (part) =>
             part.type === "text" ||
             part.type === "step-start" ||
-            (isTaskToolMessagePart(part) && isReplayableToolPart(part)),
+            (isTaskToolMessagePart(part) &&
+              isReplayableToolPart(part) &&
+              isActiveToolPart(part, activeToolNames)),
         )
       : message.parts.filter((part) => part.type === "text")
 

@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 同一助手消息中的 read-web-source、record-research-evidence、recommend-research-sources、finalize-research 标准 Tool Parts，以及研究笔记读取/来源保存回调
- * [OUTPUT]: 由真实工具结果聚合的阅读、失败、证据、问题覆盖、增量笔记、来源选择保存与完成状态卡片
+ * [INPUT]: 同一助手消息中的新版无状态与历史有状态研究 Tool Parts，以及研究笔记读取/来源保存回调
+ * [OUTPUT]: 兼容两代研究工具结果的阅读、失败、证据、问题覆盖、增量笔记、来源选择保存与完成状态卡片
  * [POS]: 研究计划和联网搜索之后的领域进度呈现，不从模型旁白推断状态
  * [DOC]: design.md、docs/architecture/research-workflow.md
  *
@@ -56,6 +56,7 @@ export type ResearchActivitySummary = Readonly<{
   active: boolean
   evidenceCount: number
   finalizeStatus: "blocked" | "completed" | "partial" | null
+  hasStructuredResearchState: boolean
   questionCounts: Readonly<{ covered: number; partial: number; pending: number; uncovered: number }> | null
   readCount: number
   recommendations: readonly Readonly<{
@@ -85,6 +86,7 @@ export function collectResearchActivity(parts: readonly MessagePart[]): Research
   let active = false
   let evidenceCount = 0
   let finalizeStatus: ResearchActivitySummary["finalizeStatus"] = null
+  let hasStructuredResearchState = false
   let questionCounts: ResearchActivitySummary["questionCounts"] = null
   let sourceCounts: ResearchActivitySummary["sourceCounts"] = null
   let requestId: string | null = null
@@ -106,7 +108,8 @@ export function collectResearchActivity(parts: readonly MessagePart[]): Research
     }
     if (name === READ_WEB_SOURCE_TOOL_NAME) {
       // SDK/供应商级工具错误不是已经尝试过的网页，不能伪装成一个“不可用来源”。
-      if (part.state === "output-error") continue
+      const errorText = "errorText" in part && typeof part.errorText === "string" ? part.errorText : ""
+      if (part.state === "output-error" && /NoSuchToolError/iu.test(errorText)) continue
       let label = typeof output?.title === "string" ? output.title : ""
       const url =
         typeof output?.finalUrl === "string"
@@ -121,14 +124,32 @@ export function collectResearchActivity(parts: readonly MessagePart[]): Research
           label = url
         }
       }
-      const status = output?.status === "read" ? "read" : output?.status === "unusable" ? "failed" : "reading"
+      const status =
+        output?.status === "unusable" || part.state === "output-error"
+          ? "failed"
+          : output?.status === "read" || part.state === "output-available"
+            ? "read"
+            : "reading"
       const key = typeof output?.sourceId === "string" ? output.sourceId : url || part.toolCallId
       const detail =
-        status === "failed" && typeof output?.error === "string" ? output.error.slice(0, 160) : undefined
+        status === "failed"
+          ? typeof output?.error === "string"
+            ? output.error.slice(0, 160)
+            : errorText
+              ? errorText.slice(0, 160)
+              : undefined
+          : undefined
       sources.set(key, { label: label || "网页来源", status, ...(detail ? { detail } : {}) })
+      if (typeof output?.sourceId === "string" || typeof output?.status === "string") {
+        hasStructuredResearchState = true
+      }
     }
-    if (name === RECORD_RESEARCH_EVIDENCE_TOOL_NAME && output?.status === "recorded") evidenceCount += 1
+    if (name === RECORD_RESEARCH_EVIDENCE_TOOL_NAME) {
+      hasStructuredResearchState = true
+      if (output?.status === "recorded") evidenceCount += 1
+    }
     if (name === RECOMMEND_RESEARCH_SOURCES_TOOL_NAME && output?.status === "recommended") {
+      hasStructuredResearchState = true
       if (typeof output.requestId === "string") requestId = output.requestId
       if (Array.isArray(output.recommendations)) {
         for (const value of output.recommendations) {
@@ -151,6 +172,7 @@ export function collectResearchActivity(parts: readonly MessagePart[]): Research
       }
     }
     if (name === FINALIZE_RESEARCH_TOOL_NAME) {
+      hasStructuredResearchState = true
       if (output?.status === "blocked" || output?.status === "completed" || output?.status === "partial") {
         finalizeStatus = output.status
       }
@@ -182,6 +204,7 @@ export function collectResearchActivity(parts: readonly MessagePart[]): Research
     active,
     evidenceCount,
     finalizeStatus,
+    hasStructuredResearchState,
     questionCounts,
     readCount: sourceCounts?.read ?? sourceValues.filter((source) => source.status === "read").length,
     recommendations: [...recommendations.values()],
@@ -240,7 +263,9 @@ export function ResearchActivityPart({
           ? "等待补证"
           : summary.active || streaming
             ? "研究中"
-            : "已暂停"
+            : summary.sources.some((source) => source.status !== "reading")
+              ? "来源已处理"
+              : "已暂停"
   const questionTotal = summary.questionCounts
     ? Object.values(summary.questionCounts).reduce((total, count) => total + count, 0)
     : 0
@@ -302,8 +327,8 @@ export function ResearchActivityPart({
       <p className="mt-1.5 text-[11px] leading-5 text-muted-foreground">
         {discoveredTotal === null ? "" : `已发现 ${discoveredTotal} 个来源 · `}已阅读 {summary.readCount}{" "}
         个来源
-        {summary.unusableCount > 0 ? ` · ${summary.unusableCount} 个不可用` : ""} · 已登记{" "}
-        {summary.evidenceCount} 条证据
+        {summary.unusableCount > 0 ? ` · ${summary.unusableCount} 个不可用` : ""}
+        {summary.hasStructuredResearchState ? ` · 已登记 ${summary.evidenceCount} 条证据` : ""}
         {summary.questionCounts ? ` · 覆盖 ${summary.questionCounts.covered}/${questionTotal} 个问题` : ""}
       </p>
       {summary.sources.length > 0 ? (

@@ -1,8 +1,8 @@
 /**
- * [INPUT]: 用户授权的内容库目录、SQLite 内容控制层、任务/Run 标识与领域工具输入
- * [OUTPUT]: 未归档内容库、托管项目、Markdown Artifact 创建/查询/检查/安全移动、具名领域错误及可恢复审计
- * [POS]: Electron 主进程中统一创作 Agent 的混合内容领域边界
- * [DOC]: docs/architecture/unified-creation-agent.md、docs/architecture/database.md
+ * [INPUT]: 用户授权的内容库目录、SQLite 内容控制层、任务/Run 标识、直接文件提交或 Bash 文件事件与 UI 领域操作输入
+ * [OUTPUT]: 工作区文件/Bash Artifact 登记、未归档内容库、托管项目、Markdown 创建/查询/检查/安全移动、具名领域错误及可恢复审计
+ * [POS]: Electron 主进程中文件成功事件与内容管理 UI 共用的混合内容领域边界
+ * [DOC]: docs/architecture/agent-simplification-roadmap.md、docs/architecture/unified-creation-agent.md、docs/architecture/database.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -13,6 +13,7 @@
 import { randomUUID } from "node:crypto"
 import { mkdir, readdir, realpath, rename, stat } from "node:fs/promises"
 import { basename, extname, join } from "node:path"
+import type { WorkspaceFileMutationResult } from "@tessera/agent-runtime"
 import type {
   ContentLibraryInfo,
   CreateDocumentInput,
@@ -368,6 +369,54 @@ export function createContentLibraryService(client: DatabaseClient) {
     }
   }
 
+  function recordWorkspaceFileArtifact(
+    context: CreationContext,
+    workspaceId: string,
+    mutation: Extract<WorkspaceFileMutationResult, { status: "saved" }>,
+  ) {
+    const workspace = findWorkspaceById(client, workspaceId)
+    if (!workspace) throw new ContentLibraryError("找不到文件提交对应的工作区。", "not-found")
+    const now = new Date()
+    const existing = findIndexedDocumentByWorkspacePath(client, workspace.id, mutation.path)
+    const indexedDocument = saveIndexedDocument(client, {
+      id: existing?.id ?? randomUUID(),
+      workspaceId: workspace.id,
+      relativePath: mutation.path,
+      contentHash: mutation.contentHash,
+      sourceModifiedAt: new Date(mutation.modifiedAt),
+      indexedAt: now,
+    })
+    if (!indexedDocument) {
+      throw new ContentLibraryError("无法登记 Agent 文件索引。", "operation-failed")
+    }
+    const artifact = saveArtifact(client, {
+      id: randomUUID(),
+      taskId: context.taskId,
+      runId: context.runId,
+      documentId: indexedDocument.id,
+      relation: mutation.operation === "create" || !existing ? "created" : "updated",
+      updatedAt: now,
+    })
+    saveTaskResourceBinding(client, {
+      id: randomUUID(),
+      taskId: context.taskId,
+      runId: context.runId,
+      resourceType: "document",
+      resourceId: indexedDocument.id,
+      role: "output",
+    })
+    saveTaskResourceBinding(client, {
+      id: randomUUID(),
+      taskId: context.taskId,
+      runId: context.runId,
+      resourceType: "project",
+      resourceId: workspace.id,
+      role: "scope",
+    })
+    if (!artifact) throw new ContentLibraryError("无法保存 Agent Artifact 关系。", "operation-failed")
+    return hydrateArtifact(artifact)
+  }
+
   async function inspectProject(context: OperationContext, projectId: string): Promise<ProjectInspection> {
     const library = requireActiveLibrary()
     const project = requireManagedWorkspace(projectId, library.id)
@@ -553,6 +602,7 @@ export function createContentLibraryService(client: DatabaseClient) {
           return []
         }
       }),
+    recordWorkspaceFileArtifact,
     createDocument,
     createProject,
     inspectProject,

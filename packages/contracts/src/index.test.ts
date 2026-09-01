@@ -1,8 +1,8 @@
 /**
- * [INPUT]: 根入口重新导出的运行时守卫与合法、畸形 RunPolicy/ContextManifest/资源摘要样例
- * [OUTPUT]: 领域拆分后共享契约仍拒绝非法资源限制、上下文预算、Skill ID 与研究网络模式的回归验证
+ * [INPUT]: 根入口重新导出的运行时守卫与合法、畸形 RunPolicy/ContextManifest/资源摘要/供应商错误样例
+ * [OUTPUT]: 领域拆分后共享契约仍拒绝非法资源限制、上下文预算/压缩 marker、Skill ID、研究网络模式与超界供应商错误正文的回归验证
  * [POS]: @tessera/contracts 根入口与 task-run-policy 领域文件之间的运行时回归测试
- * [DOC]: docs/architecture/ai-observability.md、docs/architecture/research-workflow.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
+ * [DOC]: docs/architecture/agent-run-reliability.md、docs/architecture/ai-observability.md、docs/architecture/research-workflow.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -15,10 +15,29 @@ import {
   type TaskRunPolicy,
   isResearchNetworkMode,
   isTaskRunPolicy,
+  isTaskRunErrorDataV1,
   isTaskRunResourceSummary,
   isTaskSkillId,
   isUserTaskSkillId,
 } from "./index"
+
+describe("共享运行错误契约", () => {
+  const failure = {
+    code: "invalid-request",
+    httpStatus: 400,
+    message: "供应商拒绝了当前请求。",
+    phase: "stream",
+    providerError: '{"error":{"message":"thinking must be passed back"}}',
+    retryable: false,
+    version: 1,
+  } as const
+
+  it("保留有界供应商错误正文并拒绝异常载荷", () => {
+    expect(isTaskRunErrorDataV1(failure)).toBe(true)
+    expect(isTaskRunErrorDataV1({ ...failure, providerError: "x".repeat(16_001) })).toBe(false)
+    expect(isTaskRunErrorDataV1({ ...failure, providerError: { message: "invalid" } })).toBe(false)
+  })
+})
 
 const POLICY = {
   limits: { maxOutputTokens: null, maxSteps: 8, timeoutMs: 120_000 },
@@ -63,6 +82,17 @@ describe("共享运行资源摘要契约", () => {
     attachmentCount: 1,
     contextManifest: {
       availableInputTokens: 100_000,
+      compaction: {
+        estimatedTokensAfter: 12_000,
+        estimatedTokensBefore: 24_000,
+        firstRetainedMessageIndex: 4,
+        omittedMessageCount: 4,
+        reason: "threshold",
+        retainedMessageCount: 3,
+        sourceMessageCount: 7,
+        summaryCharacters: 800,
+        version: 1,
+      },
       estimatedInputTokens: 12_000,
       estimator: "heuristic-v1",
       modelContextWindow: 128_000,
@@ -91,6 +121,15 @@ describe("共享运行资源摘要契约", () => {
       isTaskRunResourceSummary({
         ...summary,
         contextManifest: { ...summary.contextManifest, status: "guess" },
+      }),
+    ).toBe(false)
+    expect(
+      isTaskRunResourceSummary({
+        ...summary,
+        contextManifest: {
+          ...summary.contextManifest,
+          compaction: { ...summary.contextManifest.compaction, retainedMessageCount: 2 },
+        },
       }),
     ).toBe(false)
   })

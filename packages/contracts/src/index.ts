@@ -1,8 +1,8 @@
 /**
  * [INPUT]: Electron/Tauri 桌面宿主共同需要的跨进程数据、运行时标识、生命周期、默认空间/文件工作区条目、AI 模型事实/端点绑定、MCP 服务器、用户 Skill、研究网络偏好、任务运行策略、消息反馈、内容对象、开发期 AI 日志与 Agent 变更审批形状
- * [OUTPUT]: 宿主无关桌面频道、运行时信息、默认空间切换、当前 Space 任务分页、工作区文件操作、模型/MCP/用户 Skill/研究网络配置、带正安全整数限制的类型化 RunPolicy、ContextManifest、批量研究证据、版本化公开运行/工具错误与引申问题、本地消息反馈、脱敏运行解释、后端无关内容引用、可恢复流式运行、开发期 AI 日志入口、客户端问答/研究计划工具、Agent Diff 审批、关闭握手与可推导的桌面 API 类型契约
+ * [OUTPUT]: 宿主无关桌面频道、运行时信息、默认空间切换、当前 Space 任务分页、工作区文件操作、模型/MCP/用户 Skill/研究网络配置、带正安全整数限制的类型化 RunPolicy、带压缩 marker 的 ContextManifest、版本化公开运行/工具错误与引申问题、本地消息反馈、带 Progress/Execution Context、turn/tool/terminal 生命周期及凭据剔除供应商错误正文的运行解释、后端无关内容引用、可恢复流式运行、开发期 AI 日志入口、客户端交互工具、旧 Agent Diff 审批兼容、关闭握手与可推导的桌面 API 类型契约
  * [POS]: 应用和共享包共同依赖的底层契约入口
- * [DOC]: docs/architecture.md、docs/architecture/tauri-parity.md、docs/architecture/ai-providers.md、docs/architecture/ai-observability.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/mcp.md、docs/architecture/research-workflow.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md、docs/architecture/unified-creation-agent.md
+ * [DOC]: docs/architecture.md、docs/architecture/agent-run-reliability.md、docs/architecture/agent-product-feedback-layer.md、docs/architecture/tauri-parity.md、docs/architecture/ai-providers.md、docs/architecture/ai-observability.md、docs/architecture/ai-chat-agent-todo.md、docs/architecture/mcp.md、docs/architecture/research-workflow.md、docs/architecture/skill-system.md、docs/architecture/task-navigation.md、docs/architecture/unified-creation-agent.md
  *
  * [PROTOCOL]:
  * 1. 文件契约变化时更新本 Header。
@@ -374,21 +374,52 @@ export type TaskRunToolInspection = {
   name: string
 }
 
+export type TaskRunProgressPhase =
+  | "working"
+  | "waiting"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "interrupted"
+
+export type TaskRunExecutionContext = {
+  /** 成功工具调用涉及的安全工作区相对路径；不含命令正文或绝对路径。 */
+  files: string[]
+  /** 成功调用的 MCP 工具稳定名称；不包含服务器配置和 Secret。 */
+  mcpTools: string[]
+  /** 任一类别超过产品投影上限时为 true；原始运行事件不受影响。 */
+  truncated: boolean
+  /** 供应商来源事件或成功网页深读涉及的 hostname；去除凭据、query 和 fragment。 */
+  webHosts: string[]
+}
+
 /** 面向产品 UI 的只读运行解释；不包含提示词、正文、绝对路径或供应商秘密。 */
 export type TaskRunInspection = {
   completedAt: number | null
+  executionContext: TaskRunExecutionContext
   execution: {
     stepCount: number | null
     toolCallCount: number | null
   }
   failure: TaskRunErrorDataV1 | null
   finishReason: string | null
+  lifecycle: {
+    awaitingToolCount: number
+    terminal: "abort" | "error" | "finish" | null
+    turnCount: number
+  }
   model: {
     configId: string
     modelId: string
     providerId: string
   }
   policy: TaskRunPolicy | null
+  progress: {
+    completedActionCount: number
+    currentToolName: string | null
+    phase: TaskRunProgressPhase
+    totalActionCount: number
+  }
   requestId: string
   resources: TaskRunResourceSummary | null
   startedAt: number
@@ -717,6 +748,8 @@ export type TaskRunErrorDataV1 = {
   httpStatus?: number
   message: string
   phase: TaskRunErrorPhase
+  /** 供应商响应中的原始错误正文；只剔除 API Key / Authorization 凭据并限制长度。 */
+  providerError?: string
   retryable: boolean
   version: 1
 }
@@ -753,6 +786,8 @@ export function isTaskRunErrorDataV1(value: unknown): value is TaskRunErrorDataV
         data.httpStatus >= 100 &&
         data.httpStatus <= 599)) &&
     typeof data.message === "string" &&
+    (data.providerError === undefined ||
+      (typeof data.providerError === "string" && data.providerError.length <= 16_000)) &&
     typeof data.retryable === "boolean"
   )
 }
