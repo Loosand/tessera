@@ -59,7 +59,7 @@ OpenAI 兼容与 Anthropic 兼容适配器允许创建多条具名连接；DeepS
 
 模型发现不用 `generateText`，因此目录检查和刷新不会产生推理费用，也不能证明推理接口一定可用。生成运行时通过另一个边界 `createAiSdkLanguageModel` 建立：OpenAI 兼容与 OpenRouter 使用 `@ai-sdk/openai-compatible`，Anthropic Messages 使用 `@ai-sdk/anthropic`，DeepSeek 普通对话使用 `@ai-sdk/deepseek`，DeepSeek Responses 使用 `@ai-sdk/openai`，Grok 使用 `@ai-sdk/xai`。
 
-DeepSeek V4 在官方连接上的普通对话明确绑定 `openai-chat-completions`；创作方式请求原生联网时，有效能力解析器优先选择官方 `anthropic-messages`，并注册 DeepSeek 官方 Harness 采用的 `web_search_20250305` 服务端工具。模型与 API 端点保持最新，不代表兼容端点会同步实现 Anthropic 每个新版工具方言；因此 Tessera 只使用已由 DeepSeek 官方实现验证的搜索协议，不把 Anthropic 的 `web_search_20260209` 动态工具契约外推给 DeepSeek。原因是实际运行证据显示 DeepSeek Responses 会产生 reasoning token 和加密续轮状态，却不返回 AI SDK 可展示的 reasoning summary；官方 Anthropic 兼容说明则明确支持 `thinking`、`server_tool_use`、`web_search_tool_result` 和工具续轮，AI SDK 也会把它们直接归一化为 reasoning 与工具 Part。`openai-responses` 仍作为同一官方模型的搜索端点回退；由于 `deepseek-v4-*` 不在 `@ai-sdk/openai` 的内建模型能力表中，该回退通过标准 `providerOptions.openai.forceReasoning` 声明推理模型语义，但不能把只有 `encrypted_content` 的响应虚构成明文思考。产品策略不会在 AI SDK 适配层偷换协议，自定义 DeepSeek 代理也不会仅凭模型名称继承官方端点能力。
+DeepSeek V4 在官方连接上的普通对话明确绑定 `openai-chat-completions`；创作方式请求原生联网时，有效能力解析器优先选择官方 `anthropic-messages`，并注册 DeepSeek 官方 Harness 采用的 `web_search_20250305` 服务端工具。模型与 API 端点保持最新，不代表兼容端点会同步实现 Anthropic 每个新版工具方言；因此 Tessera 只使用已由 DeepSeek 官方实现验证的搜索协议，不把 Anthropic 的 `web_search_20260209` 动态工具契约外推给 DeepSeek。真实运行进一步证明：虽然 AI SDK 在 ModelMessage 中完整保留了签名 thinking，DeepSeek 仍会拒绝 thinking、服务端搜索和本地工具交错后的续轮。因此该原生搜索路由显式发送 `thinking: disabled`，同时不回放历史 reasoning；普通 Chat Completions 与 Responses 路由不受此兼容性降级影响。`openai-responses` 仍作为同一官方模型的搜索端点回退；由于 `deepseek-v4-*` 不在 `@ai-sdk/openai` 的内建模型能力表中，该回退通过标准 `providerOptions.openai.forceReasoning` 声明推理模型语义，但不能把只有 `encrypted_content` 的响应虚构成明文思考。产品策略不会在 AI SDK 适配层偷换协议，自定义 DeepSeek 代理也不会仅凭模型名称继承官方端点能力。
 
 ## 模型能力事实
 
@@ -111,7 +111,7 @@ useChat + Electron ChatTransport
 | --- | --- | --- |
 | OpenAI 兼容 | `https://api.openai.com/v1` | 推导 `/models`，Bearer |
 | Anthropic 兼容 | `https://api.anthropic.com/v1` | 尝试 `/models?limit=1000`，官方地址使用 `x-api-key`；兼容地址可从 Bearer 回退到原生头；404/405 表示目录能力缺失，不代表 Messages API 不可用 |
-| DeepSeek | `https://api.deepseek.com` | 官方根地址推导 `/models`，Bearer；普通对话绑定 Chat Completions，V4 原生联网优先绑定可返回 thinking 的 Anthropic Messages，Responses 作为官方搜索回退 |
+| DeepSeek | `https://api.deepseek.com` | 官方根地址推导 `/models`，Bearer；普通对话绑定 Chat Completions，V4 原生联网使用关闭 thinking 的 Anthropic Messages 稳定搜索路由，Responses 作为官方搜索回退 |
 | Grok | `https://api.x.ai/v1` | 推导 `/models`，Bearer |
 | OpenRouter | `https://openrouter.ai/api/v1` | 推导 `/models`；公共目录可匿名读取，存在 Key 时附加 Bearer |
 

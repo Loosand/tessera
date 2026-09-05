@@ -129,8 +129,17 @@ export function createAiSdkChatRuntime(
         return {
           model: anthropic(modelId),
           // DeepSeek 官方 Anthropic 兼容实现与 Harness 以 20250305 为稳定搜索协议；
-          // 不把 Anthropic 新版动态 Web Tools 方言直接外推给兼容端点。
-          ...(webSearch ? { tools: { web_search: anthropic.tools.webSearch_20250305({ maxUses }) } } : {}),
+          // 不把 Anthropic 新版动态 Web Tools 方言直接外推给兼容端点。线上续轮还表明，
+          // thinking 与服务端搜索、本地工具交错时会被 DeepSeek 拒绝，因此搜索路由显式
+          // 关闭 thinking，并剔除失败历史中的旧 thinking 块。
+          ...(webSearch
+            ? {
+                providerOptions: {
+                  anthropic: { sendReasoning: false, thinking: { type: "disabled" } },
+                },
+                tools: { web_search: anthropic.tools.webSearch_20250305({ maxUses }) },
+              }
+            : {}),
         }
       }
       if (endpointType !== "openai-chat-completions") {

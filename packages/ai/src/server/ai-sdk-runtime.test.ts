@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 五类供应商配置、联网搜索额度与真实 AI SDK provider 工厂
- * [OUTPUT]: 密钥/地址/模型 ID 边界、供应商到 AI SDK LanguageModel、DeepSeek 稳定搜索协议及复杂工具续轮 wire shape 的映射回归验证
+ * [OUTPUT]: 密钥/地址/模型 ID 边界、供应商到 AI SDK LanguageModel、DeepSeek 稳定搜索协议及无 thinking 工具续轮 wire shape 的映射回归验证
  * [POS]: @tessera/ai/server AI SDK 适配器单元测试
  * [DOC]: docs/architecture/ai-providers.md
  *
@@ -118,7 +118,7 @@ describe("AI SDK 供应商适配", () => {
     expect(runtime.tools?.web_search).toMatchObject({ args: { maxUses: 30 } })
   })
 
-  it("为 DeepSeek Anthropic 续轮固定使用官方稳定搜索协议", () => {
+  it("为 DeepSeek Anthropic 搜索固定稳定协议并关闭不兼容的 thinking", () => {
     const runtime = createAiSdkChatRuntime(
       {
         configId: "deepseek",
@@ -135,10 +135,24 @@ describe("AI SDK 供应商适配", () => {
       id: "anthropic.web_search_20250305",
       args: { maxUses: 2 },
     })
+    expect(runtime.providerOptions).toEqual({
+      anthropic: { sendReasoning: false, thinking: { type: "disabled" } },
+    })
   })
 
-  it("在 DeepSeek 第二轮请求中完整回放 thinking、原生搜索配对和本地工具结果", async () => {
+  it("在 DeepSeek 第二轮请求中剔除旧 thinking 并保留搜索配对和本地工具结果", async () => {
     const requests: unknown[] = []
+    const runtime = createAiSdkChatRuntime(
+      {
+        configId: "deepseek",
+        providerId: "deepseek",
+        baseUrl: "https://api.deepseek.com",
+        endpointType: "anthropic-messages",
+        modelId: "deepseek-v4-flash",
+        apiKey: "test-key",
+      },
+      { webSearch: true, webSearchMaxUses: 2 },
+    )
     const anthropic = createAnthropic({
       apiKey: "test-key",
       baseURL: "https://api.deepseek.com/anthropic/v1",
@@ -246,6 +260,7 @@ describe("AI SDK 供应商适配", () => {
         tools,
         messages,
         reasoning: "high",
+        ...(runtime.providerOptions ? { providerOptions: runtime.providerOptions } : {}),
         maxRetries: 0,
       }),
     ).rejects.toThrow("captured request")
@@ -253,24 +268,20 @@ describe("AI SDK 供应商适配", () => {
     expect(requests).toHaveLength(1)
     const request = requests[0] as {
       messages: Array<{ content: Array<Record<string, unknown>>; role: string }>
+      thinking: Record<string, unknown>
       tools: Array<Record<string, unknown>>
     }
+    expect(request.thinking).toEqual({ type: "disabled" })
     expect(request.tools).toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "web_search", type: "web_search_20250305" })]),
     )
     expect(request.messages[1]?.content.map((part) => part.type)).toEqual([
-      "thinking",
       "server_tool_use",
       "web_search_tool_result",
       "server_tool_use",
       "web_search_tool_result",
       "tool_use",
     ])
-    expect(request.messages[1]?.content[0]).toEqual({
-      type: "thinking",
-      thinking: "先搜索资料，再查看工作区。",
-      signature: "deepseek-thinking-signature",
-    })
     expect(request.messages[2]?.content).toEqual([
       expect.objectContaining({ type: "tool_result", tool_use_id: "bash-1" }),
     ])

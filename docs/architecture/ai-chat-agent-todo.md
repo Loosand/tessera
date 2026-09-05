@@ -32,7 +32,7 @@
 
 | 能力 | 状态 | 现状 |
 | --- | --- | --- |
-| 供应商适配 | 部分实现 | `@tessera/ai` 已能创建 OpenAI 兼容、Anthropic 兼容、DeepSeek、Grok 和 OpenRouter 模型；兼容协议允许多条具名连接，官方服务保持单例；DeepSeek 官方 Anthropic Web Search 固定使用其 Harness 已验证的 `web_search_20250305`，复杂搜索与本地工具续轮有真实 wire shape 回归。 |
+| 供应商适配 | 部分实现 | `@tessera/ai` 已能创建 OpenAI 兼容、Anthropic 兼容、DeepSeek、Grok 和 OpenRouter 模型；兼容协议允许多条具名连接，官方服务保持单例；DeepSeek 官方 Anthropic Web Search 固定使用其 Harness 已验证的 `web_search_20250305`，并用无 thinking 的复杂搜索与本地工具续轮规避已复现的供应商兼容错误。 |
 | 供应商配置 | 部分实现 | API Key 由系统安全存储加密，Base URL、启用状态和手动模型持久化；模型目录是可选能力，404/405 不判定推理连接失效。 |
 | 新任务界面 | 部分实现 | 只暴露自动/研究/写作/问答与模型，不显示 Chat/Agent、联网或思考开关；已接入流式消息、停止、恢复、结构化问题、事实 Progress、脱敏 Execution Context、Artifact 关系/预览、文件跳转，并兼容显示旧研究计划和 Diff。 |
 | Skill 基建 | 部分实现 | 标准 `SKILL.md`、轻量研究/写作内置注册表、用户导入、逐轮显式选择与 AI SDK `instructions` 已接通；自动方式已保守识别明确研究/写作意图，更新/版本与更强语义路由待实现。 |
@@ -91,7 +91,7 @@
 - [x] 在主进程增加统一的模型解析器，根据配置创建 AI SDK `LanguageModel`。
 - [x] 请求正文、Header、工具载荷与堆栈不进入产品诊断；供应商错误响应正文最多保留 16,000 字符，只剔除 API Key / Authorization 凭据并通过按需 Run Inspector 展示。
 - [x] 开发环境使用 AI SDK 官方 Telemetry / DevTools 记录 Agent run、step、tool、usage 与 timing，并通过设置页窄 IPC 按需打开本地 Viewer；生产脱敏日志仍独立规划。
-- [x] 模型启动、流式与恢复失败使用版本化公开错误，区分配置、认证、限流、超时、不可用、网络与中断；公开提示保持稳定，供应商错误响应正文单独进入有界诊断。DeepSeek Anthropic 路由使用官方稳定 `web_search_20250305`，并以 thinking、两次搜索和本地工具混合续轮测试约束第二次请求。工具与 IPC 的完整统一仍归入横向任务。
+- [x] 模型启动、流式与恢复失败使用版本化公开错误，区分配置、认证、限流、超时、不可用、网络与中断；公开提示保持稳定，供应商错误响应正文单独进入有界诊断。DeepSeek Anthropic 路由使用官方稳定 `web_search_20250305`，显式关闭并剔除 thinking，以两次搜索和本地工具混合续轮测试约束第二次请求。工具与 IPC 的完整统一仍归入横向任务。
 
 ### 验收门槛
 
