@@ -82,6 +82,8 @@ Skill 负责告诉模型何时需要澄清以及如何执行方法；共享运�
 - Research 的问题拆分、来源选择与核验保留在 Skill instructions 中，不再注册计划或证据状态命令。可选 `web_search` 和 `read-web-source` 来自 RunPolicy 与主进程能力，详见[轻量研究能力与历史证据数据](research-workflow.md)。
 - `request-user-input` 的输入和输出由共享 schema 校验并使用固定 React 组件呈现；它不是任意 JSON UI，也不能注册新工具、修改权限或执行模型提供的组件代码。
 
+**已实现（Skill 指令）**：写作优先使用当前已授权的材料与工具补齐关键缺口。一次核心澄清机会用完后，后续来源冲突不得触发第二次工具询问或通过正文问题绕过上限；Skill 要求保留冲突与分支，完成不依赖裁决的内容，并明确未解决的限制。受限结果不报告为完整交付；本规则不新增权限或改变运行时工具移除策略。
+
 ## 权限边界
 
 Skill 描述符可以声明 `workspace.read`、`workspace.write` 或 `network.search` 等所需能力，但声明始终是需求，不是授权：
